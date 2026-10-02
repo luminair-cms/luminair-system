@@ -1,5 +1,5 @@
-use super::ids::UserId;
 use super::role::{Permission, Role};
+use super::user::UserId;
 use crate::content::instance::DocumentInstance;
 
 pub struct AuthorizationService;
@@ -35,17 +35,19 @@ impl AuthorizationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use uuid::Uuid;
 
-    use crate::auth::ids::RoleId;
-    use crate::schema::ids::DocumentTypeId;
+    use crate::auth::role::RoleId;
+    use crate::schema::DocumentTypeId;
+    use crate::test_support::{
+        admin_role, fixture_document_instance, test_doc_type_id, test_user_id,
+    };
 
     fn make_test_fixture() -> (UserId, UserId, DocumentTypeId, DocumentInstance) {
-        let owner = UserId::try_new("owner_user").unwrap();
-        let other = UserId::try_new("other_user").unwrap();
-        let type_id = DocumentTypeId::try_new("article").unwrap();
-        let instance = DocumentInstance::new(type_id.clone(), Some(owner.clone()), Utc::now());
+        let owner = test_user_id("owner_user");
+        let other = test_user_id("other_user");
+        let type_id = test_doc_type_id("article");
+        let instance = fixture_document_instance("article", Some("owner_user"));
         (owner, other, type_id, instance)
     }
 
@@ -163,28 +165,12 @@ mod tests {
     #[test]
     fn test_admin_all_permissions() {
         let (_, other, type_id, instance) = make_test_fixture();
-        let admin_role = Role {
-            id: RoleId::new(Uuid::now_v7()),
-            name: "admin".into(),
-            description: None,
-            permissions: vec![
-                Permission::ManageSchema,
-                Permission::ManageRoles,
-                Permission::ManageUsers,
-                Permission::CreateDocument(None),
-                Permission::ReadDocument(None),
-                Permission::UpdateDocument(None),
-                Permission::DeleteDocument(None),
-                Permission::PublishDocument(None),
-            ],
-        };
-
         let action = Permission::DeleteDocument(Some(type_id));
         assert!(AuthorizationService::can(
             &other,
             &action,
             Some(&instance),
-            &[admin_role]
+            &[admin_role()]
         ));
     }
 }

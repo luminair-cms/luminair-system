@@ -1,9 +1,26 @@
-use serde::{Deserialize, Serialize};
+use nutype::nutype;
+use uuid::Uuid;
 
-use super::ids::{LocaleId, SystemConfigId};
+use super::locale::LocaleId;
 use crate::errors::DomainError;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[nutype(derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    Serialize,
+    Deserialize,
+    AsRef,
+    Deref,
+    Into
+))]
+pub struct SystemConfigId(Uuid);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemConfig {
     pub id: SystemConfigId,
     pub available_locales: Vec<LocaleId>,
@@ -35,39 +52,35 @@ impl SystemConfig {
 mod tests {
     use super::*;
     use uuid::Uuid;
+    use crate::test_support::test_locales;
 
-    fn make_test_locales() -> (SystemConfigId, LocaleId, LocaleId, LocaleId) {
-        (
-            SystemConfigId::new(Uuid::now_v7()),
-            LocaleId::try_new("en").unwrap(),
-            LocaleId::try_new("uk").unwrap(),
-            LocaleId::try_new("fr").unwrap(),
-        )
+    fn test_config_id() -> SystemConfigId {
+        SystemConfigId::new(Uuid::now_v7())
     }
 
     #[test]
     fn test_contains_locale_found() {
-        let (id, en, uk, _) = make_test_locales();
-        let config = SystemConfig::new(id, vec![en.clone(), uk.clone()], en).unwrap();
+        let (en, uk, _) = test_locales();
+        let config = SystemConfig::new(test_config_id(), vec![en.clone(), uk.clone()], en).unwrap();
         assert!(config.contains_locale(&uk));
     }
 
     #[test]
     fn test_contains_locale_not_found() {
-        let (id, en, uk, fr) = make_test_locales();
-        let config = SystemConfig::new(id, vec![en, uk], LocaleId::try_new("en").unwrap()).unwrap();
+        let (en, uk, fr) = test_locales();
+        let config = SystemConfig::new(test_config_id(), vec![en.clone(), uk], en).unwrap();
         assert!(!config.contains_locale(&fr));
     }
 
     #[test]
     fn test_contains_locale_default_included() {
-        let (id, en, uk, fr) = make_test_locales();
+        let (en, uk, fr) = test_locales();
         // default_locale 'fr' is not in [en, uk] -> error
-        let res = SystemConfig::new(id, vec![en.clone(), uk], fr.clone());
+        let res = SystemConfig::new(test_config_id(), vec![en.clone(), uk], fr.clone());
         assert!(matches!(res, Err(DomainError::UnknownLocale(loc)) if loc == fr));
 
         // valid when default_locale is in available_locales
-        let valid = SystemConfig::new(id, vec![en.clone()], en.clone()).unwrap();
+        let valid = SystemConfig::new(test_config_id(), vec![en.clone()], en.clone()).unwrap();
         assert!(valid.contains_locale(&en));
     }
 }

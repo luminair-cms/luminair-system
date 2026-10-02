@@ -2,14 +2,13 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::common::{Email, Url};
 use crate::schema::types::{FieldType, IntegerSize, PrimitiveType};
-use crate::system::ids::LocaleId;
+use crate::system::LocaleId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentValue {
     Scalar(DomainValue),
     LocalizedText(HashMap<LocaleId, String>),
@@ -28,7 +27,7 @@ impl From<PrimitiveValue> for ContentValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainValue {
     Primitive(PrimitiveValue),
     Email(Email),
@@ -66,7 +65,7 @@ impl From<Url> for DomainValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimitiveValue {
     Text(String),
     Uid(String),
@@ -89,7 +88,16 @@ impl PrimitiveValue {
                 IntegerSize::I32 => *val >= i32::MIN as i64 && *val <= i32::MAX as i64,
                 IntegerSize::I64 => true,
             },
-            (PrimitiveValue::Decimal(_), PrimitiveType::Decimal { .. }) => true,
+            (PrimitiveValue::Decimal(d), PrimitiveType::Decimal { precision, scale }) => {
+                let actual_scale = d.scale() as u8;
+                if actual_scale > *scale {
+                    return false;
+                }
+                // Verify total digit count within precision
+                let mantissa = d.mantissa().abs();
+                let num_digits = if mantissa == 0 { 1 } else { mantissa.ilog10() + 1 } as u8;
+                num_digits <= *precision
+            },
             (PrimitiveValue::Date(_), PrimitiveType::Date) => true,
             (PrimitiveValue::DateTime(_), PrimitiveType::DateTime) => true,
             (PrimitiveValue::Boolean(_), PrimitiveType::Boolean) => true,
@@ -167,6 +175,26 @@ mod tests {
                 IntegerSize::I64
             )))
         );
+    }
+
+    #[test]
+    fn test_matches_field_type_decimal_precision_and_scale() {
+        let ft = FieldType::Primitive(PrimitiveType::Decimal {
+            precision: 5,
+            scale: 2,
+        });
+
+        // Valid: 123.45 has 5 digits and scale 2
+        let valid: DomainValue = PrimitiveValue::Decimal(Decimal::new(12345, 2)).into();
+        assert!(valid.matches_field_type(&ft));
+
+        // Scale violation: 12.345 has scale 3 > 2
+        let scale_overflow: DomainValue = PrimitiveValue::Decimal(Decimal::new(12345, 3)).into();
+        assert!(!scale_overflow.matches_field_type(&ft));
+
+        // Precision violation: 1234.56 has 6 digits > 5
+        let prec_overflow: DomainValue = PrimitiveValue::Decimal(Decimal::new(123456, 2)).into();
+        assert!(!prec_overflow.matches_field_type(&ft));
     }
 
     #[test]

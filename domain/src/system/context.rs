@@ -40,3 +40,32 @@ impl SystemContext {
         self.config.contains_locale(locale)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{
+        fixture_system_config, test_doc_type_id, test_locales, DocumentTypeBuilder,
+    };
+
+    #[test]
+    fn test_system_context_delegation() {
+        let type_id = test_doc_type_id("article");
+        let doc_type = DocumentTypeBuilder::collection("article").build();
+        let registry = SchemaRegistry::new(vec![doc_type]);
+        let config = fixture_system_config();
+        let (en, uk, fr) = test_locales();
+
+        let ctx = SystemContext::new(registry, config);
+
+        // Schema delegation
+        assert_eq!(ctx.find_type(&type_id).unwrap().id, type_id);
+        assert_eq!(ctx.find_type_by_name("articles").unwrap().id, type_id);
+        assert_eq!(ctx.all_types().count(), 1);
+
+        // Config delegation
+        assert_eq!(ctx.default_locale(), &en);
+        assert!(ctx.contains_locale(&uk));
+        assert!(!ctx.contains_locale(&fr));
+    }
+}

@@ -17,5 +17,8 @@ regex.workspace = true
 email_address = { workspace = true }
 url = { workspace = true }
 
+[features]
+test-support = []
+
 [dev-dependencies]
 serde_json.workspace = true

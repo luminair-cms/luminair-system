@@ -1,13 +1,30 @@
 use chrono::{DateTime, Utc};
+use nutype::nutype;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::ids::{AccessRequestId, RoleId, UserId, UserRoleAssignmentId};
-use super::role::UserRoleAssignment;
+use super::role::{RoleId, UserRoleAssignment, UserRoleAssignmentId};
+use super::user::UserId;
 use crate::common::{DisplayName, Email};
 use crate::errors::DomainError;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[nutype(derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    Serialize,
+    Deserialize,
+    AsRef,
+    Deref,
+    Into
+))]
+pub struct AccessRequestId(Uuid);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessRequest {
     pub id: AccessRequestId,
     pub user_id: UserId,
@@ -123,14 +140,10 @@ pub enum AccessRequestStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{fixture_access_request, test_user_id};
 
     fn make_test_request() -> (AccessRequest, UserId, DateTime<Utc>) {
-        let user = UserId::try_new("user_req").unwrap();
-        let email = Email::try_new("u@example.com").ok();
-        let name = DisplayName::try_new("User").ok();
-        let now = Utc::now();
-        let req = AccessRequest::new(user.clone(), email, name, now);
-        (req, user, now)
+        fixture_access_request("user_req")
     }
 
     #[test]
@@ -147,7 +160,7 @@ mod tests {
     #[test]
     fn test_approve_sets_status() {
         let (mut req, _, now) = make_test_request();
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
         let role = RoleId::new(Uuid::now_v7());
 
         req.approve(admin.clone(), vec![role], now).unwrap();
@@ -160,7 +173,7 @@ mod tests {
     #[test]
     fn test_approve_returns_assignments() {
         let (mut req, user, now) = make_test_request();
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
         let role1 = RoleId::new(Uuid::now_v7());
         let role2 = RoleId::new(Uuid::now_v7());
 
@@ -175,7 +188,7 @@ mod tests {
     #[test]
     fn test_approve_already_approved_fails() {
         let (mut req, _, now) = make_test_request();
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
         let role = RoleId::new(Uuid::now_v7());
 
         req.approve(admin.clone(), vec![role], now).unwrap();
@@ -189,7 +202,7 @@ mod tests {
     #[test]
     fn test_reject_sets_status() {
         let (mut req, _, now) = make_test_request();
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
 
         req.reject(admin.clone(), Some("Not authorized".into()), now)
             .unwrap();
@@ -206,7 +219,7 @@ mod tests {
     #[test]
     fn test_reject_approved_request_fails() {
         let (mut req, _, now) = make_test_request();
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
         let role = RoleId::new(Uuid::now_v7());
 
         req.approve(admin.clone(), vec![role], now).unwrap();
@@ -222,7 +235,7 @@ mod tests {
         let (mut req, _, now) = make_test_request();
         assert!(req.is_active()); // Pending
 
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
         let role = RoleId::new(Uuid::now_v7());
         req.approve(admin.clone(), vec![role], now).unwrap();
         assert!(req.is_active()); // Approved
@@ -235,7 +248,7 @@ mod tests {
     #[test]
     fn test_approve_empty_roles_fails() {
         let (mut req, _, now) = make_test_request();
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
         let res = req.approve(admin, vec![], now);
         assert!(matches!(res, Err(DomainError::Validation(_))));
     }
@@ -243,7 +256,7 @@ mod tests {
     #[test]
     fn test_approve_exceeds_max_roles_fails() {
         let (mut req, _, now) = make_test_request();
-        let admin = UserId::try_new("admin").unwrap();
+        let admin = test_user_id("admin");
         let roles: Vec<RoleId> = (0..AccessRequest::MAX_ROLES + 1)
             .map(|_| RoleId::new(Uuid::now_v7()))
             .collect();

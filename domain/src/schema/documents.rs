@@ -1,14 +1,39 @@
 use std::{borrow::Borrow, hash::Hash};
 
 use indexmap::IndexSet;
+use nutype::nutype;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     common::DisplayName,
-    schema::{DocumentTypeId, FieldDefinition, RelationDefinition},
+    schema::attributes::{FieldDefinition, RelationDefinition},
 };
 
-#[derive(Debug, Clone, Serialize)]
+#[nutype(
+    sanitize(trim),
+    validate(
+        not_empty,
+        len_char_min = 2,
+        len_char_max = 64,
+        regex = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    ),
+    derive(
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
+        Hash,
+        Display,
+        Serialize,
+        Deserialize,
+        AsRef,
+        Deref,
+        Into
+    )
+)]
+pub struct DocumentTypeId(String);
+
+#[derive(Debug, Clone)]
 pub struct DocumentType {
     pub id: DocumentTypeId,
     pub kind: DocumentKind,
@@ -24,7 +49,7 @@ pub enum DocumentKind {
     SingleType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentTypeInfo {
     pub title: DisplayName,
     pub singular_name: DocumentTypeId,
@@ -32,7 +57,7 @@ pub struct DocumentTypeInfo {
     pub description: Option<DisplayName>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DocumentTypeOptions {
     pub draft_and_publish: bool,
 }
@@ -59,5 +84,31 @@ impl Hash for DocumentType {
 impl Borrow<DocumentTypeId> for DocumentType {
     fn borrow(&self) -> &DocumentTypeId {
         &self.id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_document_type_id_valid() {
+        assert!(DocumentTypeId::try_new("article").is_ok());
+        assert!(DocumentTypeId::try_new("partner-booking-category").is_ok());
+        assert!(DocumentTypeId::try_new("site-settings").is_ok());
+    }
+
+    #[test]
+    fn test_document_type_id_rejects_underscores_and_uppercase() {
+        assert!(DocumentTypeId::try_new("partner_category").is_err());
+        assert!(DocumentTypeId::try_new("Article").is_err());
+        assert!(DocumentTypeId::try_new("partnerBookingCategory").is_err());
+    }
+
+    #[test]
+    fn test_document_type_id_rejects_invalid_hyphenation() {
+        assert!(DocumentTypeId::try_new("-article").is_err());
+        assert!(DocumentTypeId::try_new("article-").is_err());
+        assert!(DocumentTypeId::try_new("article--content").is_err());
     }
 }

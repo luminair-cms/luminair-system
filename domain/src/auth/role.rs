@@ -1,10 +1,44 @@
 use chrono::{DateTime, Utc};
+use nutype::nutype;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::auth::ids::{RoleId, UserId, UserRoleAssignmentId};
-use crate::schema::ids::DocumentTypeId;
+use crate::auth::user::UserId;
+use crate::schema::DocumentTypeId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[nutype(derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    Serialize,
+    Deserialize,
+    AsRef,
+    Deref,
+    Into
+))]
+pub struct RoleId(Uuid);
+
+#[nutype(derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    Serialize,
+    Deserialize,
+    AsRef,
+    Deref,
+    Into
+))]
+pub struct UserRoleAssignmentId(Uuid);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Role {
     pub id: RoleId,
     pub name: String,
@@ -53,7 +87,7 @@ impl Permission {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserRoleAssignment {
     pub id: UserRoleAssignmentId,
     pub user_id: UserId,
@@ -65,11 +99,12 @@ pub struct UserRoleAssignment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_doc_type_id;
 
     #[test]
     fn test_permission_matches_wildcard_and_exact() {
-        let type_a = DocumentTypeId::try_new("article").unwrap();
-        let type_b = DocumentTypeId::try_new("author").unwrap();
+        let type_a = test_doc_type_id("article");
+        let type_b = test_doc_type_id("author");
 
         let wildcard = Permission::ReadDocument(None);
         let exact_a = Permission::ReadDocument(Some(type_a));
@@ -87,5 +122,59 @@ mod tests {
         // Different actions do not match
         assert!(!Permission::ManageSchema.matches(&exact_a));
         assert!(!Permission::CreateDocument(None).matches(&exact_a));
+    }
+
+    #[test]
+    fn test_permission_matches_all_variants_wildcards_and_exact() {
+        let doc_type = test_doc_type_id("article");
+        let other_type = test_doc_type_id("author");
+
+        // System-level permissions
+        assert!(Permission::ManageSchema.matches(&Permission::ManageSchema));
+        assert!(!Permission::ManageSchema.matches(&Permission::ManageRoles));
+        assert!(Permission::ManageRoles.matches(&Permission::ManageRoles));
+        assert!(Permission::ManageUsers.matches(&Permission::ManageUsers));
+
+        // Create
+        assert!(Permission::CreateDocument(None).matches(&Permission::CreateDocument(Some(doc_type.clone()))));
+        assert!(Permission::CreateDocument(Some(doc_type.clone())).matches(&Permission::CreateDocument(Some(doc_type.clone()))));
+        assert!(!Permission::CreateDocument(Some(doc_type.clone())).matches(&Permission::CreateDocument(Some(other_type.clone()))));
+
+        // Update
+        assert!(Permission::UpdateDocument(None).matches(&Permission::UpdateDocument(Some(doc_type.clone()))));
+        assert!(Permission::UpdateDocument(Some(doc_type.clone())).matches(&Permission::UpdateDocument(Some(doc_type.clone()))));
+        assert!(!Permission::UpdateDocument(Some(doc_type.clone())).matches(&Permission::UpdateDocument(Some(other_type.clone()))));
+
+        // Delete
+        assert!(Permission::DeleteDocument(None).matches(&Permission::DeleteDocument(Some(doc_type.clone()))));
+        assert!(Permission::DeleteDocument(Some(doc_type.clone())).matches(&Permission::DeleteDocument(Some(doc_type.clone()))));
+        assert!(!Permission::DeleteDocument(Some(doc_type.clone())).matches(&Permission::DeleteDocument(Some(other_type.clone()))));
+
+        // Publish
+        assert!(Permission::PublishDocument(None).matches(&Permission::PublishDocument(Some(doc_type.clone()))));
+        assert!(Permission::PublishDocument(Some(doc_type.clone())).matches(&Permission::PublishDocument(Some(doc_type.clone()))));
+        assert!(!Permission::PublishDocument(Some(doc_type.clone())).matches(&Permission::PublishDocument(Some(other_type))));
+    }
+
+    #[test]
+    fn test_role_has_permission() {
+        let doc_type = test_doc_type_id("article");
+        let role = Role {
+            id: RoleId::new(Uuid::now_v7()),
+            name: "editor".into(),
+            description: None,
+            permissions: vec![
+                Permission::ReadDocument(None),
+                Permission::UpdateDocument(Some(doc_type.clone())),
+            ],
+        };
+
+        // Granted via wildcard
+        assert!(role.has_permission(&Permission::ReadDocument(Some(doc_type.clone()))));
+        // Granted via exact match
+        assert!(role.has_permission(&Permission::UpdateDocument(Some(doc_type.clone()))));
+        // Denied - action not in permissions
+        assert!(!role.has_permission(&Permission::DeleteDocument(Some(doc_type))));
+        assert!(!role.has_permission(&Permission::ManageSchema));
     }
 }

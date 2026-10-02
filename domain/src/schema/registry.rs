@@ -37,9 +37,48 @@ impl SchemaRegistry {
         self.types.get(id)
     }
 
-    pub fn find_by_name(&self, plural_name: &str)-> Option<&DocumentType> {
+    pub fn find_by_name(&self, plural_name: &str) -> Option<&DocumentType> {
         self.by_name
-        .get(plural_name)
-        .and_then(|id| self.types.get(id))
+            .get(plural_name)
+            .and_then(|id| self.types.get(id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{test_doc_type_id, DocumentTypeBuilder};
+
+    #[test]
+    fn test_schema_registry_indexes_collection_by_plural_and_single_by_singular() {
+        let coll = DocumentTypeBuilder::collection("article").build();
+        let single = DocumentTypeBuilder::single("site-settings").build();
+        let coll_id = coll.id.clone();
+        let single_id = single.id.clone();
+
+        let registry = SchemaRegistry::new(vec![coll, single]);
+
+        // Collection is found by plural name
+        assert_eq!(registry.find_by_name("articles").unwrap().id, coll_id);
+        // SingleType is found by singular name
+        assert_eq!(registry.find_by_name("site-settings").unwrap().id, single_id);
+
+        // Found by ID
+        assert_eq!(registry.get(&coll_id).unwrap().id, coll_id);
+        assert_eq!(registry.get(&single_id).unwrap().id, single_id);
+
+        // Non-existent lookups return None
+        assert!(registry.find_by_name("non-existent").is_none());
+        assert!(registry.get(&test_doc_type_id("missing")).is_none());
+    }
+
+    #[test]
+    fn test_schema_registry_iterate_returns_all_types() {
+        let t1 = DocumentTypeBuilder::collection("article").build();
+        let t2 = DocumentTypeBuilder::collection("author").build();
+
+        let registry = SchemaRegistry::new(vec![t1, t2]);
+        let names: Vec<_> = registry.iterate().map(|t| t.id.as_ref()).collect();
+        assert_eq!(names, vec!["article", "author"]);
     }
 }

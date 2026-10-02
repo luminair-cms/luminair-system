@@ -1,10 +1,37 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
+use nutype::nutype;
 use uuid::Uuid;
 
-use crate::{DomainError, auth::UserId, content::{ContentValue, DocumentInstanceId}, schema::{AttributeId, DocumentTypeId}};
+use crate::auth::UserId;
+use crate::content::ContentValue;
+use crate::errors::DomainError;
+use crate::schema::{AttributeId, DocumentTypeId};
 
+#[nutype(derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    Serialize,
+    Deserialize,
+    AsRef,
+    Deref,
+    Into
+))]
+pub struct DocumentInstanceId(Uuid);
+
+/*
+Found issues for future investigation:
+Public mutable fields: External callers can mutate instance.content.fields directly, bypassing version increments (touch()) and publication state transitions.
+Missing set_field / get_field methods: The aggregate does not provide convenient domain methods to get or update field values.
+Leaked DB detail (db_row_id): db_row_id has no explanation, no domain semantics, and is only initialized to None. If this is an infrastructure surrogate key, it does not belong in the domain aggregate.
+Unpublish omission: unpublish(&mut self, now: DateTime<Utc>) does not accept by: Option<UserId> (unlike publish), and thus cannot record who unpublished the document.
+ */
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentInstance {
@@ -171,5 +198,187 @@ impl DocumentInstance {
 
     pub fn is_owned_by(&self, user_id: &UserId) -> bool {
         self.audit.created_by.as_ref() == Some(user_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+    use crate::test_support::{test_attr_id, test_doc_type_id, test_user_id};
+
+    fn make_test_instance() -> (DocumentInstance, UserId, DateTime<Utc>) {
+        let user = test_user_id("author-1");
+        let now = Utc::now();
+        let instance = DocumentInstance::new(test_doc_type_id("article"), Some(user.clone()), now);
+        (instance, user, now)
+    }
+
+    #[test]
+    fn test_publish_from_draft_increments_revision_and_updates_audit() {
+        let (mut instance, user, t0) = make_test_instance();
+        let t1 = t0 + Duration::seconds(10);
+
+        let rev = instance.publish(Some(user.clone()), t1).unwrap();
+        assert_eq!(rev, 1);
+        assert_eq!(instance.audit.version, 2);
+        assert_eq!(instance.audit.updated_at, t1);
+        assert_eq!(instance.audit.updated_by, Some(user.clone()));
+
+        assert!(matches!(
+            instance.content.publication_state,
+            PublicationState::Published {
+                revision: 1,
+                published_at,
+                published_by,
+            } if published_at == t1 && published_by == Some(user)
+        ));
+    }
+
+    #[test]
+    fn test_publish_preserves_and_advances_previous_published_revision() {
+        let (mut instance, user, t0) = make_test_instance();
+        let t1 = t0 + Duration::seconds(10);
+        let t2 = t0 + Duration::seconds(20);
+        let t3 = t0 + Duration::seconds(30);
+
+        // Publish revision 1
+        instance.publish(Some(user.clone()), t1).unwrap();
+        // Unpublish back to draft
+        instance.unpublish(t2).unwrap();
+        assert!(matches!(
+            instance.content.publication_state,
+            PublicationState::Draft {
+                last_published_revision: Some(1)
+            }
+        ));
+
+        // Re-publish should advance to revision 2
+        let rev = instance.publish(Some(user), t3).unwrap();
+        assert_eq!(rev, 2);
+        assert!(matches!(
+            instance.content.publication_state,
+            PublicationState::Published { revision: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn test_publish_from_published_state_advances_revision() {
+        let (mut instance, user, t0) = make_test_instance();
+        instance.publish(Some(user.clone()), t0).unwrap();
+        let t1 = t0 + Duration::seconds(15);
+
+        let rev = instance.publish(Some(user), t1).unwrap();
+        assert_eq!(rev, 2);
+    }
+
+    #[test]
+    fn test_unpublish_from_published_transitions_to_draft_with_last_revision() {
+        let (mut instance, user, t0) = make_test_instance();
+        instance.publish(Some(user), t0).unwrap();
+        let t1 = t0 + Duration::seconds(10);
+
+        instance.unpublish(t1).unwrap();
+        assert!(matches!(
+            instance.content.publication_state,
+            PublicationState::Draft {
+                last_published_revision: Some(1)
+            }
+        ));
+        assert_eq!(instance.audit.updated_at, t1);
+    }
+
+    #[test]
+    fn test_unpublish_from_draft_fails_with_invalid_state_transition() {
+        let (mut instance, _, t0) = make_test_instance();
+        let result = instance.unpublish(t0);
+        assert!(matches!(
+            result,
+            Err(DomainError::InvalidStateTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn test_set_relations_deduplicates_target_ids() {
+        let (mut instance, _, _) = make_test_instance();
+        let attr = test_attr_id("categories");
+        let id1 = DocumentInstanceId::new(Uuid::now_v7());
+        let id2 = DocumentInstanceId::new(Uuid::now_v7());
+
+        // Pass id1 twice to test deduplication
+        instance.set_relations(attr.clone(), vec![id1, id2, id1]);
+        let relations = instance.relations.get(&attr).unwrap();
+        assert_eq!(relations.len(), 2);
+        assert_eq!(relations[0].target_instance_id, id1);
+        assert_eq!(relations[1].target_instance_id, id2);
+    }
+
+    #[test]
+    fn test_connect_relations_appends_and_deduplicates() {
+        let (mut instance, _, _) = make_test_instance();
+        let attr = test_attr_id("tags");
+        let id1 = DocumentInstanceId::new(Uuid::now_v7());
+        let id2 = DocumentInstanceId::new(Uuid::now_v7());
+        let id3 = DocumentInstanceId::new(Uuid::now_v7());
+
+        instance.set_relations(attr.clone(), vec![id1, id2]);
+        // Connect id2 (already present) and id3 (new)
+        instance.connect_relations(attr.clone(), vec![id2, id3]);
+
+        let relations = instance.relations.get(&attr).unwrap();
+        assert_eq!(relations.len(), 3);
+        let target_ids: Vec<_> = relations.iter().map(|r| r.target_instance_id).collect();
+        assert_eq!(target_ids, vec![id1, id2, id3]);
+    }
+
+    #[test]
+    fn test_disconnect_relations_removes_matching_targets_only() {
+        let (mut instance, _, _) = make_test_instance();
+        let attr = test_attr_id("tags");
+        let id1 = DocumentInstanceId::new(Uuid::now_v7());
+        let id2 = DocumentInstanceId::new(Uuid::now_v7());
+        let id3 = DocumentInstanceId::new(Uuid::now_v7());
+
+        instance.set_relations(attr.clone(), vec![id1, id2, id3]);
+        instance.disconnect_relations(&attr, &[id2]);
+
+        let relations = instance.relations.get(&attr).unwrap();
+        let target_ids: Vec<_> = relations.iter().map(|r| r.target_instance_id).collect();
+        assert_eq!(target_ids, vec![id1, id3]);
+    }
+
+    #[test]
+    fn test_unset_relations_removes_attribute() {
+        let (mut instance, _, _) = make_test_instance();
+        let attr = test_attr_id("tags");
+        let id1 = DocumentInstanceId::new(Uuid::now_v7());
+
+        instance.set_relations(attr.clone(), vec![id1]);
+        assert!(instance.relations.contains_key(&attr));
+
+        instance.unset_relations(&attr);
+        assert!(!instance.relations.contains_key(&attr));
+    }
+
+    #[test]
+    fn test_is_owned_by_matching_and_non_matching_user() {
+        let (instance, owner, _) = make_test_instance();
+        let stranger = test_user_id("stranger");
+
+        assert!(instance.is_owned_by(&owner));
+        assert!(!instance.is_owned_by(&stranger));
+    }
+
+    #[test]
+    fn test_touch_updates_timestamp_actor_and_increments_version() {
+        let (mut instance, _, t0) = make_test_instance();
+        assert_eq!(instance.audit.version, 1);
+        let editor = test_user_id("editor");
+        let t1 = t0 + Duration::seconds(45);
+
+        instance.touch(Some(editor.clone()), t1);
+        assert_eq!(instance.audit.version, 2);
+        assert_eq!(instance.audit.updated_at, t1);
+        assert_eq!(instance.audit.updated_by, Some(editor));
     }
 }

@@ -1,5 +1,4 @@
 use nutype::nutype;
-use uuid::Uuid;
 
 #[nutype(
     sanitize(trim),
@@ -19,22 +18,6 @@ use uuid::Uuid;
     )
 )]
 pub struct LocaleId(String);
-
-#[nutype(derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Display,
-    Serialize,
-    Deserialize,
-    AsRef,
-    Deref,
-    Into
-))]
-pub struct SystemConfigId(Uuid);
 
 #[cfg(test)]
 mod tests {

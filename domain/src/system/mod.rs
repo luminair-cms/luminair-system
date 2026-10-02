@@ -1,7 +1,7 @@
 pub mod config;
 pub mod context;
-pub mod ids;
+pub mod locale;
 
 pub use config::*;
 pub use context::*;
-pub use ids::*;
+pub use locale::*;

@@ -1,8 +1,8 @@
 use std::future::Future;
 
-use super::access_request::AccessRequest;
-use super::ids::{AccessRequestId, RoleId, UserId, UserRoleAssignmentId};
-use super::role::{Role, UserRoleAssignment};
+use super::access_request::{AccessRequest, AccessRequestId};
+use super::role::{Role, RoleId, UserRoleAssignment, UserRoleAssignmentId};
+use super::user::UserId;
 use crate::errors::DomainError;
 
 pub trait RoleRepository: Send + Sync {
