@@ -2,7 +2,7 @@
 
 Luminair is a schema-driven CMS backend written in Rust, exposing a Strapi-like REST API.
 
-## Coding
+## Division of responsibilities
 
 Main code is written by hand with help of AI (review, analysis, code snippets etc).
 
