@@ -202,6 +202,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::mutable_key_type)]
     fn test_field_and_relation_definition_borrow_lookup() {
         let title_attr = AttributeId::try_new("title").unwrap();
         let author_attr = AttributeId::try_new("author").unwrap();

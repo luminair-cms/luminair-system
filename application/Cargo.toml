@@ -22,5 +22,6 @@ chrono.workspace = true
 # Re-declare ourselves with the test-support feature so that integration tests
 # in application/tests/ can access application::test_support (fake repositories).
 application = { path = ".", features = ["test-support"] }
+domain = { path = "../domain", features = ["test-support"] }
 tokio.workspace = true
 indexmap.workspace = true

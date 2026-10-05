@@ -103,6 +103,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::mutable_key_type)]
     fn test_equality_and_hash() {
         use std::collections::HashSet;
 

@@ -30,7 +30,6 @@ Found issues for future investigation:
 Public mutable fields: External callers can mutate instance.content.fields directly, bypassing version increments (touch()) and publication state transitions.
 Missing set_field / get_field methods: The aggregate does not provide convenient domain methods to get or update field values.
 Leaked DB detail (db_row_id): db_row_id has no explanation, no domain semantics, and is only initialized to None. If this is an infrastructure surrogate key, it does not belong in the domain aggregate.
-Unpublish omission: unpublish(&mut self, now: DateTime<Utc>) does not accept by: Option<UserId> (unlike publish), and thus cannot record who unpublished the document.
  */
 
 #[derive(Debug, Clone, PartialEq, Eq)]
