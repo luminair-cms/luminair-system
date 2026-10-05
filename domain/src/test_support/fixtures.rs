@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use super::ids::{test_doc_type_id, test_locales, test_user_id};
 use crate::auth::access_request::AccessRequest;
+use crate::auth::policy::AccessRequestPolicy;
 use crate::auth::role::{Permission, Role, RoleId};
 use crate::auth::user::UserId;
 use crate::common::{DisplayName, Email};
@@ -36,7 +37,8 @@ pub fn fixture_access_request(user_name: &str) -> (AccessRequest, UserId, DateTi
     let email = Email::try_new("test@example.com").ok();
     let name = DisplayName::try_new("Test User").ok();
     let now = Utc::now();
-    let req = AccessRequest::new(user.clone(), email, name, now);
+    let req = AccessRequestPolicy::create_request(user.clone(), email, name, &[], None, now)
+        .expect("valid access request fixture");
     (req, user, now)
 }
 

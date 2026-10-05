@@ -40,7 +40,9 @@ pub struct AccessRequest {
 impl AccessRequest {
     pub const MAX_ROLES: usize = 50;
 
-    pub fn new(
+    /// Internal constructor. External callers must use `AccessRequestPolicy::create_request`
+    /// to guarantee enrollment invariants.
+    pub(crate) fn new_unvalidated(
         user_id: UserId,
         email: Option<Email>,
         name: Option<DisplayName>,

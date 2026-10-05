@@ -24,3 +24,11 @@
 - **Alternatives rejected**: Aurora Postgres Serverless v2 (higher idle cost), DynamoDB (poor fit for relational document associations).
 - **See**: [`docs/adr/ADR-003-aws-dsql-database.md`](../../docs/adr/ADR-003-aws-dsql-database.md)
 
+## 2026-10-05 — Access Request Enrollment Invariant & Policy
+- **Decision**: Added `DomainError::UserAlreadyEnrolled(UserId)` and pure domain policy `AccessRequestPolicy::validate_can_submit`. An access request is strictly an initial enrollment request for non-enrolled users. Users with existing role assignments or active requests are rejected at the policy boundary.
+- **Rationale**: Eliminates the self-review paradox, decouples enrollment from general role changes, and enforces cross-aggregate invariants purely without I/O inside `domain`.
+
+## 2026-10-05 — Two-Table Draft-and-Publish Pattern with Typed Relational Columns
+- **Decision**: Adopt 2-table model per DocumentType (`[type]` main/draft table + `[type]_published` live snapshot table) with plain typed columns for B-tree search/filter/sort in PostgreSQL/DSQL. Unpublish deletes the live row, updates `[type].updated_by = user_id`, and appends an audit event.
+- **Alternatives rejected**: Single JSONB column (poor sorting/filtering/constraints), single table with status/version columns (complex foreign keys, risk of public draft leak), dynamic view (cannot concurrently edit draft while live).
+- **See**: [`docs/adr/ADR-004-draft-and-publish-table-pattern.md`](../../docs/adr/ADR-004-draft-and-publish-table-pattern.md)

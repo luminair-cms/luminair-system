@@ -173,14 +173,13 @@ impl DocumentInstance {
     }
 
     /// Transitions a published document back into a draft, recording the last published revision.
-    pub fn unpublish(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
+    pub fn unpublish(&mut self, by: Option<UserId>, now: DateTime<Utc>) -> Result<(), DomainError> {
         match self.content.publication_state {
             PublicationState::Published { revision, .. } => {
                 self.content.publication_state = PublicationState::Draft {
                     last_published_revision: Some(revision),
                 };
-                self.audit.updated_at = now;
-                self.audit.version += 1;
+                self.touch(by, now);
                 Ok(())
             }
             PublicationState::Draft { .. } => Err(DomainError::InvalidStateTransition {
@@ -245,13 +244,15 @@ mod tests {
         // Publish revision 1
         instance.publish(Some(user.clone()), t1).unwrap();
         // Unpublish back to draft
-        instance.unpublish(t2).unwrap();
+        instance.unpublish(Some(user.clone()), t2).unwrap();
         assert!(matches!(
             instance.content.publication_state,
             PublicationState::Draft {
                 last_published_revision: Some(1)
             }
         ));
+        assert_eq!(instance.audit.updated_by, Some(user.clone()));
+        assert_eq!(instance.audit.updated_at, t2);
 
         // Re-publish should advance to revision 2
         let rev = instance.publish(Some(user), t3).unwrap();
@@ -275,10 +276,10 @@ mod tests {
     #[test]
     fn test_unpublish_from_published_transitions_to_draft_with_last_revision() {
         let (mut instance, user, t0) = make_test_instance();
-        instance.publish(Some(user), t0).unwrap();
+        instance.publish(Some(user.clone()), t0).unwrap();
         let t1 = t0 + Duration::seconds(10);
 
-        instance.unpublish(t1).unwrap();
+        instance.unpublish(Some(user.clone()), t1).unwrap();
         assert!(matches!(
             instance.content.publication_state,
             PublicationState::Draft {
@@ -286,12 +287,13 @@ mod tests {
             }
         ));
         assert_eq!(instance.audit.updated_at, t1);
+        assert_eq!(instance.audit.updated_by, Some(user));
     }
 
     #[test]
     fn test_unpublish_from_draft_fails_with_invalid_state_transition() {
-        let (mut instance, _, t0) = make_test_instance();
-        let result = instance.unpublish(t0);
+        let (mut instance, user, t0) = make_test_instance();
+        let result = instance.unpublish(Some(user), t0);
         assert!(matches!(
             result,
             Err(DomainError::InvalidStateTransition { .. })

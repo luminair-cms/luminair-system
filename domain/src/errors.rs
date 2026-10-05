@@ -34,6 +34,9 @@ pub enum DomainError {
     #[error("access request already exists for user: {0}")]
     AccessRequestAlreadyActive(UserId),
 
+    #[error("user is already enrolled: {0}")]
+    UserAlreadyEnrolled(UserId),
+
     #[error("unauthorized: {0}")]
     Unauthorized(String),
 
