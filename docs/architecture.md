@@ -79,7 +79,7 @@ crates have no knowledge of any deployment environment.
 - Database differences are isolated in the connection pool factory at startup:
   - Local / CI / K8s: Standard PostgreSQL connection pool using `DATABASE_URL`
   - AWS Aurora DSQL: Dynamic connection pool with IAM authentication token rotation (15-minute token lifecycle)
-- Migrations use plain SQL and `sea-query`; avoid DSQL-incompatible DDL (see research note and ADR-009) so schemas run identically on standard PG and DSQL
+- Migrations use plain SQL and `sea-query`; avoid DSQL-incompatible DDL (see [`docs/research/dsql-vs-postgres.md`](./research/dsql-vs-postgres.md) and [`ADR-003`](./adr/ADR-003-aws-dsql-database.md)) so schemas run identically on standard PG and DSQL
 - The binary is configured entirely through environment variables — no AWS SDK calls outside `infrastructure`
 
 ## UI Layer (Admin Dashboard)

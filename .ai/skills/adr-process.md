@@ -57,8 +57,9 @@ Never skip phases. Never set an ADR status to `Accepted` yourself — only human
 
 **Trigger**: investigation is complete, or user says "write an ADR for X".
 
-1. Copy `docs/adr/TEMPLATE.md` to `docs/adr/ADR-NNN-short-title.md`
+1. Create `docs/adr/ADR-NNN-short-title.md` following the structure of [`ADR-001`](../../docs/adr/ADR-001-declarative-test-specifications.md)
    - Pick the next available number by listing `docs/adr/`
+   - Add the new ADR to the ADR index in `AGENTS.md`
 2. Fill in **all sections** — especially *Considered Alternatives* (minimum two options)
 3. Set status: `Proposed`
 4. Link to the research note(s) in the `Research:` field

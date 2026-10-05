@@ -13,3 +13,14 @@
 ### Shared Test Support Module
 - **Decision**: Created `domain::test_support` gated behind `#[cfg(any(test, feature = "test-support"))]` and exposed via `test-support = []` feature flag in `domain/Cargo.toml`.
 - **Rationale**: Centralizes test data builders (`DocumentTypeBuilder`), ID generators, and canonical fixtures (`fixture_system_config`, `fixture_document_instance`, `fixture_access_request`) across unit tests in `domain` while allowing downstream crates (`application`, `infrastructure`) to reuse standard fixtures in their dev-dependencies without duplicating test setup logic.
+
+## 2026-08-20 — Hexagonal Architecture & Crate Layout
+- **Decision**: 3-crate Cargo workspace (`domain`, `application`, `infrastructure`) with unidirectional dependencies and pure domain.
+- **Alternatives rejected**: Monolithic single-crate (poor boundary enforcement), traditional N-tier (leaks DB dependencies into domain).
+- **See**: [`docs/adr/ADR-002-hexagonal-architecture.md`](../../docs/adr/ADR-002-hexagonal-architecture.md)
+
+## 2026-08-21 — Database Choice: AWS Aurora DSQL with PostgreSQL Portability
+- **Decision**: Aurora DSQL for cloud environments (serverless, scale-to-zero) with client UUIDv7, non-transactional DDL, and OCC retry; standard PostgreSQL for local/CI.
+- **Alternatives rejected**: Aurora Postgres Serverless v2 (higher idle cost), DynamoDB (poor fit for relational document associations).
+- **See**: [`docs/adr/ADR-003-aws-dsql-database.md`](../../docs/adr/ADR-003-aws-dsql-database.md)
+

@@ -32,14 +32,23 @@ Read in this order:
 - [`.ai/context/project.md`](.ai/context/project.md) — one-paragraph seed for cold-start sessions
 - [`.ai/context/decisions.md`](.ai/context/decisions.md) — running log of key decisions (informal complement to ADRs)
 - [`docs/research/`](./docs/research/) — investigation/spike notes (raw findings, no opinions)
-- [`docs/adr/`](./docs/adr/) — Architecture Decision Records; use [`TEMPLATE.md`](./docs/adr/TEMPLATE.md) for new ones
+- [`docs/adr/`](./docs/adr/) — Architecture Decision Records; use [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md) as the format reference for new ones
+
+### ADR Index
+
+| ADR | Title | Status |
+|---|---|---|
+| [ADR-001](./docs/adr/ADR-001-declarative-test-specifications.md) | Declarative behavior specifications as the source of truth for tests | Proposed (decide after `application` crate) |
+| [ADR-002](./docs/adr/ADR-002-hexagonal-architecture.md) | Hexagonal Architecture and DDD Crate Layout | Accepted |
+| [ADR-003](./docs/adr/ADR-003-aws-dsql-database.md) | AWS Aurora DSQL with PostgreSQL Portability | Accepted |
 
 ## 4. Mandatory Workflow Rules
 
 - **Before every PR / patch**: run the review checklist in `.ai/skills/review.md`
 - **All code must pass**: `cargo clippy -- -D warnings` and `cargo test --workspace`
 - **New endpoints**: add an entry to `docs/api.md`
-- **Architecture changes**: create a new ADR in `docs/adr/` (see [`ADR-001`](./docs/adr/ADR-001-hexagonal-architecture.md) as template)
+- **Architecture changes**: create a new ADR in `docs/adr/` following [`.ai/skills/adr-process.md`](.ai/skills/adr-process.md) (next free number; structure as in [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md)) and add it to the ADR index above
+- **Generating tests**: never derive expected behavior from the implementation; if a test fails, report it as a spec–code mismatch instead of changing the assertion (see [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md))
 - **Never put domain logic in `infrastructure` crate** — see architecture doc
 
 ## 5. Sensitive / Local Files

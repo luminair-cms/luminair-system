@@ -2,7 +2,7 @@
 
 - **Date**: 2026-08-21
 - **Question**: What are the differences between AWS Aurora DSQL and standard PostgreSQL that affect application code, migrations, and the ORM layer?
-- **Related ADR**: ADR-001 (DSQL chosen as database)
+- **Related ADR**: [`ADR-003`](../adr/ADR-003-aws-dsql-database.md) (AWS Aurora DSQL with PostgreSQL Portability)
 
 ---
 
