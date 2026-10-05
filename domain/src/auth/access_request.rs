@@ -71,6 +71,12 @@ impl AccessRequest {
             });
         }
 
+        if self.user_id == by {
+            return Err(DomainError::Unauthorized(
+                "reviewer cannot review or approve their own access request".to_string(),
+            ));
+        }
+
         if roles.is_empty() {
             return Err(DomainError::Validation(
                 "at least one role must be assigned when approving an access request".to_string(),
@@ -114,6 +120,12 @@ impl AccessRequest {
             return Err(DomainError::InvalidStateTransition {
                 reason: format!("cannot reject access request in {:?} state", self.status),
             });
+        }
+
+        if self.user_id == by {
+            return Err(DomainError::Unauthorized(
+                "reviewer cannot review or reject their own access request".to_string(),
+            ));
         }
 
         self.status = AccessRequestStatus::Rejected { reason };
@@ -262,5 +274,20 @@ mod tests {
             .collect();
         let res = req.approve(admin, roles, now);
         assert!(matches!(res, Err(DomainError::Validation(_))));
+    }
+
+    #[test]
+    fn test_approve_by_self_fails() {
+        let (mut req, user, now) = make_test_request();
+        let role = RoleId::new(Uuid::now_v7());
+        let res = req.approve(user, vec![role], now);
+        assert!(matches!(res, Err(DomainError::Unauthorized(_))));
+    }
+
+    #[test]
+    fn test_reject_by_self_fails() {
+        let (mut req, user, now) = make_test_request();
+        let res = req.reject(user, Some("self reject".into()), now);
+        assert!(matches!(res, Err(DomainError::Unauthorized(_))));
     }
 }

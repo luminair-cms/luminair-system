@@ -6,7 +6,9 @@ pub struct AuthorizationService;
 
 impl AuthorizationService {
     /// Evaluates access authorization using the precedence rule:
-    /// 1. Owner rule (creators can read, update, delete, publish their own instances).
+    /// 1. Owner rule (creators can read, update, and delete their own instances without a role).
+    ///    Publishing always requires explicit RBAC permission, enabling editorial workflows
+    ///    where authors cannot self-publish.
     /// 2. RBAC (evaluation across all assigned roles).
     /// 3. Default DENY.
     pub fn can(
@@ -15,14 +17,16 @@ impl AuthorizationService {
         instance: Option<&DocumentInstance>,
         roles: &[Role],
     ) -> bool {
-        // 1. Special Owner Rule: Owner may read and update their own instance without a role.
-        //    Publish and Delete always require explicit RBAC permission, enabling editorial
-        //    workflows where authors cannot self-publish or self-delete.
+        // 1. Special Owner Rule: Owner may read, update, and delete their own instance without a role.
+        //    Publish always requires explicit RBAC permission, enabling editorial
+        //    workflows where authors cannot self-publish.
         if let Some(inst) = instance
             && inst.is_owned_by(user_id)
         {
             match action {
-                Permission::UpdateDocument(_) | Permission::ReadDocument(_) => return true,
+                Permission::ReadDocument(_)
+                | Permission::UpdateDocument(_)
+                | Permission::DeleteDocument(_) => return true,
                 _ => {}
             }
         }
@@ -52,9 +56,9 @@ mod tests {
     }
 
     #[test]
-    fn test_owner_allowed_read_and_update() {
+    fn test_owner_allowed_read_update_and_delete() {
         let (owner, _, type_id, instance) = make_test_fixture();
-        // Owner may read and update without any role
+        // Owner may read, update, and delete without any role
         assert!(AuthorizationService::can(
             &owner,
             &Permission::ReadDocument(Some(type_id.clone())),
@@ -63,7 +67,13 @@ mod tests {
         ));
         assert!(AuthorizationService::can(
             &owner,
-            &Permission::UpdateDocument(Some(type_id)),
+            &Permission::UpdateDocument(Some(type_id.clone())),
+            Some(&instance),
+            &[]
+        ));
+        assert!(AuthorizationService::can(
+            &owner,
+            &Permission::DeleteDocument(Some(type_id)),
             Some(&instance),
             &[]
         ));
@@ -76,18 +86,6 @@ mod tests {
         assert!(!AuthorizationService::can(
             &owner,
             &Permission::PublishDocument(Some(type_id)),
-            Some(&instance),
-            &[]
-        ));
-    }
-
-    #[test]
-    fn test_owner_denied_delete_without_role() {
-        let (owner, _, type_id, instance) = make_test_fixture();
-        // Owner cannot delete without an explicit role
-        assert!(!AuthorizationService::can(
-            &owner,
-            &Permission::DeleteDocument(Some(type_id)),
             Some(&instance),
             &[]
         ));

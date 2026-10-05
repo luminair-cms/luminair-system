@@ -150,7 +150,7 @@ cases:
   - { id: AZ-01, user: alice, action: ReadDocument(article),    owner: alice, roles: [],               expect: allow }
   - { id: AZ-02, user: alice, action: UpdateDocument(article),  owner: alice, roles: [],               expect: allow }
   - { id: AZ-03, user: alice, action: PublishDocument(article), owner: alice, roles: [],               expect: deny  }
-  - { id: AZ-04, user: alice, action: DeleteDocument(article),  owner: alice, roles: [],               expect: deny  }
+  - { id: AZ-04, user: alice, action: DeleteDocument(article),  owner: alice, roles: [],               expect: allow }
   - { id: AZ-05, user: bob,   action: ReadDocument(article),    owner: alice, roles: [],               expect: deny  }
   - { id: AZ-06, user: bob,   action: ReadDocument(article),    owner: alice, roles: [reader],         expect: allow }
   - { id: AZ-07, user: bob,   action: UpdateDocument(author),   owner: alice, roles: [article-editor], expect: deny  }
@@ -161,8 +161,8 @@ cases:
   - { id: AZ-12, user: bob,   action: DeleteDocument(article),  owner: null,  roles: [reader, publisher], expect: deny }
 ```
 
-`AZ-03`/`AZ-04` capture the editorial-workflow rule ("authors cannot self-publish or self-delete").
-The doc comment on `AuthorizationService::can` currently says otherwise; see [§4](#4-findings-discovered-while-writing-the-specs).
+`AZ-03` captures the editorial-workflow rule ("authors cannot self-publish without an explicit role").
+An owner may read, update, and delete their own document, but publishing is an editorial responsibility requiring an assigned role.
 
 ### 2.3 Access request — `access_request.yaml`
 
@@ -217,11 +217,11 @@ scenarios:
       - { status: approved, is_active: true  }
       - { status: rejected, is_active: false }
 
-  # ⚠️ DECISION NEEDED — self-approval is currently allowed.
-  # - id: AR-08
-  #   given: { status: pending, requester: admin }
-  #   when:  { action: approve, by: admin, roles: [editor] }
-  #   then:  { error: Unauthorized }
+  - id: AR-08
+    title: Reviewer cannot approve or reject their own access request
+    given: { status: pending, requester: admin }
+    when:  { action: approve, by: admin, roles: [editor] }
+    then:  { error: Unauthorized }
 ```
 
 ### 2.4 Content validation — `content_validation.yaml`
@@ -501,17 +501,22 @@ Template (each rule fixed to Given / When / Then, with no extra prose inside a r
 - **Когда** alice выполняет `ReadDocument(article)` или `UpdateDocument(article)`
 - **Тогда** доступ разрешён
 
-### AZ-02 Владелец не может сам опубликовать или удалить документ
+### AZ-02 Владелец не может сам опубликовать документ
 - **Дано** документ `article`, созданный alice; у alice нет ролей
-- **Когда** alice выполняет `PublishDocument(article)` или `DeleteDocument(article)`
+- **Когда** alice выполняет `PublishDocument(article)`
 - **Тогда** доступ запрещён
 
-### AZ-03 Роль с конкретным типом не действует на другие типы
+### AZ-03 Владелец может удалить свой документ без ролей
+- **Дано** документ `article`, созданный alice; у alice нет ролей
+- **Когда** alice выполняет `DeleteDocument(article)`
+- **Тогда** доступ разрешён
+
+### AZ-04 Роль с конкретным типом не действует на другие типы
 - **Дано** у bob роль с `UpdateDocument(article)`
 - **Когда** bob выполняет `UpdateDocument(author)`
 - **Тогда** доступ запрещён
 
-### AZ-04 Права нескольких ролей объединяются
+### AZ-05 Права нескольких ролей объединяются
 - **Дано** у bob роли `reader` (`ReadDocument(*)`) и `publisher` (`PublishDocument(article)`)
 - **Когда** bob выполняет `ReadDocument(article)`, затем `PublishDocument(article)`
 - **Тогда** оба действия разрешены
@@ -586,19 +591,26 @@ fn lc_05_draft_cannot_be_unpublished() {
 
 ```rust
 // domain/src/auth/service.rs — #[cfg(test)] mod spec_authorization
-/// AZ-02 Владелец не может сам опубликовать или удалить документ
+/// AZ-02 Владелец не может сам опубликовать документ
 #[test]
-fn az_02_owner_cannot_self_publish_or_delete() {
+fn az_02_owner_cannot_self_publish() {
     let alice = test_user_id("alice");
     let doc = fixture_document_instance("article", Some("alice"));
     let article = test_doc_type_id("article");
 
-    for action in [
-        Permission::PublishDocument(Some(article.clone())),
-        Permission::DeleteDocument(Some(article.clone())),
-    ] {
-        assert!(!AuthorizationService::can(&alice, &action, Some(&doc), &[]), "{action:?}");
-    }
+    let action = Permission::PublishDocument(Some(article));
+    assert!(!AuthorizationService::can(&alice, &action, Some(&doc), &[]));
+}
+
+/// AZ-03 Владелец может удалить свой документ без ролей
+#[test]
+fn az_03_owner_can_delete_own_document() {
+    let alice = test_user_id("alice");
+    let doc = fixture_document_instance("article", Some("alice"));
+    let article = test_doc_type_id("article");
+
+    let action = Permission::DeleteDocument(Some(article));
+    assert!(AuthorizationService::can(&alice, &action, Some(&doc), &[]));
 }
 ```
 
@@ -622,11 +634,11 @@ The rule "**never edit an assertion to make it pass**" is what makes the suite i
 
 Writing these specs (without running anything) surfaced three gaps in the current domain:
 
-| # | Area | Observation | Spec status |
+| # | Area | Observation | Status & Resolution |
 |---|---|---|---|
-| F1 | `AuthorizationService::can` | The doc comment says the owner may "read, update, delete, publish". The code and inline comment allow only read/update. | YAML `AZ-03`/`AZ-04` and markdown `AZ-02` follow the inline comment (editorial workflow). The doc comment needs a fix, or the rule is wrong. |
-| F2 | `DocumentInstance::unpublish` | Takes no actor, so `audit.updated_by` keeps the previous editor after an unpublish. `publish` does record the actor. | `LC-06` ⚠️ DECISION NEEDED |
-| F3 | `AccessRequest::approve` | A reviewer can approve their own access request (`by == user_id`). | `AR-08` ⚠️ DECISION NEEDED |
+| F1 | `AuthorizationService::can` | The doc comment said the owner may "read, update, delete, publish", while code originally only allowed read/update. | **Resolved**: Owner may read, update, and delete their own record; publishing requires an explicit role. Fixed in code and doc comments. |
+| F2 | `DocumentInstance::unpublish` | `published_at` and `published_by` are cleared on unpublish, but the domain lacks an audit/event logging facility to record who unpublished and when. | **Pending investigation**: Logging facility to be researched in detail before application crate implementation. |
+| F3 | `AccessRequest::approve` / `reject` | Could a reviewer review their own access request (`by == user_id`)? | **Resolved**: Access requests are submitted only for users who have not yet enrolled in Luminair. Reviewers already have system access. Enforced in domain: `approve` and `reject` reject `by == self.user_id` with `Unauthorized`. |
 
 These are the kind of issues that implementation-derived tests never find.
 
