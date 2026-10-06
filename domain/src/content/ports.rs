@@ -31,6 +31,12 @@ pub struct Page<T> {
     pub page_size: u32,
 }
 
+/// Equality filter on a single scalar field.
+///
+/// Contract for `DocumentInstanceRepository::find_by_type` / `count`:
+/// - an instance matches when its field `attribute_id` holds a scalar equal to `value`;
+/// - a missing field, a `Null` value and a localized text never match;
+/// - several filters are combined with logical AND; an empty list matches everything.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldFilter {
     pub attribute_id: AttributeId,

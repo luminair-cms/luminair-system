@@ -49,3 +49,5 @@ url = "=2.5.8"
 
 # Testing
 axum-test = { version = "21.1.0" }
+proptest = { version = "1.11.0" }
+

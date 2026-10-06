@@ -5,7 +5,8 @@ use std::future::Future;
 
 use chrono::Utc;
 use domain::auth::{
-    AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository, Permission, RoleRepository, UserRoleAssignment, UserRoleAssignmentRepository,
+    AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository, Permission,
+    RoleRepository, UserRoleAssignment, UserRoleAssignmentRepository,
 };
 use domain::errors::DomainError;
 
@@ -82,20 +83,20 @@ where
         cmd: SubmitAccessRequestCommand,
     ) -> Result<AccessRequest, ApplicationError> {
         // Enforce invariant: at most one active (Pending or Approved) request per user
-        let existing_assignments = self.assignment_repo
-            .find_by_user(&cmd.user_id)
-            .await?;
-        let existing_request = self.access_request_repo
+        let existing_assignments = self.assignment_repo.find_by_user(&cmd.user_id).await?;
+        let existing_request = self
+            .access_request_repo
             .find_active_by_user(&cmd.user_id)
             .await?;
 
         let request = AccessRequestPolicy::create_request(
-            cmd.user_id, 
-            cmd.email, 
-            cmd.name, 
-            &existing_assignments, 
-            existing_request.as_ref(), 
-            Utc::now())?;
+            cmd.user_id,
+            cmd.email,
+            cmd.name,
+            &existing_assignments,
+            existing_request.as_ref(),
+            Utc::now(),
+        )?;
         self.access_request_repo.save(&request).await?;
         Ok(request)
     }
@@ -502,7 +503,11 @@ mod tests {
         );
 
         let req = service
-            .submit(SubmitAccessRequestCommand::new(admin_user.clone(), None, None))
+            .submit(SubmitAccessRequestCommand::new(
+                admin_user.clone(),
+                None,
+                None,
+            ))
             .await
             .unwrap();
 

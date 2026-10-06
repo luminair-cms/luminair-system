@@ -1,0 +1,3 @@
+# Project Context: Luminair CMS
+
+Luminair is a modular, high-performance headless Content Management System written in Rust, built on hexagonal architecture and Domain-Driven Design (DDD). It features declarative schemas (single and collection types, localized fields, strict value objects via `nutype`), strict RBAC with an author ownership rule, draft-and-publish workflows, and high-concurrency storage designed for AWS Aurora DSQL with PostgreSQL compatibility. Code follows a strict split: main code is hand-crafted with AI assistance, while behavior specifications, tests, and documentation are AI-driven and human-approved.

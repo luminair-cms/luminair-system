@@ -23,7 +23,7 @@ Read in this order:
 | Task | Skill to load |
 |---|---|
 | Writing or modifying Rust code | [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md) |
-| Writing or modifying tests | [`.ai/skills/testing.md`](.ai/skills/testing.md) |
+| Writing or modifying tests | [`.ai/skills/testing.md`](.ai/skills/testing.md), [`.ai/skills/spec-testing.md`](.ai/skills/spec-testing.md) |
 | Reviewing a PR / self-reviewing code | [`.ai/skills/review.md`](.ai/skills/review.md) |
 | Investigating a topic / drafting an ADR | [`.ai/skills/adr-process.md`](.ai/skills/adr-process.md) |
 
@@ -38,7 +38,7 @@ Read in this order:
 
 | ADR | Title | Status |
 |---|---|---|
-| [ADR-001](./docs/adr/ADR-001-declarative-test-specifications.md) | Declarative behavior specifications as the source of truth for tests | Proposed (decide after `application` crate) |
+| [ADR-001](./docs/adr/ADR-001-declarative-test-specifications.md) | Declarative behavior specifications as the source of truth for tests | Accepted |
 | [ADR-002](./docs/adr/ADR-002-hexagonal-architecture.md) | Hexagonal Architecture and DDD Crate Layout | Accepted |
 | [ADR-003](./docs/adr/ADR-003-aws-dsql-database.md) | AWS Aurora DSQL with PostgreSQL Portability | Accepted |
 | [ADR-004](./docs/adr/ADR-004-draft-and-publish-table-pattern.md) | Two-Table Draft-and-Publish Pattern with Typed Relational Columns | Proposed |

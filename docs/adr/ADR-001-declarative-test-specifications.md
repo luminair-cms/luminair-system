@@ -1,10 +1,11 @@
 # ADR-001: Declarative Behavior Specifications as the Source of Truth for Tests
 
-- **Status**: Proposed
-- **Date**: 2026-10-05
+- **Status**: Accepted
+- **Date**: 2026-10-05 (proposed) · 2026-10-06 (accepted)
 - **Deciders**: Dmitri Astafiev
-- **Decision deadline**: after the `application` crate (use cases) is implemented
-- **Research**: [`docs/research/declarative-test-specifications.md`](../research/declarative-test-specifications.md) (detailed examples for the domain model; use-case examples will be added later)
+- **Decision trigger**: the `application` crate (use cases) is implemented — reached; see [Decision](#decision)
+- **Research**: [`docs/research/declarative-test-specifications.md`](../research/declarative-test-specifications.md) (detailed examples for the domain model)
+- **Operational rules**: [`docs/specs/GUIDELINES.md`](../specs/GUIDELINES.md) and [`.ai/skills/spec-testing.md`](../../.ai/skills/spec-testing.md)
 
 ---
 
@@ -17,16 +18,19 @@ That split has a structural flaw: when an AI derives tests by reading the implem
 ("tautological tests"). The test suite is green, yet it verifies nothing that the author did not
 already believe.
 
-Concrete evidence from the current `domain` crate (found while preparing this ADR):
+Concrete evidence from the `domain` crate (found while preparing this ADR on 2026-10-05).
+**All three were fixed in code before acceptance** (2026-10-06); the table is kept as historical evidence of the failure mode.
 
-| Location | Code says | Docs/comments say |
-|---|---|---|
-| [`AuthorizationService::can`](../../domain/src/auth/service.rs) | Owner may only **read / update** without a role | Doc comment: owner may "read, update, **delete, publish**" |
-| [`DocumentInstance::unpublish`](../../domain/src/content/instance.rs) | Does not take `by`; `audit.updated_by` is not changed | No rule written down for it |
-| [`AccessRequest::approve`](../../domain/src/auth/access_request.rs) | A reviewer can approve their **own** request | No rule written down for it |
+| Location | Code said | Docs/comments said | State on 2026-10-06 |
+|---|---|---|---|
+| [`AuthorizationService::can`](../../domain/src/auth/service.rs) | Owner may only **read / update** without a role | Doc comment: owner may "read, update, **delete, publish**" | Fixed: owner may read/update/delete; **publish always needs RBAC** (documented) |
+| [`DocumentInstance::unpublish`](../../domain/src/content/instance.rs) | Did not take `by`; `audit.updated_by` unchanged | No rule written down | Fixed: takes `by`, calls `touch` |
+| [`AccessRequest::approve`](../../domain/src/auth/access_request.rs) | A reviewer could approve their **own** request | No rule written down | Fixed: self-approval rejected (`test_approve_by_self_fails`) |
 
-A test generated from the code would accept any of these as correct. A test generated from a
-written rule would either confirm the intent or flag a bug.
+A test generated from the code would have accepted any of these as correct. A test generated from a
+written rule would either have confirmed the intent or flagged a bug. The fixes themselves were
+verified by after-the-fact tests, so the underlying risk is **not** retired: the rest of the code
+base is still covered by tests that were derived from the implementation.
 
 We need a way for the human to state **expected behavior** once, briefly and precisely
 (English or Russian), and let the AI generate the test code **from that statement**, not from the
@@ -108,31 +112,50 @@ chars") and let the framework generate inputs.
 
 ---
 
-## Proposed Direction (to be confirmed after the `application` crate exists)
+## Decision
 
-A **hybrid of Option 3 (default) + Option 2 (for state machines / decision tables)**, with Option 4
-used selectively for value-object invariants:
+Adopt a **hybrid of Option 3 (default) + Option 2 (state machines / decision tables)**, with Option 4
+(`proptest`) for value-object invariants. Gherkin (Option 1) is rejected: it gives the readability of
+Option 3 at the glue cost of a framework.
 
-| Behavior kind | Format | Example |
+| Behavior kind | Format | Spec file | Test location | Example |
+|---|---|---|---|---|
+| Lifecycle / state machines | Option 2 case table | `docs/specs/domain/*.md` | `domain/tests/` | `DocumentInstance` publish/unpublish, `AccessRequest` approve/reject |
+| Decision tables | Option 2 case table | `docs/specs/domain/*.md` | `domain/tests/` | `AuthorizationService::can`, `validate_content` |
+| Use cases (application layer) | Option 3 rule → plain `#[tokio::test]` with fake repos | `docs/specs/application/*.md` | `application/tests/` | `DocumentsService::publish`, `AccessRequestsService::approve` |
+| Value-object invariants | Option 4 `proptest` | `docs/specs/domain/*.md` (type `property`) | `domain/tests/` | `AttributeId`, `LocaleId`, `RegexPattern` |
+
+### Resolved open questions
+
+| Question | Decision | Why |
 |---|---|---|
-| Lifecycle / state machines | Option 2 scenario table | `DocumentInstance` publish/unpublish, `AccessRequest` approve/reject |
-| Decision tables | Option 2 scenario table | `AuthorizationService::can`, `validate_content` |
-| Use cases (application layer) | Option 3 markdown rules → Rust tests with fake repos | `PublishDocument`, `ApproveAccessRequest` |
-| Value-object invariants | Option 4 `proptest` (optional) | `AttributeId`, `LocaleId`, `RegexPattern` |
+| Scenario file format (YAML vs TOML) | **Neither.** Case tables are plain Rust data (`const`/`vec!` of structs with closed enums) inside the test file. | No new dependency (`serde_yaml` is archived), no parser, no runner; the compiler rejects unknown keys and values (R3, R6); the DSL cannot grow beyond what Rust enums allow. Revisit only if tables exceed ~50 rows per aggregate. |
+| Test-per-scenario harness (`libtest-mimic` vs loop) | **One `#[test]` per spec group that runs all cases and reports *all* failing rule IDs at once.** | Keeps plain `cargo test` (R6). A loop that stops at the first failure hides how many rules are red. |
+| Enforcing "blind" generation | **Structure + a mechanical check + process.** Spec-backed tests live in `<crate>/tests/` (integration tests compile against the public API only, so they cannot depend on private details). A traceability test fails when an *Approved* rule ID has no test. The allowed-context list in the guidelines is a process rule. | A generated public-API summary file is extra tooling for little gain: the public API is already visible to the compiler. |
 
-Gherkin (Option 1) is not proposed: it gives the readability of Option 3 at the glue cost of a framework.
+### Where tests live (inline vs separate)
 
-### Workflow rules (apply to any chosen option)
+| Kind of test | Location | Reason |
+|---|---|---|
+| **Spec-backed** (rules in `docs/specs/`) | `<crate>/tests/*.rs` | Public API only: guarantees the test checks observable behavior, supports blind generation, and keeps AI-generated code out of production files. |
+| Existing tests | Stay inline as they are | No churn; migrate to spec-backed tests when the related code changes. |
+| Tests of **private** invariants / helpers that have no public surface | Inline `#[cfg(test)]` | Cannot be reached from `tests/`. Not spec-backed; mark as such in a comment if there is any doubt. |
+| Fakes of `application::test_support` | Inline self-tests in the same file | A fake that diverges from the port contract invalidates every use-case spec built on it. |
 
-1. **Spec first.** A behavior change starts with a spec/scenario diff, reviewed by a human.
-2. **Blind generation.** When the AI generates tests, it gets the spec plus public signatures / `test_support` only, never the function bodies.
-3. **Red is a finding, not a typo.** If a generated test fails, the AI reports it as a *spec–code mismatch* and does not edit the assertion. The human decides whether the code or the spec is wrong.
-4. **Traceability.** Test name or scenario `id` = rule ID (e.g. `LC-03`). CI may check that each rule ID appears in at least one test.
-5. **Existing tests** stay as they are; they migrate to spec-backed tests gradually, when the related code changes.
+Consequence for the build: `domain` gets the same self dev-dependency with `test-support` that
+`application` already has, so `domain/tests/` can use `domain::test_support`.
+
+### Workflow rules (apply to every option)
+
+1. **Spec first.** A behavior change starts with a spec diff, reviewed by a human. Specs are written by AI *or* human; **only a human sets `Status: Approved`**.
+2. **Blind generation.** The AI that generates tests receives only: the approved spec, public signatures (`cargo doc` / `pub` items), and `test_support`. It does not read function bodies or existing tests of the unit under test.
+3. **Red is a finding, not a typo.** If a generated test fails, the AI reports a *spec–code mismatch* and does not edit the assertion. The human decides whether the code or the spec is wrong.
+4. **Traceability.** The rule ID appears in the test (test name for Option 3 / `property`, `id` field for Option 2). `domain/tests/spec_traceability.rs` enforces this for `Approved` rules.
+5. **Existing tests** stay as they are and migrate gradually (see the table above).
 
 ---
 
-## Consequences (if the proposed direction is accepted)
+## Consequences
 
 ### Positive
 - Tests verify intent; spec–code mismatches like the ones in *Context* surface automatically.
@@ -140,18 +163,17 @@ Gherkin (Option 1) is not proposed: it gives the readability of Option 3 at the 
 - Specs become reviewable, versioned business documentation.
 
 ### Negative / Risks
-- Two artefact types (markdown specs + scenario files) and one runner per aggregate to maintain.
-- The scenario DSL can grow into a mini-language; keep it limited to one action per scenario.
+- Two artefact types (markdown specs + Rust case tables) to keep in sync; the traceability check only proves that a rule ID is *mentioned* in a test, not that the test is right. Human review of the generated test against the rule is still required (see the review guidelines).
+- Case tables can grow into a mini-language; keep them to one action per case.
 - Blind generation depends on discipline; it is weakened if the AI is given the whole repository as context.
+- Fakes are a second implementation of the ports. Use-case specs are only as good as the fakes, hence their self-tests.
+- Specs written by AI from the current behavior carry the same tautology risk if the human approves them without reading. The review guidelines therefore require the reviewer to answer "is this what the system *should* do?", not "is this what it does?".
 
-### Follow-ups (after acceptance)
-- Add `docs/specs/` structure and a spec template.
-- Add the scenario runner for one aggregate (pilot: `DocumentInstance` lifecycle).
-- Extend [`.ai/skills/testing.md`](../../.ai/skills/testing.md) with the blind-generation protocol.
-- Add use-case examples to the research note once the `application` crate is implemented.
-- Log the decision in `.ai/context/decisions.md`.
-
-## Open Questions
-- Scenario file format: YAML (`serde_yaml` is archived/unmaintained; maintained forks exist) vs TOML (`toml` crate, well-maintained but more verbose for nested data).
-- Test-per-scenario harness: `libtest-mimic` / `datatest-stable` (one test per scenario, `harness = false`) vs a single `#[test]` that loops and aggregates failures.
-- How to enforce "blind" generation: instructions only, or a generated public-API summary file used as the only code context.
+### Follow-ups
+- [x] `docs/specs/` structure, template, guidelines and examples (`docs/specs/`).
+- [x] Skill for generating and reviewing tests from specs: [`.ai/skills/spec-testing.md`](../../.ai/skills/spec-testing.md); [`.ai/skills/testing.md`](../../.ai/skills/testing.md) updated.
+- [x] Fakes: `FieldFilter` honored, lock errors reported as `Storage`, deterministic paging.
+- [x] Initial draft specs (all `Draft`, awaiting human review).
+- [ ] Human review and approval of the draft specs, then blind test generation per spec file.
+- [ ] Pilot: generate tests for `LC` (`DocumentInstance` lifecycle) and compare with existing inline tests.
+- [ ] Log the decision in `.ai/context/decisions.md` (done together with this ADR).

@@ -133,13 +133,12 @@ where
         relations: HashMap<AttributeId, RelationAction>,
     ) -> Result<(), ApplicationError> {
         for (attr, action) in relations {
-            let rel = doc_type.relations.get(&attr)
-                .ok_or_else(|| {
-                    ApplicationError::Validation(vec![format!(
-                        "relation attribute '{attr}' is not defined for document type '{}'",
-                        doc_type.id
-                    )])
-                })?;
+            let rel = doc_type.relations.get(&attr).ok_or_else(|| {
+                ApplicationError::Validation(vec![format!(
+                    "relation attribute '{attr}' is not defined for document type '{}'",
+                    doc_type.id
+                )])
+            })?;
 
             if !rel.relation_type.is_owning() {
                 return Err(ApplicationError::Validation(vec![format!(
@@ -308,9 +307,9 @@ where
             let mut enriched = self
                 .enrich(cmd.document_type, populate, vec![instance])
                 .await?;
-            let doc = enriched
-                .pop()
-                .ok_or_else(|| ApplicationError::Internal("enriched instance missing from batch result".into()))?;
+            let doc = enriched.pop().ok_or_else(|| {
+                ApplicationError::Internal("enriched instance missing from batch result".into())
+            })?;
             Ok(doc)
         } else {
             Ok(instance)
@@ -363,9 +362,9 @@ where
             let mut enriched = self
                 .enrich(cmd.document_type, populate, vec![instance])
                 .await?;
-            let doc = enriched
-                .pop()
-                .ok_or_else(|| ApplicationError::Internal("enriched instance missing from batch result".into()))?;
+            let doc = enriched.pop().ok_or_else(|| {
+                ApplicationError::Internal("enriched instance missing from batch result".into())
+            })?;
             Ok(doc)
         } else {
             Ok(instance)
@@ -479,7 +478,7 @@ mod tests {
     };
     use domain::schema::{DocumentType, RelationDefinition, RelationType, SchemaRegistry};
     use domain::system::SystemContext;
-    use domain::test_support::{fixture_system_config, text_field, DocumentTypeBuilder};
+    use domain::test_support::{DocumentTypeBuilder, fixture_system_config, text_field};
     use uuid::Uuid;
 
     use crate::test_support::FakeDocumentInstanceRepository;

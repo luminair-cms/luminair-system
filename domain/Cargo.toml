@@ -21,4 +21,9 @@ url = { workspace = true }
 test-support = []
 
 [dev-dependencies]
+# Re-declare ourselves with the test-support feature so that integration tests
+# in domain/tests/ can access domain::test_support (builders, fixtures).
+domain = { path = ".", features = ["test-support"] }
+proptest.workspace = true
 serde_json.workspace = true
+
