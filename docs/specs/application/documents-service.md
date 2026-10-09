@@ -108,6 +108,27 @@
 - **When**: Caller invokes `update`, `delete`, `publish`, or `unpublish`.
 - **Then**: Returns `Err(ApplicationError::Unauthorized { .. })` without repository modification.
 
+### DS-13 — Discard Draft Reverts to Published State
+- **Status**: `Draft`
+- **Origin**: `adr:004`
+- **Given**: An existing document instance in `Modified` state (published with pending draft changes).
+- **When**: Authorized caller invokes `service.discard_draft(&caller, DiscardDraftCommand::new(type_id, instance_id)).await`.
+- **Then**: Returns `Ok(published)` with `publication_state` restored to clean `Published`, draft store cleared, and `has_pending_draft == false`.
+
+### DS-14 — Restore Snapshot Loads Historical Revision to Draft
+- **Status**: `Draft`
+- **Origin**: `adr:004`
+- **Given**: An existing published document instance with historical revision `1` in `document_snapshots`.
+- **When**: Authorized caller invokes `service.restore_snapshot(&caller, RestoreSnapshotCommand::new(type_id, instance_id, 1)).await`.
+- **Then**: Returns `Ok(modified)` with draft content matching revision `1`, draft status marked as `Modified`, and audit trail touched.
+
+### DS-15 — List Admin Headers Returns Lightweight Projections
+- **Status**: `Draft`
+- **Origin**: `adr:004`
+- **Given**: Document instances in draft, modified, and published states in the repository.
+- **When**: Authorized caller invokes `service.list_admin_headers(&caller, ListAdminHeadersCommand::new(type_id, pagination)).await`.
+- **Then**: Returns `Ok((headers, total))` containing `DocumentHeader` items with `display_values`, `display_title`, and correct `DocumentStatus` badges without loading full content blobs.
+
 ---
 
 ## Open Questions

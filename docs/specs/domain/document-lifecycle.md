@@ -34,6 +34,10 @@
 | `LC-06` | `Draft` | `adr:004` | `Draft(Some(1))`, `Version(3)` | `Unpublish(Some("bob"), T4)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(3)` |
 | `LC-07` | `Draft` | `observed` | Initial `new(type, Some("alice"), T0)` | (constructed) | `Draft(None)`, `Version(1)`, `created_by == Some("alice")`, `updated_by == Some("alice")` |
 | `LC-08` | `Draft` | `observed` | Any instance with `Version(V)` | `Touch(Some("bob"), T1)` | `audit.version == V + 1`, `audit.updated_by == Some("bob")`, `audit.updated_at == T1` |
+| `LC-09` | `Draft` | `adr:004` | `Published(1)`, `Version(2)` | `EditDraft(Some("alice"), T3)` | `Modified(1)`, `Version(3)`, `updated_by == Some("alice")` |
+| `LC-10` | `Draft` | `adr:004` | `Modified(1)`, `Version(3)` | `DiscardDraft()` | `Published(1)`, `Version(3)` |
+| `LC-11` | `Draft` | `adr:004` | `Draft(None)`, `Version(1)` | `DiscardDraft()` | `Err(DomainError::InvalidStateTransition)` |
+| `LC-12` | `Draft` | `adr:004` | `Published(2)`, `Version(4)` | `RestoreSnapshot(Rev1, T5)` | `Modified(1)`, `Version(5)` |
 
 ---
 

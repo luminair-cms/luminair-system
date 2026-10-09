@@ -1,7 +1,7 @@
-# ADR-004: Two-Table Draft-and-Publish Pattern with Typed Relational Columns
+# ADR-004: Asymmetric Hybrid Draft-and-Publish Persistence Pattern
 
 - **Status**: Proposed
-- **Date**: 2026-10-05
+- **Date**: 2026-10-05 (original) · 2026-10-09 (revised)
 - **Deciders**: Dmitri Astafiev
 - **Research**: [`docs/research/audit-logging-and-domain-events.md`](../research/audit-logging-and-domain-events.md), [`docs/research/dsql-vs-postgres.md`](../research/dsql-vs-postgres.md)
 
@@ -9,165 +9,235 @@
 
 ## Context
 
-Luminair is a headless CMS requiring robust content authoring workflows. In standard editorial operations, authors must be able to edit in private while an existing published version of the document remains live for public visitors. Furthermore, editors require the ability to unpublish live content immediately when needed.
+Luminair is a headless CMS requiring robust content authoring workflows. In standard editorial operations, authors must be able to edit in private while an existing published version of the document remains live for public visitors. Furthermore, editors require the ability to unpublish live content immediately, inspect revision history, and discard in-progress edits.
 
-Content querying in a modern CMS demands real database filtering, searching, and sorting capabilities:
-- Public visitors query by slug, filter by categories or tags, and sort by publication date (`WHERE status = 'published' AND category_id = ... ORDER BY published_at DESC`).
-- Admin UI users search, filter, and sort across arbitrary schema attributes (e.g. titles, dates, author relations).
+The original proposal for ADR-004 specified a **Symmetric Two-Table Pattern** where both the working draft table (`[type]`) and the published table (`[type]_published`) maintained identical wide, typed relational columns. However, architectural evaluation under AWS Aurora DSQL identified critical limitations with that approach:
+
+1. **Non-Transactional DDL & Migration Overhead**: AWS Aurora DSQL does not support transactional DDL. Adding, altering, or removing fields across $N$ document types required executing DDL on $2N$ wide tables and $2M$ junction tables outside transactions, increasing deployment complexity.
+2. **Draft Tolerance & Work-In-Progress Invariants**: Editors frequently save drafts with incomplete or missing fields. Enforcing SQL-level `NOT NULL` and relation constraints on a wide draft table either rejects partial drafts or forces all columns in the draft table to be `NULL`able, which dilutes relational integrity.
+3. **Cross-Type Administrative Operations**: The CMS dashboard requires global views (e.g. "My Recent Drafts" across all document types). Having drafts scattered across dozens of individual type-specific tables makes cross-type aggregation cumbersome and inefficient.
 
 We need an architectural storage pattern in PostgreSQL and AWS Aurora DSQL that resolves three core requirements:
-1. **Search, Filter, and Sort Performance**: Real relational columns vs. unstructured JSON/JSONB blobs.
-2. **Draft Isolation & High-Performance Public Reads**: Allowing concurrent draft editing without public data leakage and without slow, error-prone query branching.
-3. **Unpublish Semantics & Actor Attribution**: Clear tracking of who unpublished a document, when it occurred, and where the audit trail resides.
+1. **Search, Filter, and Sort Performance for Visitors**: Real relational columns and B-tree indexes for public queries without status checks or joins.
+2. **Draft Ergonomics & Schema Agility**: Frictionless saving of work-in-progress content without relational constraint violations or dual-table DDL churn.
+3. **Unified Revision Auditing**: Immutable, append-only historical snapshot tracking across all content types with zero Optimistic Concurrency Control (OCC) contention.
 
 ---
 
 ## Decision
 
-Adopt the **Two-Table Pattern** per `DocumentType` with **typed relational columns**, complemented by dedicated junction tables for relations, audit trail attribution in the main draft table, and a planned post-MVP revision history snapshot table.
+Adopt the **Asymmetric Hybrid Persistence Pattern**:
+1. **Per-Type Wide Relational Table (`[type]`)**: Dedicated strictly to **live published instances** (and single-lifecycle document types where `draft_and_publish: false`). Includes a `has_pending_draft` flag to eliminate distributed outer joins.
+2. **Unified Draft Store (`document_drafts`)**: A **single static system table** holding working drafts as **JSONB** across all document types, augmented with materialized identity maps (`display_values JSONB` as key-value pairs) and workflow metadata.
+3. **Global Snapshot Store (`document_snapshots`)**: A **single static system table** recording immutable **JSONB** snapshots for publication history, manual checkpoints, and rollbacks.
+4. **Relational Junction Tables (`[type]_[attr]`)**: Maintained strictly for published associations with foreign keys (`ON DELETE CASCADE`).
 
-### 1. Plain SQL Columns for Schema Fields
+---
 
-Rather than storing all dynamic content attributes in a single opaque JSONB document, each `DocumentType` schema is mapped to physical, typed SQL columns (e.g., `title TEXT NOT NULL`, `slug VARCHAR(255) NOT NULL UNIQUE`, `summary TEXT`, `published_at TIMESTAMPTZ`):
-
-- **B-tree Indexing**: Enables standard PostgreSQL and Aurora DSQL indexes on high-cardinality fields (`slug`, `published_at`, relation IDs).
-- **Relational Integrity**: Enforces database-level constraints (foreign keys, nullability, uniqueness, check constraints).
-- **Fast Sorting & Filtering**: Eliminates JSON path parsing overhead in SQL execution engines.
-
-### 2. Two-Table Pattern per DocumentType
-
-For each defined `DocumentType` (e.g. `articles`), two physical tables are maintained:
+## Detailed Storage Architecture
 
 ```
-┌──────────────────────────────────────────────┐
-│                  articles                    │  <-- Draft / Working Table (Admin UI)
-├──────────────────────────────────────────────┤
-│ id (UUIDv7, PK)                              │
-│ title, slug, content, ... (typed columns)    │
-│ status ('draft' | 'published')               │
-│ revision (INT)                               │
-│ created_at, created_by                       │
-│ updated_at, updated_by                       │  <-- Captures author of latest edits / unpublish
-│ published_at, published_by                   │  <-- Set on publish, cleared on unpublish
-└──────────────────────┬───────────────────────┘
-                       │
-                       │ 1 : 0..1 (CASCADE)
-                       ▼
-┌──────────────────────────────────────────────┐
-│              articles_published              │  <-- Public Live Snapshot (Public API)
-├──────────────────────────────────────────────┤
-│ id (UUIDv7, PK, FK -> articles(id))          │
-│ title, slug, content, ... (typed columns)    │
-│ revision (INT)                               │
-│ published_at, published_by                   │
-└──────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                   document_drafts                      │  <-- Single Static Table (JSONB)
+├────────────────────────────────────────────────────────┤
+│ (document_type_id, id) [PK]                            │
+│ display_values (JSONB Object), display_title (VARCHAR) │
+│ status ('draft' | 'modified' | 'unpublished')          │
+│ content (JSONB), relations (JSONB)                     │
+│ schema_version (INT), version (INT)                    │
+│ last_published_revision (INT)                          │
+│ created_at, created_by, updated_at, updated_by         │
+└──────────────────────────┬─────────────────────────────┘
+                           │
+                           │ publish (validates & copies)
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│             [type] (e.g. articles)                     │  <-- Wide Relational Table (Visitors)
+├────────────────────────────────────────────────────────┤
+│ id (UUIDv7, PK)                                        │
+│ has_pending_draft (BOOLEAN NOT NULL DEFAULT FALSE)     │  <-- Fast admin status flag
+│ slug, title, body, ... (typed relational columns)      │
+│ revision (INT), published_at, published_by             │
+│ created_at, created_by, updated_at, updated_by         │
+└──────────────────────────┬─────────────────────────────┘
+                           │
+                           │ 1 : N (FK ON DELETE CASCADE)
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│             [type]_[attr] (e.g. article_tags)          │  <-- Published Junction Table
+├────────────────────────────────────────────────────────┤
+│ (article_id, tag_id) [PK]                              │
+└────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────┐
+│                  document_snapshots                    │  <-- Global Immutable Revisions
+├────────────────────────────────────────────────────────┤
+│ id (UUIDv7, PK), document_type_id, document_id         │
+│ revision (INT), content (JSONB), relations (JSONB)     │
+│ created_at, created_by, reason ('publish'|'unpublish') │
+└────────────────────────────────────────────────────────┘
 ```
 
-#### A. Main / Draft Table (`[type]`, e.g. `articles`)
-- Acts as the primary identity holder and working draft for editorial staff.
-- Holds full lifecycle audit metadata (`created_at`, `created_by`, `updated_at`, `updated_by`, `published_at`, `published_by`, `revision`).
-- All admin edits mutate rows in this table without impacting public visitors.
+### 1. Main Wide Table (`[type]`, e.g. `articles`)
+- Contains only live published rows (or non-draft entities).
+- Uses typed SQL columns matching the schema definition (`VARCHAR`, `INT`, `TIMESTAMPTZ`, etc.).
+- B-tree indexed on high-traffic filter and sort keys (`slug`, `published_at`, relation IDs).
+- Includes `has_pending_draft BOOLEAN NOT NULL DEFAULT FALSE`, updated when drafts are touched or cleared.
+- Public visitor queries target this table directly: zero joins, zero status filtering, optimal execution plans.
 
-#### B. Published Table (`[type]_published`, e.g. `articles_published`)
-- Acts as an isolated, read-optimized snapshot of live published content.
-- Primary key is `id UUID PRIMARY KEY REFERENCES [type](id) ON DELETE CASCADE`.
-- Contains copies of all public-facing content columns at the moment of publication.
-- **Public API reads query `[type]_published` directly**:
-  - Zero joins required to filter out unpublished drafts.
-  - Zero risk of leaking in-progress draft edits to public visitors.
-  - Extremely fast index lookups (e.g. `SELECT * FROM articles_published WHERE slug = $1`).
+### 2. Unified Draft Store (`document_drafts`)
+- Single static table for all content types, created once during initial system migration.
+- Primary key is composite `(document_type_id, id)`.
+- Content attributes and relations are stored as JSONB. Foreign keys are soft references during drafting, avoiding locking issues or cascading deletions on drafts.
+- Tracks `schema_version INT` to detect schema drift and allow graceful reconciliation.
+- Materialized administrative columns for instant table rendering:
+  - `display_values JSONB`: Key-value map (`{"attribute_id": "value"}`) resolved from `display_fields`.
+  - `display_title VARCHAR(255)`: Flattened string for alphabetical sorting and autocomplete text search.
+  - `status VARCHAR(32)`: `'draft'`, `'modified'`, or `'unpublished'`.
+  - `version INT`: Incremented on every draft touch.
 
-#### C. Relational Junction Tables
-- Many-to-many associations follow the same duality:
-  - Working relations: `article_tags (article_id, tag_id)`
-  - Published live relations: `article_tags_published (article_id, tag_id)` with foreign keys referencing `articles_published(id)`.
-- On publication, junction records are synchronized within the same atomic database transaction.
+### 3. Composite Identity (`display_fields` & Key-Value `display_values`)
+In `DocumentTypeInfo`, schemas define an ordered list of attributes representing the document's identity:
+```json
+{
+  "id": "pos-terminal",
+  "info": {
+    "title": "POS Terminal",
+    "display_fields": ["terminal_id", "brand_name", "removing_date"]
+  }
+}
+```
+At write time, the domain engine extracts these values into:
+- `display_values JSONB`: Self-describing object mapping `AttributeId -> String`:
+  ```json
+  {
+    "terminal_id": "POS-042",
+    "brand_name": "Nike Store",
+    "removing_date": "2026-05-12"
+  }
+  ```
+  This allows frontend data tables to bind directly to `display_values["terminal_id"]` with custom typography (e.g. monospace font for IDs, badge for dates).
+  If a field is a relation (e.g. `brand` pointing to `Brand`), its target `display_title` is resolved and saved into `display_values["brand"]`.
+- `display_title VARCHAR(255)`: Concatenated fallback (`"POS-042 — Nike Store — 2026-05-12"`) indexed for alphabetical sorting (`ORDER BY display_title ASC`) and text search.
 
-### 3. Publication and Unpublish Lifecycle
+### 4. Global Snapshot Store (`document_snapshots`)
+- Single static table recording immutable revision history across all content types.
+- Append-only inserts with UUIDv7 primary keys eliminate OCC serialization conflicts in DSQL.
+- Stores frozen JSONB representation of content and relations at the exact moment of publication or unpublishing.
 
-#### Publication Workflow (`publish`)
-When a document is published:
-1. Validate draft content in `articles` against schema constraints.
-2. In a single database transaction:
-   - Update `articles`: set `status = 'published'`, `revision = revision + 1`, `published_at = $now`, `published_by = $user_id`, `updated_at = $now`, `updated_by = $user_id`.
-   - Upsert into `articles_published`: copy content fields, `revision`, `published_at`, and `published_by`.
-   - Synchronize relation junction records into `article_tags_published`.
-   - Append audit log / domain event (`ArticlePublished`).
+---
 
-#### Unpublish Workflow (`unpublish`)
-When an authorized user unpublishes a document:
-1. **Immediate Public Removal**:
-   - Execute `DELETE FROM articles_published WHERE id = $id`.
-   - Cascading foreign keys immediately remove live junction rows (`article_tags_published`).
-   - The document vanishes instantly from all public read queries.
-2. **Attribution and Draft State Update in Main Table**:
-   - The `user_id` of the actor performing the unpublish action is recorded directly in `articles.updated_by`:
-     ```sql
-     UPDATE articles
-     SET status = 'draft',
-         published_at = NULL,
-         published_by = NULL,
-         updated_at = $now,
-         updated_by = $user_id
-     WHERE id = $id;
-     ```
-   - Retains provenance: `articles.revision` and `last_published_revision` remain preserved so history is not lost.
-3. **Audit Trail & Activity Logging**:
-   - Record an append-only audit entry in the activity log (and emit `DocumentUnpublished` domain event):
-     ```
-     {
-       action: "unpublish",
-       document_type: "articles",
-       document_id: $id,
-       user_id: $user_id,
-       at: $now,
-       previous_revision: $revision
-     }
-     ```
-   - This resolves why `user_id` is needed during `unpublish`: although the row in `articles_published` is removed, the actor is permanently recorded in `articles.updated_by` and in the audit log.
+## Lifecycle Workflows
 
-### 4. Post-MVP Revision History
+```
+                     create()
+                        │
+                        ▼
+                 ┌──────────────┐
+                 │    DRAFT     │
+                 │(drafts table)│
+                 └──────┬───────┘
+                        │
+                        │ publish() [atomic transaction]
+                        ▼
+                 ┌──────────────┐
+                 │  PUBLISHED   │
+                 │ (wide table) │
+                 └──────┬───────┘
+                        │
+             edit()     │       unpublish()
+        ┌───────────────┴────────────────┐
+        ▼                                ▼
+┌────────────────┐               ┌──────────────┐
+│    MODIFIED    │               │ UNPUBLISHED  │
+│(in both tables)│               │(drafts table)│
+└───────┬────────┘               └──────────────┘
+        │
+        ├── publish() ───────▶ updates wide table & snapshots; sets has_pending_draft = false
+        └── discard_draft() ─▶ removes draft; sets has_pending_draft = false
+```
 
-In Post-MVP, full multi-version historical rollbacks will be introduced via a dedicated snapshot table:
-- `document_revisions (id UUID PK, document_type VARCHAR, document_id UUID, revision_number INT, snapshot_json JSONB, created_at TIMESTAMPTZ, created_by UUID)`.
-- Every publish action (and optional manual checkpoints) appends an immutable JSON snapshot.
-- Rolling back restores content from `document_revisions` back into the main `articles` draft table for editing and subsequent republishing.
-- This cleanly decouples high-performance runtime querying (2-table typed model) from cold historical archiving (JSON snapshot table).
+### 1. Draft Creation (`create`)
+- Validates syntax and field types (lenient draft validation).
+- Inserts into `document_drafts` with `status = 'draft'`. The wide table is not touched.
+
+### 2. Publication (`publish`)
+- Verifies optimistic concurrency token (`expected_version` matches `draft.version`).
+- Validates draft against strict schema constraints (required fields, regex patterns, number ranges, target existence).
+- Within a single database transaction:
+  1. Upserts the live row into the wide table `[type]` and sets `has_pending_draft = FALSE`.
+  2. Synchronizes relational junction rows in `[type]_[attr]`.
+  3. Appends an immutable revision row to `document_snapshots` (`reason = 'publish'`).
+  4. Deletes the draft row from `document_drafts`.
+- If an OCC serialization conflict (`40001`) occurs in DSQL, the transaction runner retries automatically with exponential backoff and randomized jitter.
+
+### 3. Editing a Published Document (`update`)
+- The wide table continues serving public visitors without disruption.
+- Mutates or creates a row in `document_drafts` with `status = 'modified'` and increments `version`.
+- Updates `[type].has_pending_draft = TRUE` in the wide table.
+
+### 4. Unpublishing (`unpublish`)
+- Within a single database transaction:
+  1. Preserves content in `document_drafts` with `status = 'unpublished'`.
+  2. Deletes the live row from the wide table `[type]` (foreign keys cascade to published junction rows).
+  3. Appends a revision row to `document_snapshots` (`reason = 'unpublish'`).
+
+### 5. Discarding Drafts (`discard_draft`)
+- Deletes the row from `document_drafts`.
+- Updates `[type].has_pending_draft = FALSE`.
+- The document remains cleanly published in the wide table.
+
+### 6. Restoring Snapshots (`restore_snapshot`)
+- Loads the historical snapshot from `document_snapshots`.
+- Writes the snapshot content into `document_drafts` with `status = 'modified'` for editorial review and subsequent republishing.
+
+---
+
+## CQRS Query Separation
+
+1. **Public Visitor Queries (`find_published`)**:
+   - Queries strictly the wide table `[type]`.
+   - Uses relational `FieldFilter`, B-tree indexing, and standard SQL sorting.
+   - Zero draft leakage; optimal throughput.
+2. **Admin Studio Listing (`list_admin_headers`)**:
+   - For `draft_and_publish: false` types: queries the wide table directly (`status = 'published'`).
+   - For `draft_and_publish: true` types: executes a union query between pure drafts (`document_drafts WHERE status = 'draft'`) and published documents from `[type]` (incorporating `has_pending_draft`), avoiding distributed cross-shard `FULL OUTER JOIN` bottlenecks.
+   - Returns lightweight `DocumentHeader` projections (`display_values` key-value map, `display_title`, `status`, audit timestamps).
+3. **Editing Fetch (`find_draft_by_id`)**:
+   - Loads the full working draft JSONB by ID into the editor form (falling back to the wide table if no active draft exists).
+   - Reconciles `draft.schema_version` against the current schema definition.
+4. **Revision History (`list_snapshots`)**:
+   - Scoped strictly to a single document ID (`WHERE document_type_id = $1 AND document_id = $2`).
 
 ---
 
 ## Considered Alternatives
 
-### Alternative 1: Single Table with Single JSON/JSONB Column (`data JSONB`)
-Store document attributes as an unstructured JSON/JSONB blob with a `status` column.
-- *Pros*: Extreme flexibility for dynamic schemas; no DDL alterations when schemas change.
-- *Cons*: Poor query performance for sorting and range filtering; complex, non-portable index syntax; no relational foreign key integrity; high CPU serialization overhead.
+### Alternative 1: Symmetric Dual Wide Tables (Original ADR-004)
+Maintain identical wide tables `[type]` and `[type]_published`.
+- *Rejected*: Requires dual DDL migrations for every schema update; rigid SQL constraints break incomplete draft saves; DSQL non-transactional DDL complexity.
 
-### Alternative 2: Single Table with Status Flag (`is_published`) and Draft Clones
-Keep draft and published records in the same table, either via multiple rows per document or inline draft columns (`title_draft`, `title_published`).
-- *Pros*: Single table per document type.
-- *Cons*: 
-  - Multiple rows per document break simple primary key lookups (`id` must be composite `(id, version)`), complicating foreign keys across junction tables.
-  - Inline column doubling (`_draft`, `_published`) bloats table schemas and makes relational joins cumbersome.
-  - Public queries must always remember to include `WHERE is_published = true`, creating serious risk of data leakage if a developer omits the filter.
+### Alternative 2: Pure JSONB Single Table (`documents`)
+Store all documents, published and drafts, in a single table with a `data JSONB` column.
+- *Rejected*: Degrades public read performance, prevents B-tree range indexing, eliminates native SQL foreign key constraints, and increases CPU deserialization overhead on public traffic.
 
-### Alternative 3: Single Table with SQL View for Published Records
-A single table with a status flag, accompanied by `CREATE VIEW articles_published AS SELECT * FROM articles WHERE status = 'published'`.
-- *Pros*: Encapsulates filtering logic behind a view.
-- *Cons*: Fails to solve the concurrent draft editing problem: any edit to a live document immediately mutates the live view, preventing authors from drafting changes privately while the published version remains untouched.
+### Alternative 3: Positional Array for Display Values (`Vec<Option<String>>`)
+Store display values as an anonymous array `["POS-042", "Nike Store", "2026-05-12"]`.
+- *Rejected in favor of `IndexMap<AttributeId, String>`*: Positional arrays require client-side index alignment, break if schema order evolves, and make direct attribute lookups in UI tables brittle.
 
 ---
 
 ## Consequences
 
 ### Positive
-- **Blazing Fast Public Reads**: Public visitor endpoints query `[type]_published` directly without joins or status checks.
-- **True Draft Isolation**: Editorial teams can edit, refine, and save drafts privately without affecting public traffic.
-- **Relational Power**: Native SQL sorting, filtering, B-tree indexes, and foreign keys operate natively on both PostgreSQL and AWS Aurora DSQL.
-- **Clean Unpublish Semantics**: Simple row deletion from the published table, accompanied by clear audit attribution in `articles.updated_by` and append-only activity logs.
-- **Forward Compatibility**: Clean bridge to post-MVP `document_revisions` snapshot table without rewriting the operational query architecture.
+- **Optimal Visitor Performance**: Public reads query pure typed relational columns with native B-tree indexes and zero draft filtering.
+- **Minimal DDL Overhead**: Only published tables require DDL. `document_drafts` and `document_snapshots` are static tables created once.
+- **True Draft Tolerance**: Authors can auto-save incomplete work without tripping SQL `NOT NULL` or foreign key constraints.
+- **Rich Semantic UI Display**: Self-describing `display_values` key-value map enables dynamic multi-column tables, status chips, and custom attribute styling.
+- **Resilient Distributed Querying**: `has_pending_draft` flag eliminates distributed cross-shard `FULL OUTER JOIN` operations in AWS Aurora DSQL.
+- **Zero OCC Contention on Revisions**: Append-only snapshots with UUIDv7 eliminate write conflicts in Aurora DSQL.
+- **Built-in Concurrency & Drift Defense**: `expected_version` guards against publish race conditions, and `schema_version` prevents stale draft corruption.
 
 ### Negative / Operational Constraints
-- **Table Duplication**: Each document type requires two SQL tables (`[type]` and `[type]_published`) plus associated junction tables.
-- **Atomic Publish Overhead**: The publish use-case must copy data from the draft table to the published table within a database transaction.
-- **Schema Migrations**: Schema alterations (adding/modifying fields) must apply DDL to both draft and published tables.
+- **Materialization Discipline**: Application services must consistently update `display_values` and `display_title` on every draft save and publish event.
+- **Publish Transaction Scope**: Publishing requires orchestrating operations across the wide table, junction tables, draft store, and snapshot store within a single database transaction.

@@ -41,7 +41,7 @@ Read in this order:
 | [ADR-001](./docs/adr/ADR-001-declarative-test-specifications.md) | Declarative behavior specifications as the source of truth for tests | Accepted |
 | [ADR-002](./docs/adr/ADR-002-hexagonal-architecture.md) | Hexagonal Architecture and DDD Crate Layout | Accepted |
 | [ADR-003](./docs/adr/ADR-003-aws-dsql-database.md) | AWS Aurora DSQL with PostgreSQL Portability | Accepted |
-| [ADR-004](./docs/adr/ADR-004-draft-and-publish-table-pattern.md) | Two-Table Draft-and-Publish Pattern with Typed Relational Columns | Proposed |
+| [ADR-004](./docs/adr/ADR-004-draft-and-publish-table-pattern.md) | Asymmetric Hybrid Draft-and-Publish Persistence Pattern | Proposed |
 
 ## 4. Mandatory Workflow Rules
 
