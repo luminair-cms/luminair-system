@@ -56,7 +56,7 @@ pub struct IntegerPrecision(u8);
 **Rules**:
 - Every domain identifier type (`DocumentTypeId`, `RelationId`, `AttributeId`, `UserId`, etc.) **must** use `nutype` — never use raw `String`, `Uuid`, or `i64` directly in domain signatures
 - Every constrained value object (`LocaleId`, `SlugValue`, `Email`, `Url`) **must** use `nutype`
-- `nutype` types live in `domain/src/value_objects/` — one file per type or grouped by concept
+- `nutype` identifier types live inside their owning subdomain (`domain/src/<subdomain>/`) and shared value objects live in `domain/src/common/` — one file per concept
 - The `::new(raw)` constructor returns `Result<Self, NutypeError>` — always propagate with `?`
 - Do **not** use `nutype` in `infrastructure` DTOs or API request/response types — those use plain types with `validator` annotations
 

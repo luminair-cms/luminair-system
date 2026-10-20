@@ -41,9 +41,9 @@ CREATE TABLE IF NOT EXISTS document_drafts (
     version                 INT NOT NULL DEFAULT 1,
     last_published_revision INT,
     created_at              TIMESTAMPTZ NOT NULL,
-    created_by              VARCHAR(255),
+    created_by              VARCHAR(255) NOT NULL,
     updated_at              TIMESTAMPTZ NOT NULL,
-    updated_by              VARCHAR(255),
+    updated_by              VARCHAR(255) NOT NULL,
     PRIMARY KEY (document_type_id, id)
 );
 
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS document_snapshots (
     content          JSONB NOT NULL,
     relations        JSONB NOT NULL,
     created_at       TIMESTAMPTZ NOT NULL,
-    created_by       VARCHAR(255),
+    created_by       VARCHAR(255) NOT NULL,
     reason           VARCHAR(32) NOT NULL CHECK (reason IN ('publish', 'checkpoint', 'unpublish'))
 );
 
@@ -108,11 +108,11 @@ CREATE TABLE IF NOT EXISTS articles (
     summary             TEXT,
     revision            INT NOT NULL DEFAULT 1,
     published_at        TIMESTAMPTZ NOT NULL,
-    published_by        VARCHAR(255),
+    published_by        VARCHAR(255) NOT NULL,
     created_at          TIMESTAMPTZ NOT NULL,
-    created_by          VARCHAR(255),
+    created_by          VARCHAR(255) NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL,
-    updated_by          VARCHAR(255)
+    updated_by          VARCHAR(255) NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles (published_at DESC);
@@ -209,6 +209,19 @@ LIMIT $2 OFFSET $3;
 ```
 * **DSQL Optimization**: Executes as two independent shard-friendly index scans merged in memory, scaling cleanly even with hundreds of thousands of documents.
 
+#### Path C: Phase 2 Batched Display Title Enrichment (`find_display_titles_by_ids`)
+When a `DocumentType`'s `display_fields` contains a singular relation (`HasOne` or `BelongsToOne`), `DocumentsService::list_admin_headers` collects the referenced target `DocumentInstanceId`s from the current page (~25 items) and executes one batched query per target type:
+```sql
+SELECT id, display_title
+FROM [target_type]
+WHERE id = ANY($1)
+UNION ALL
+SELECT id, display_title
+FROM document_drafts
+WHERE document_type_id = $2 AND status = 'draft' AND id = ANY($1);
+```
+This resolves all related entity titles for the page in a single extra round-trip per target type without any write-time denormalization or event cascade complexity.
+
 ---
 
 ### 4.3 Atomic Publication Transaction (`publish`)
@@ -217,7 +230,7 @@ Executed inside an explicit `sqlx::Transaction`:
 ```rust
 async fn publish_transaction(
     pool: &PgPool,
-    type_id: &'static DocumentTypeId,
+    type_id: &DocumentTypeId,
     instance: &DocumentInstance,
     revision: u32,
     actor: Option<&UserId>,
@@ -279,7 +292,7 @@ async fn publish_transaction(
 ```rust
 async fn unpublish_transaction(
     pool: &PgPool,
-    type_id: &'static DocumentTypeId,
+    type_id: &DocumentTypeId,
     id: DocumentInstanceId,
     actor: Option<&UserId>,
     now: DateTime<Utc>,
@@ -306,7 +319,7 @@ async fn unpublish_transaction(
 ```rust
 async fn discard_draft_transaction(
     pool: &PgPool,
-    type_id: &'static DocumentTypeId,
+    type_id: &DocumentTypeId,
     id: DocumentInstanceId,
 ) -> Result<(), RepositoryError> {
     let mut tx = pool.begin().await?;
@@ -328,6 +341,11 @@ async fn discard_draft_transaction(
     Ok(())
 }
 ```
+
+---
+
+### 4.6 Multi-Repository Atomic Approval (`AccessRequest::approve`)
+When an administrator approves an `AccessRequest`, both the newly generated `UserRoleAssignment` rows and the updated `AccessRequest` status (`Approved`) must be persisted atomically inside a single `sqlx::Transaction` wrapped in `with_occ_retry` so a partial failure cannot leave a user enrolled while their request remains `Pending`.
 
 ---
 

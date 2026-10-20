@@ -43,6 +43,12 @@ pub enum DomainError {
     #[error("invalid state transition: {reason}")]
     InvalidStateTransition { reason: String },
 
+    #[error("invalid display_fields for document type '{type_id}': {reason}")]
+    InvalidSchemaDisplayField {
+        type_id: DocumentTypeId,
+        reason: String,
+    },
+
     #[error("validation error: {0}")]
     Validation(String),
 

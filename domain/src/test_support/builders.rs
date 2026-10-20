@@ -19,6 +19,7 @@ pub struct DocumentTypeBuilder {
     singular: DocumentTypeId,
     plural: DocumentTypeId,
     draft_and_publish: bool,
+    display_fields: Vec<AttributeId>,
     fields: IndexSet<FieldDefinition>,
     relations: IndexSet<RelationDefinition>,
 }
@@ -34,6 +35,7 @@ impl DocumentTypeBuilder {
             singular: test_doc_type_id(id),
             plural: test_doc_type_id(&plural),
             draft_and_publish: true,
+            display_fields: Vec::new(),
             fields: IndexSet::new(),
             relations: IndexSet::new(),
         }
@@ -48,6 +50,7 @@ impl DocumentTypeBuilder {
             singular: test_doc_type_id(id),
             plural: test_doc_type_id(id),
             draft_and_publish: true,
+            display_fields: Vec::new(),
             fields: IndexSet::new(),
             relations: IndexSet::new(),
         }
@@ -73,6 +76,11 @@ impl DocumentTypeBuilder {
         self
     }
 
+    pub fn with_display_fields(mut self, fields: Vec<AttributeId>) -> Self {
+        self.display_fields = fields;
+        self
+    }
+
     pub fn with_field(mut self, field: impl Into<FieldDefinition>) -> Self {
         self.fields.insert(field.into());
         self
@@ -93,6 +101,7 @@ impl DocumentTypeBuilder {
                 singular_name: self.singular,
                 plural_name: self.plural,
                 description: None,
+                display_fields: self.display_fields,
             },
             options: DocumentTypeOptions {
                 draft_and_publish: self.draft_and_publish,

@@ -1,5 +1,5 @@
 use super::role::{Permission, Role};
-use super::user::UserId;
+use super::user::{ActorId, UserId};
 use crate::content::instance::DocumentInstance;
 
 pub struct AuthorizationService;
@@ -33,6 +33,31 @@ impl AuthorizationService {
 
         // 2. RBAC check
         roles.iter().any(|role| role.has_permission(action))
+    }
+
+    /// Evaluates access authorization for an `ActorId`:
+    /// - If `actor.is_system()`, returns `true`.
+    /// - If `actor.as_user()`, delegates to `Self::can(user_id, action, instance, roles)`.
+    /// - If `ActorId::Service(_)`, evaluates RBAC across `roles`.
+    pub fn can_actor(
+        actor: &ActorId,
+        action: &Permission,
+        instance: Option<&DocumentInstance>,
+        roles: &[Role],
+    ) -> bool {
+        if actor.is_system() {
+            return true;
+        }
+
+        if let Some(user_id) = actor.as_user() {
+            return Self::can(user_id, action, instance, roles);
+        }
+
+        if actor.as_service().is_some() {
+            return roles.iter().any(|role| role.has_permission(action));
+        }
+
+        false
     }
 }
 
@@ -167,6 +192,105 @@ mod tests {
         assert!(AuthorizationService::can(
             &other,
             &action,
+            Some(&instance),
+            &[admin_role()]
+        ));
+    }
+
+    #[test]
+    fn test_can_actor_system_allowed_unconditionally() {
+        let (_, _, type_id, instance) = make_test_fixture();
+        let action = Permission::PublishDocument(Some(type_id));
+        // System actor is allowed even with no roles and publishing action
+        assert!(AuthorizationService::can_actor(
+            &ActorId::System,
+            &action,
+            Some(&instance),
+            &[]
+        ));
+        assert!(AuthorizationService::can_actor(
+            &ActorId::System,
+            &action,
+            None,
+            &[]
+        ));
+    }
+
+    #[test]
+    fn test_can_actor_user_delegation() {
+        let (owner, other, type_id, instance) = make_test_fixture();
+        let owner_actor = ActorId::User(owner);
+        let other_actor = ActorId::User(other);
+
+        // Owner can read/update without role
+        assert!(AuthorizationService::can_actor(
+            &owner_actor,
+            &Permission::ReadDocument(Some(type_id.clone())),
+            Some(&instance),
+            &[]
+        ));
+        // Owner cannot publish without role
+        assert!(!AuthorizationService::can_actor(
+            &owner_actor,
+            &Permission::PublishDocument(Some(type_id.clone())),
+            Some(&instance),
+            &[]
+        ));
+
+        // Other cannot read without role
+        assert!(!AuthorizationService::can_actor(
+            &other_actor,
+            &Permission::ReadDocument(Some(type_id.clone())),
+            Some(&instance),
+            &[]
+        ));
+        // Other with role can read
+        let role = Role {
+            id: RoleId::new(Uuid::now_v7()),
+            name: "reader".into(),
+            description: None,
+            permissions: vec![Permission::ReadDocument(Some(type_id.clone()))],
+        };
+        assert!(AuthorizationService::can_actor(
+            &other_actor,
+            &Permission::ReadDocument(Some(type_id)),
+            Some(&instance),
+            &[role]
+        ));
+    }
+
+    #[test]
+    fn test_can_actor_service_evaluates_rbac() {
+        let (_, _, type_id, instance) = make_test_fixture();
+        let service = crate::test_support::test_service_id("export-worker");
+        let service_actor = ActorId::Service(service);
+
+        // Service has no owner privileges even if instance is present
+        assert!(!AuthorizationService::can_actor(
+            &service_actor,
+            &Permission::ReadDocument(Some(type_id.clone())),
+            Some(&instance),
+            &[]
+        ));
+
+        // Service with matching role is allowed
+        let role = Role {
+            id: RoleId::new(Uuid::now_v7()),
+            name: "worker".into(),
+            description: None,
+            permissions: vec![Permission::ReadDocument(Some(type_id.clone()))],
+        };
+        assert!(AuthorizationService::can_actor(
+            &service_actor,
+            &Permission::ReadDocument(Some(type_id.clone())),
+            Some(&instance),
+            &[role]
+        ));
+
+        // Service with admin role is allowed
+        assert!(AuthorizationService::can_actor(
+            &service_actor,
+            &Permission::PublishDocument(Some(type_id)),
             Some(&instance),
             &[admin_role()]
         ));

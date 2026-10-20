@@ -31,3 +31,16 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   5. **Concurrency & Drift Guards**: Added `expected_version` concurrency check and `schema_version` on drafts; infrastructure layer enforces DSQL OCC retry loops (`40001` serialization failure).
   6. **See**: [`ADR-004`](../docs/adr/ADR-004-draft-and-publish-table-pattern.md).
 
+---
+
+### 2026-10-20 — Actor Attribution (`ActorId`), Display Field Limits, & Read-Time Relational Enrichment
+
+- **Context**: Finalizing the merged `domain` and `application` refactoring plan before step-by-step execution via Gemini Flash subagents.
+- **Decisions**:
+  1. **Strongly-Typed Mandatory `ActorId`**: Replace `Option<UserId>` across `AuditTrail`, `PublicationState`, `DocumentInstance` lifecycle methods (`new`, `touch`, `publish`, `unpublish`, `edit_draft`), and `CallerContext` with a mandatory `ActorId` enum (`ActorId::User(UserId) | ActorId::Service(ServiceId) | ActorId::System`). Serializes to compact URN strings (`"user:<id>"`, `"service:<id>"`, `"system"`) for database `VARCHAR(255) NOT NULL` storage.
+  2. **`display_fields` Constraints**: Schema registration enforces **at most 3 display fields total** (`display_fields.len() <= 3`) and **at most 1 singular relational display field** (`HasOne` or `BelongsToOne`; multi-relations `HasMany` / `BelongsToMany` are rejected).
+  3. **Read-Time 2-Phase Batch Enrichment for Related Display Values**: Write-time `extract_display_identity` extracts only scalar and localized scalar values into `display_values: IndexMap<AttributeId, String>`. The single allowed relational display field is resolved at read time inside `DocumentsService::list_admin_headers` via at most 1 batched lookup (`find_display_titles_by_ids`) per page (~25 rows), avoiding write-time event propagation complexity.
+  4. **Domain Schema Purity**: `DocumentType`, `FieldDefinition`, and `RelationDefinition` remain free of Serde derives; JSON config loading and REST `GET` endpoints use dedicated DTOs in `infrastructure`.
+  5. **See**: [`docs/refactoring-domain-and-application.md`](../docs/refactoring-domain-and-application.md).
+
+

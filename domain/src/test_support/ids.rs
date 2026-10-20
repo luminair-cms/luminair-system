@@ -1,4 +1,4 @@
-use crate::auth::user::UserId;
+use crate::auth::user::{ActorId, ServiceId, UserId};
 use crate::schema::attributes::AttributeId;
 use crate::schema::documents::DocumentTypeId;
 use crate::system::locale::LocaleId;
@@ -6,6 +6,16 @@ use crate::system::locale::LocaleId;
 /// Shorthand to construct a valid `UserId` for tests.
 pub fn test_user_id(name: &str) -> UserId {
     UserId::try_new(name).expect("valid test user id")
+}
+
+/// Shorthand to construct a valid `ServiceId` for tests.
+pub fn test_service_id(name: &str) -> ServiceId {
+    ServiceId::try_new(name).expect("valid test service id")
+}
+
+/// Shorthand to construct a valid `ActorId::User` for tests.
+pub fn test_actor_user(name: &str) -> ActorId {
+    ActorId::User(test_user_id(name))
 }
 
 /// Shorthand to construct a valid kebab-case `DocumentTypeId` for tests.

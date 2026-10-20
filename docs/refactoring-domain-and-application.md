@@ -1,54 +1,128 @@
-# Refactoring Plan: Domain and Application Crates (ADR-004 Asymmetric Persistence)
+# Refactoring Plan: Domain and Application Crates (ADR-004 & Domain Review Merge)
 
 - **Target Crates**: `domain`, `application`
-- **Governing Architecture**: [`ADR-004`](./adr/ADR-004-draft-and-publish-table-pattern.md) (Asymmetric Hybrid Draft-and-Publish Persistence Pattern)
-- **Status**: Ready for implementation (Phase-by-Phase Execution Guide)
-- **Date**: 2026-10-09
+- **Governing Architecture**: [`ADR-004`](./adr/ADR-004-draft-and-publish-table-pattern.md) (Asymmetric Hybrid Draft-and-Publish Persistence Pattern) & Findings from Domain/Application Review
+- **Execution Mode**: Orchestrated step-by-step via **Gemini Flash** subagents (`Model: "flash"`), reviewed and verified by the orchestrator after each step.
+- **Status**: Approved — Ready for Step-by-Step Execution
+- **Date**: 2026-10-20
 
 ---
 
 ## Overview
 
-This document specifies the exact refactoring plan for transitioning the existing in-memory domain model and application orchestration services to support the Asymmetric Hybrid Persistence Pattern.
+This document specifies the complete, merged refactoring plan for transitioning the `domain` and `application` crates to support the **Asymmetric Hybrid Persistence Pattern (ADR-004)** while resolving all remaining architectural findings from the **Domain & Application Crate Review**.
 
-### Objectives
-1. Introduce composite identity via `display_fields: Vec<AttributeId>` and materialized `IndexMap<AttributeId, String>`.
-2. Expand `PublicationState` to support `Modified` (published with pending draft changes) and `Unpublished` states.
-3. Clean up aggregate internals: eliminate leaked infrastructure surrogate key `db_row_id` and encapsulate field mutations.
-4. Split all-or-nothing validation into **lenient draft validation** and **strict publication validation**.
-5. Decouple repository ports under CQRS principles (`find_published` vs. `list_admin_headers` vs. `find_draft_by_id`).
-6. Add commands and use cases for `DiscardDraft`, `RestoreSnapshot`, and `ListAdminHeaders`.
+### Summary of Already Completed Review Fixes (Baseline)
+- **F1 (Owner Permissions)**: Document owners may read, update, and delete their own documents, while publishing/unpublishing strictly requires `Permission::PublishDocument`.
+- **F2 (Unpublish Attribution)**: `DocumentInstance::unpublish(by, now)` records the actor and updates `audit.updated_by` and `updated_at`.
+- **F3 (Self-Review Prevention)**: `AccessRequest::approve` and `reject` forbid `reviewer_id == requester_id`.
+- **Enrollment Invariant**: `AccessRequestPolicy` rejects requests from users who already hold any active role (`DomainError::UserAlreadyEnrolled`).
+- **Pre-compiled Regex (`PERF`)**: `RegexPattern` pre-compiles and caches `Arc<Regex>` on construction.
+- **Decimal Precision & Scale (`NUM`)**: `PrimitiveValue::matches_primitive_type` validates total significant digits (`precision`) and fractional digits (`scale`).
+
+### Core Architectural Decisions in This Plan
+1. **Strongly-Typed Mandatory `ActorId` Attribution**:
+   - Every content lifecycle operation (`new`, `touch`, `publish`, `unpublish`, `edit_draft`) and every audit field (`created_by`, `updated_by`, `published_by`, `unpublished_by`) uses a mandatory **`ActorId`** enum (`ActorId::User(UserId) | ActorId::Service(ServiceId) | ActorId::System`) instead of `Option<UserId>`.
+   - Serializes to/from compact URN strings (`"user:<id>"`, `"service:<id>"`, `"system"`) for database `VARCHAR(255) NOT NULL` storage.
+2. **Schema Metadata (`display_fields`) with Bounded Complexity**:
+   - `DocumentTypeInfo` defines `display_fields: Vec<AttributeId>`.
+   - Enforces two strict limits at schema registration:
+     1. **Maximum 3 display fields total** (`display_fields.len() <= 3`).
+     2. **Maximum 1 singular relational display field** (`HasOne` or `BelongsToOne`; multi-relations `HasMany` / `BelongsToMany` are rejected).
+   - Domain schema structs (`DocumentType`, `FieldDefinition`, `RelationDefinition`) remain free of Serde derives; JSON config loading and REST `GET` endpoints use dedicated DTOs in `infrastructure`.
+3. **Composite Identity & Read-Time 2-Phase Relational Enrichment**:
+   - Write-time `extract_display_identity` extracts scalar and localized scalar values into `display_values: IndexMap<AttributeId, String>` and `display_title: String`.
+   - Read-time 2-phase batch enrichment in `DocumentsService::list_admin_headers` resolves the (at most 1) singular relational display field in a single batched lookup (`find_display_titles_by_ids`) for the current page (~25 rows).
+4. **Aggregate Root Cleanup & State Machine Expansion**:
+   - Remove dead leaked database field `db_row_id: Option<DocumentInstanceId>` from `DocumentInstance`.
+   - Encapsulate `content.fields` behind `get_field`, `set_field`, `remove_field`, and `fields()` methods.
+   - Expand `PublicationState` to `Draft`, `Published`, `Modified`, and `Unpublished`, adding `edit_draft` and `discard_draft`.
+5. **Two-Tier Content Validation**:
+   - Split validation into **lenient draft validation** (`validate_draft_content`) and **strict publication validation** (`validate_publish_content`).
+6. **CQRS Repository Ports & Lifetime Ergonomics**:
+   - Relax `type_id: &'static DocumentTypeId` to `type_id: &DocumentTypeId` across `DocumentInstanceRepository`.
+   - Replace generic `find_by_type` with decoupled CQRS methods (`find_published`, `list_admin_headers`, `find_display_titles_by_ids`, `find_draft_by_id`, `find_published_by_id`, `save_draft`, `publish`, `unpublish`, `discard_draft`) and `DocumentSnapshotRepository`.
 
 ---
 
 ## Phase 1: Domain Crate Refactoring (`domain`)
 
-### Step 1.1: Schema Metadata Enhancement
-* **File**: `domain/src/schema/documents.rs`
+### Step 1.0: Strongly-Typed `ActorId` Attribution
+* **Files**: `domain/src/auth/user.rs`, `domain/src/auth/service.rs`, `domain/src/auth/mod.rs`
 * **Changes**:
-  1. Add `display_fields: Vec<AttributeId>` to `DocumentTypeInfo`.
-  2. Implement validation in `DocumentTypeRegistry`: verify that every `AttributeId` in `display_fields` is declared in `doc_type.fields`.
-  3. Provide fallback: if `display_fields` is empty, fallback automatically to the first declared `Text` field, or `"id"`.
-* **Verification**: Add unit test `test_display_fields_validated_against_declared_attributes`.
+  1. Define `ServiceId` using `#[nutype]` (same validation rules as `UserId`: `sanitize(trim)`, `validate(not_empty, len_char_max = 250)`).
+  2. Define `ActorId`:
+     ```rust
+     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+     #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+     pub enum ActorId {
+         User(UserId),
+         Service(ServiceId),
+         System,
+     }
+     ```
+  3. Implement `Display` and `ActorId::to_urn(&self) -> String` / `ActorId::from_urn(s: &str) -> Result<Self, DomainError>`:
+     - `ActorId::User(u)` $\leftrightarrow$ `"user:<u_str>"`
+     - `ActorId::Service(s)` $\leftrightarrow$ `"service:<s_str>"`
+     - `ActorId::System` $\leftrightarrow$ `"system"`
+  4. Implement `From<UserId>` and `From<ServiceId>` for `ActorId`.
+  5. Update `AuthorizationService::can` to accept `actor: &ActorId`:
+     - If `actor` is `ActorId::System`, allow all actions.
+     - Owner rule (`inst.is_owned_by(actor)`) applies when `self.audit.created_by == *actor` for `ReadDocument`, `UpdateDocument`, and `DeleteDocument`.
+     - Otherwise evaluates RBAC across `roles`.
+* **Verification**:
+  - Unit tests for `ActorId` URN roundtrip (`user:...`, `service:...`, `system`), ownership matching, and `AuthorizationService::can` with `User`, `Service`, and `System` actors.
 
-### Step 1.2: Display Extraction Domain Service
+### Step 1.1: Schema Metadata (`display_fields` & Validation Limits)
+* **Files**: `domain/src/schema/documents.rs`, `domain/src/schema/registry.rs`, `domain/src/errors.rs`
+* **Changes**:
+  1. **Add `display_fields` to `DocumentTypeInfo`**:
+     - Add `pub display_fields: Vec<AttributeId>` to `DocumentTypeInfo` (no Serde derives on `DocumentType` / `DocumentTypeInfo`).
+  2. **Validate `display_fields` at Schema Registration**:
+     - Add `DomainError::InvalidSchemaDisplayField { type_id: DocumentTypeId, reason: String }`.
+     - In `DocumentType::validate_display_fields(&self) -> Result<(), DomainError>` (called by `SchemaRegistry::register`):
+       - **Rule 1 (Max 3 Total)**: `self.info.display_fields.len() <= 3` (reject if $> 3$).
+       - **Rule 2 (No Duplicates)**: Every `AttributeId` in `display_fields` must be unique.
+       - **Rule 3 (Allowed Field/Relation Types)**: Each `attr_id` must exist either in `self.fields` (excluding `FieldType::Json`) **or** in `self.relations` with `RelationType::HasOne` or `RelationType::BelongsToOne` (`HasMany` and `BelongsToMany` are rejected).
+       - **Rule 4 (Max 1 Relational Display Field)**: At most **1** attribute in `display_fields` may reference a relation in `self.relations`.
+  3. **Fallback Helper (`effective_display_fields`)**:
+     - `DocumentType::effective_display_fields(&self) -> Vec<AttributeId>`: if `info.display_fields` is non-empty, returns it; otherwise returns the first declared `Text`, `LocalizedText`, or `Uid` field in `self.fields` (if any).
+* **Verification**:
+  - Unit tests verifying:
+    - Valid `display_fields` with up to 3 fields (including 1 `HasOne` or `BelongsToOne`).
+    - Rejection of $> 3$ display fields.
+    - Rejection of $> 1$ relational display field.
+    - Rejection of `HasMany` / `BelongsToMany` or `FieldType::Json` or undeclared attributes in `display_fields`.
+
+### Step 1.2: Display Extraction Domain Service (Write-Time Scalars)
 * **File**: `domain/src/content/values.rs`
 * **Changes**:
-  1. Add `extract_display_identity(doc_type, fields, locale) -> (IndexMap<AttributeId, String>, String)`:
-     - Iterates through `doc_type.info.display_fields`.
-     - Extracts string representations of scalar values.
-     - Preserves insertion order using `IndexMap<AttributeId, String>`.
-     - Formats joined fallback `display_title` (e.g. `"POS-042 — Nike Store — 2026-05-12"`).
-* **Verification**: Add unit test testing single-field, composite-field, null-field, and localized-field extractions.
+  1. Add `extract_display_identity(doc_type: &DocumentType, instance_id: DocumentInstanceId, fields: &HashMap<AttributeId, ContentValue>, default_locale: &LocaleId) -> (IndexMap<AttributeId, String>, String)`:
+     - Iterates through `doc_type.effective_display_fields()`.
+     - For each attribute declared in `doc_type.fields`:
+       - Extracts a formatted string representation of the scalar or localized value (using `default_locale` for `LocalizedText`, skipping `Null`).
+       - Inserts `(attr_id, formatted_string)` into `IndexMap<AttributeId, String>`, preserving declaration order.
+     - Attributes referring to a singular relation (`HasOne` / `BelongsToOne`) are skipped at write time (they are enriched at read time in `list_admin_headers`).
+     - Joins all non-empty values in declaration order with `" — "` (falling back to `instance_id.to_string()` if empty) and truncates to 255 characters to produce `display_title: String`.
+* **Verification**:
+  - Unit tests covering single-field, composite 3-field (`terminal-id` + `brand-name` + `removing-date`), null-field omission, localized-field extraction, and empty-fallback to `instance_id`.
 
 ### Step 1.3: Aggregate Root Cleanup & State Machine Expansion
 * **File**: `domain/src/content/instance.rs`
 * **Changes**:
-  1. **Remove `db_row_id: Option<DocumentInstanceId>`**: Eliminate this leaked database surrogate ID entirely from the domain aggregate.
-  2. **Encapsulate Field Mutations**: Make `content.fields` private. Add aggregate methods:
-     - `set_field(&mut self, attr_id: AttributeId, value: ContentValue)`
-     - `get_field(&self, attr_id: &AttributeId) -> Option<&ContentValue>`
-  3. **Expand `PublicationState`**:
+  1. **Remove `db_row_id` (Review Finding 3)**:
+     - Delete `pub db_row_id: Option<DocumentInstanceId>` from `DocumentInstance`.
+  2. **Mandatory `ActorId` Attribution**:
+     - Update `AuditTrail` (`created_by: ActorId`, `updated_by: ActorId`) and `PublicationState` (`published_by: ActorId`, `unpublished_by: ActorId`) to use `ActorId` instead of `Option<UserId>`.
+  3. **Encapsulate Field Mutations**:
+     - Make `DocumentContent.fields` private (`fields: HashMap<AttributeId, ContentValue>`).
+     - Add methods on `DocumentInstance` (and `DocumentContent` getters):
+       - `fields(&self) -> &HashMap<AttributeId, ContentValue>`
+       - `get_field(&self, attr_id: &AttributeId) -> Option<&ContentValue>`
+       - `set_field(&mut self, attr_id: AttributeId, value: ContentValue)`
+       - `remove_field(&mut self, attr_id: &AttributeId) -> Option<ContentValue>`
+       - `replace_fields(&mut self, fields: HashMap<AttributeId, ContentValue>)`
+  4. **Expand `PublicationState`**:
      ```rust
      #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
      pub enum PublicationState {
@@ -58,30 +132,31 @@ This document specifies the exact refactoring plan for transitioning the existin
          Published {
              revision: u32,
              published_at: DateTime<Utc>,
-             published_by: Option<UserId>,
+             published_by: ActorId,
          },
          Modified {
              live_revision: u32,
              published_at: DateTime<Utc>,
-             published_by: Option<UserId>,
+             published_by: ActorId,
              draft_version: u32,
          },
          Unpublished {
              last_published_revision: u32,
              unpublished_at: DateTime<Utc>,
-             unpublished_by: Option<UserId>,
+             unpublished_by: ActorId,
          },
      }
      ```
-  4. **State Machine Methods**:
-     - `publish(by, now) -> Result<u32, DomainError>`: transitions `Draft` or `Modified` to `Published`, increments revision, updates audit.
-     - `unpublish(by, now) -> Result<(), DomainError>`: transitions `Published` or `Modified` to `Unpublished`, preserves revision.
-     - `edit_draft(by, now)`: transitions `Published` to `Modified`, increments draft version and touches audit.
-     - `discard_draft() -> Result<(), DomainError>`: transitions `Modified` back to clean `Published`. Rejects calls on pure `Draft`.
-* **Verification**: Update case table tests in `domain/tests/lc_document_lifecycle.rs` to cover `LC-09` through `LC-12`.
+  5. **State Machine Methods**:
+     - `publish(&mut self, by: ActorId, now: DateTime<Utc>) -> Result<u32, DomainError>`: transitions `Draft`, `Modified`, `Unpublished`, or `Published` to `Published`, increments revision (`last + 1`), and calls `self.touch(by, now)`.
+     - `unpublish(&mut self, by: ActorId, now: DateTime<Utc>) -> Result<(), DomainError>`: transitions `Published` or `Modified` to `Unpublished`, preserving `last_published_revision` and recording `unpublished_at` / `unpublished_by`. Rejects `Draft` and `Unpublished` with `DomainError::InvalidStateTransition`.
+     - `edit_draft(&mut self, by: ActorId, now: DateTime<Utc>)`: transitions `Published { revision, published_at, published_by }` to `Modified { live_revision: revision, published_at, published_by, draft_version: self.audit.version + 1 }` and calls `self.touch(by, now)`. If already `Draft`, `Modified`, or `Unpublished`, increments draft version and touches audit trail.
+     - `discard_draft(&mut self) -> Result<(), DomainError>`: transitions `Modified { live_revision, published_at, published_by, .. }` back to `Published { revision: live_revision, published_at, published_by }`. Rejects calls on `Draft`, `Published`, or `Unpublished` with `DomainError::InvalidStateTransition`.
+* **Verification**:
+  - Update inline unit tests and case table tests in `domain/tests/lc_document_lifecycle.rs` to cover `LC-01` through `LC-12`.
 
 ### Step 1.4: Lightweight Projections (`DocumentHeader` & `DocumentSnapshot`)
-* **File**: `domain/src/content/instance.rs` or `domain/src/content/header.rs`
+* **File**: `domain/src/content/header.rs` (re-exported in `domain/src/content/mod.rs`)
 * **Changes**:
   1. Define `DocumentStatus`:
      ```rust
@@ -102,97 +177,108 @@ This document specifies the exact refactoring plan for transitioning the existin
          pub document_type_id: DocumentTypeId,
          pub display_values: IndexMap<AttributeId, String>,
          pub display_title: String,
+         /// Target ID for the (at most 1) singular relational display field, used for Phase 2 read-time enrichment
+         pub relational_display_target: Option<(AttributeId, DocumentInstanceId)>,
          pub status: DocumentStatus,
          pub slug: Option<String>,
          pub revision: Option<u32>,
          pub draft_version: Option<u32>,
          pub created_at: DateTime<Utc>,
-         pub created_by: Option<UserId>,
+         pub created_by: ActorId,
          pub updated_at: DateTime<Utc>,
-         pub updated_by: Option<UserId>,
+         pub updated_by: ActorId,
          pub published_at: Option<DateTime<Utc>>,
-         pub published_by: Option<UserId>,
+         pub published_by: Option<ActorId>,
      }
      ```
-  3. Define `DocumentSnapshot` and `SnapshotHeader`.
+  3. Define `SnapshotId` (UUIDv7 `nutype`), `SnapshotReason` (`Publish`, `Checkpoint`, `Unpublish`), `DocumentSnapshot`, and `SnapshotHeader` (with `created_by: ActorId`).
 
 ### Step 1.5: Two-Tier Content Validation
 * **File**: `domain/src/content/validator.rs`
 * **Changes**:
   1. `validate_draft_content(doc_type, content, config) -> Result<(), Vec<DomainError>>`:
-     - Checks scalar type compatibility (e.g. integer does not contain string).
-     - Rejects undeclared attributes.
-     - Skips missing required fields and allows unresolved draft relations.
+     - Checks scalar type compatibility (`matches_field_type`) and locale validity for non-null fields.
+     - Rejects undeclared attributes (`DomainError::UnknownAttribute`).
+     - Skips `required: true` checks for missing/null fields so incomplete work-in-progress drafts can be saved.
   2. `validate_publish_content(doc_type, content, config) -> Result<(), Vec<DomainError>>`:
-     - Runs existing strict validation (enforces `required`, length, bounds, regex).
-     - Validates relation targets.
+     - Enforces all strict schema rules (`required: true`, `FieldConstraint` bounds/lengths/regex, and locale checks).
+     - Keep `validate_content` as an alias or delegate to `validate_publish_content` for backward compatibility with existing tests.
 
-### Step 1.6: Repository Ports Refactoring
+### Step 1.6: Repository Ports Refactoring & Lifetime Ergonomics
 * **File**: `domain/src/content/ports.rs`
 * **Changes**:
-  1. Replace generic `find_by_type` with decoupled methods:
-     - `find_published`: queries wide table with `FieldFilter` and pagination.
-     - `list_admin_headers`: queries unified drafts and wide table with `DocumentStatusFilter`.
-     - `find_draft_by_id`: loads working draft JSONB by ID.
-     - `find_published_by_id`: loads published document by ID.
-     - `save_draft`, `publish`, `unpublish`, `discard_draft`.
-  2. Introduce `DocumentSnapshotRepository`:
-     - `list_snapshots(type_id, doc_id) -> Future<Vec<SnapshotHeader>>`
-     - `get_snapshot(snapshot_id) -> Future<Option<DocumentSnapshot>>`
-
-### Step 1.7: Test Support & Fake Repository Updates
-* **File**: `domain/src/test_support/mod.rs` (or `fake.rs`)
-* **Changes**:
-  1. Update `FakeDocumentInstanceRepository` to implement the new port methods.
-  2. Maintain separate in-memory storage for drafts (`HashMap<(DocumentTypeId, DocumentInstanceId), DocumentInstance>`) and published documents (`HashMap<(DocumentTypeId, DocumentInstanceId), DocumentInstance>`).
-  3. Verify `domain/tests/spec_traceability.rs` passes.
+  1. **Relax `'static` Lifetime on `DocumentTypeId` (Review Finding 1)**:
+     - Change `type_id: &'static DocumentTypeId` to `type_id: &DocumentTypeId` across all methods on `DocumentInstanceRepository`.
+  2. **Expand `DocumentInstanceRepository` with CQRS & Lifecycle Methods**:
+     - `find_published(type_id: &DocumentTypeId, pagination: Pagination, filters: Vec<FieldFilter>) -> Future<Result<Page<DocumentInstance>, DomainError>>`
+     - `find_published_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
+     - `find_draft_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
+     - `list_admin_headers(type_id: &DocumentTypeId, pagination: Pagination, status_filter: Option<DocumentStatus>) -> Future<Result<Page<DocumentHeader>, DomainError>>`
+     - `find_display_titles_by_ids(type_id: &DocumentTypeId, ids: &[DocumentInstanceId]) -> Future<Result<HashMap<DocumentInstanceId, String>, DomainError>>`
+     - `save_draft(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`
+     - `publish(instance: &DocumentInstance, revision: u32, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`
+     - `unpublish(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`
+     - `discard_draft(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
+     - `delete(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<(), DomainError>>`
+     - `count(type_id: &DocumentTypeId, filters: Vec<FieldFilter>) -> Future<Result<u64, DomainError>>`
+     - `fetch_relations(...)` and `exists_for_type(type_id: &DocumentTypeId)`
+  3. **Introduce `DocumentSnapshotRepository`**:
+     - `save_snapshot(snapshot: &DocumentSnapshot) -> Future<Result<(), DomainError>>`
+     - `list_snapshots(type_id: &DocumentTypeId, doc_id: DocumentInstanceId) -> Future<Result<Vec<SnapshotHeader>, DomainError>>`
+     - `get_snapshot(type_id: &DocumentTypeId, doc_id: DocumentInstanceId, revision: u32) -> Future<Result<Option<DocumentSnapshot>, DomainError>>`
 
 ---
 
-## Phase 2: Application Layer Refactoring (`application`)
+## Phase 2: Application Crate Refactoring (`application`)
 
-### Step 2.1: Use Case Commands Expansion
-* **File**: `application/src/commands/documents.rs`
+### Step 2.1: CallerContext & Use Case Commands Expansion
+* **Files**: `application/src/context.rs`, `application/src/commands/documents.rs`, `application/src/errors.rs`
 * **Changes**:
-  1. Add `FindPublishedCommand { document_type, pagination, filters, populate }`.
-  2. Add `ListAdminHeadersCommand { document_type, pagination, status_filter }`.
-  3. Add `DiscardDraftCommand { document_type, document_instance_id }`.
-  4. Add `RestoreSnapshotCommand { document_type, document_instance_id, revision }`.
-  5. Add `ListSnapshotsCommand { document_type, document_instance_id }`.
-  6. Update `PublishDocumentCommand` to include `expected_version: Option<u32>` for OCC safety.
+  1. Update `CallerContext` to hold `pub actor: ActorId` and `pub roles: Vec<Role>`:
+     - `CallerContext::new(actor: impl Into<ActorId>, roles: Vec<Role>)`
+     - `CallerContext::service(service_id: ServiceId, roles: Vec<Role>)`
+     - `CallerContext::system()` uses `ActorId::System` (eliminating the hardcoded `"system-internal"` fake `UserId`).
+  2. Add commands in `application/src/commands/documents.rs`:
+     - `DiscardDraftCommand`, `RestoreSnapshotCommand`, `ListAdminHeadersCommand`, `ListSnapshotsCommand`.
+     - Add optional `expected_version: Option<u32>` to `PublishDocumentCommand`.
 
 ### Step 2.2: Application Service Orchestration (`DocumentsService`)
 * **File**: `application/src/services/documents.rs`
 * **Changes**:
   1. **`create` use case**:
-     - If `draft_and_publish: true`: runs `validate_draft_content`, calls `repo.save_draft(instance)`.
-     - If `draft_and_publish: false`: runs `validate_publish_content`, calls `repo.publish(instance)`.
+     - Computes `(display_values, display_title)` via `extract_display_identity`.
+     - If `draft_and_publish: true`: runs `validate_draft_content`, calls `repo.save_draft(&instance, &display_values, &display_title)`.
+     - If `draft_and_publish: false`: runs `validate_publish_content`, transitions to `Published`, calls `repo.publish(&instance, 1, &display_values, &display_title)`.
   2. **`update` use case**:
-     - If `draft_and_publish: true`: loads working draft via `find_draft_by_id`, mutates fields, runs `validate_draft_content`, calls `repo.save_draft(instance)` (state becomes `Modified` if previously published).
-     - If `draft_and_publish: false`: updates directly in wide table via `repo.publish(instance)`.
+     - Loads working copy, calls `instance.edit_draft(caller.actor.clone(), Utc::now())`, updates fields/relations, recomputes `(display_values, display_title)`.
+     - If `draft_and_publish: true`: runs `validate_draft_content`, saves via `repo.save_draft(...)`.
+     - If `draft_and_publish: false`: runs `validate_publish_content`, increments revision, saves via `repo.publish(...)`.
   3. **`publish` use case**:
-     - Validates caller possesses `Permission::PublishDocument`.
-     - Loads draft, verifies `expected_version`.
-     - Executes strict validation via `validate_publish_content`.
-     - Invokes `repo.publish(...)`.
-     - Emits `DocumentPublished` event.
+     - Verifies `Permission::PublishDocument`.
+     - Verifies `expected_version` (if provided) matches `instance.audit.version`.
+     - Runs strict `validate_publish_content`.
+     - Transitions via `instance.publish(caller.actor.clone(), now)`, persists via `repo.publish(...)`, and saves an immutable `DocumentSnapshot` (`SnapshotReason::Publish`).
   4. **`unpublish` use case**:
-     - Validates caller possesses `Permission::PublishDocument`.
-     - Invokes `repo.unpublish(...)`.
-     - Emits `DocumentUnpublished` event.
-  5. **`discard_draft` use case**:
-     - Validates caller possesses `Permission::UpdateDocument` or ownership.
-     - Invokes `repo.discard_draft(...)`.
-  6. **`restore_snapshot` use case**:
-     - Loads historical snapshot from snapshot repo.
-     - Copies snapshot fields into a working draft.
-     - Saves draft via `repo.save_draft(...)`.
-  7. **`list_admin_headers` use case**:
-     - Validates caller possesses `Permission::ReadDocument`.
-     - Invokes `repo.list_admin_headers(...)`.
+     - Verifies `Permission::PublishDocument`.
+     - Transitions via `instance.unpublish(caller.actor.clone(), now)`, persists via `repo.unpublish(...)`, and saves an immutable `DocumentSnapshot` (`SnapshotReason::Unpublish`).
+  5. **`discard_draft` use case (`DS-13`)**:
+     - Verifies `Permission::UpdateDocument` or document ownership.
+     - Loads draft, calls `instance.discard_draft()`, and invokes `repo.discard_draft(type_id, id)` to restore clean `Published` state.
+  6. **`restore_snapshot` use case (`DS-14`)**:
+     - Verifies `Permission::UpdateDocument` or ownership.
+     - Loads historical snapshot by `(type_id, doc_id, revision)` from `snapshot_repo`.
+     - Copies snapshot `fields` and `relations` into the instance, calls `instance.edit_draft(caller.actor.clone(), now)`, recomputes `(display_values, display_title)`, and saves via `repo.save_draft(...)`.
+  7. **`list_admin_headers` use case with 2-Phase Relational Enrichment (`DS-15`)**:
+     - Verifies `Permission::ReadDocument`.
+     - **Phase 1**: Calls `repo.list_admin_headers(type_id, pagination, status_filter)` to get `Page<DocumentHeader>`.
+     - **Phase 2 (At Most 1 Batched Query)**:
+       - If `doc_type.effective_display_fields()` includes a singular relation (`rel_attr`), collects all `target_id`s from `header.relational_display_target` across the page.
+       - Calls `repo.find_display_titles_by_ids(&rel_def.target, &target_ids)` once.
+       - Rebuilds `header.display_values` in the exact declaration order of `effective_display_fields()` (inserting the resolved related title at `rel_attr`) and updates `header.display_title`.
 
-### Step 2.3: Application Unit & Spec Integration Tests
-* **File**: `application/tests/ds_documents_service.rs`
+### Step 2.3: Fake Repositories & Declarative Spec Tests
+* **Files**: `application/src/test_support.rs`, `application/tests/ds_documents_service.rs`, `domain/tests/lc_document_lifecycle.rs`
 * **Changes**:
-  1. Add tests for `DS-13` (Discard Draft), `DS-14` (Restore Snapshot), and `DS-15` (List Admin Headers).
-  2. Update existing tests `DS-06` through `DS-09` to verify draft store and published table interactions.
+  1. Update `FakeDocumentInstanceRepository` and add `FakeDocumentSnapshotRepository` in `application/src/test_support.rs`.
+  2. Implement spec tests `LC-09` through `LC-12` in `domain/tests/lc_document_lifecycle.rs` and `DS-13` through `DS-15` (including 2-phase relational display enrichment) in `application/tests/ds_documents_service.rs`.
+  3. Run `cargo clippy --workspace --tests -- -D warnings` and `cargo test --workspace` to verify 100% green build and spec traceability.

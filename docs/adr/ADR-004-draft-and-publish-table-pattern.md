@@ -97,28 +97,32 @@ Adopt the **Asymmetric Hybrid Persistence Pattern**:
   - `version INT`: Incremented on every draft touch.
 
 ### 3. Composite Identity (`display_fields` & Key-Value `display_values`)
-In `DocumentTypeInfo`, schemas define an ordered list of attributes representing the document's identity:
+In `DocumentTypeInfo`, schemas define an ordered list of attributes representing the document's identity, subject to two strict schema-registration invariants:
+- **Maximum 3 display fields total** (`display_fields.len() <= 3`).
+- **Maximum 1 singular relational display field** (at most one attribute in `display_fields` may reference a `HasOne` or `BelongsToOne` relation; `HasMany` and `BelongsToMany` are forbidden).
+
 ```json
 {
   "id": "pos-terminal",
   "info": {
     "title": "POS Terminal",
-    "display_fields": ["terminal_id", "brand_name", "removing_date"]
+    "display_fields": ["terminal-id", "brand", "removing-date"]
   }
 }
 ```
-At write time, the domain engine extracts these values into:
+At write time, the domain engine extracts **scalar** and **localized scalar** values into:
 - `display_values JSONB`: Self-describing object mapping `AttributeId -> String`:
   ```json
   {
-    "terminal_id": "POS-042",
-    "brand_name": "Nike Store",
-    "removing_date": "2026-05-12"
+    "terminal-id": "POS-042",
+    "removing-date": "2026-05-12"
   }
   ```
-  This allows frontend data tables to bind directly to `display_values["terminal_id"]` with custom typography (e.g. monospace font for IDs, badge for dates).
-  If a field is a relation (e.g. `brand` pointing to `Brand`), its target `display_title` is resolved and saved into `display_values["brand"]`.
-- `display_title VARCHAR(255)`: Concatenated fallback (`"POS-042 — Nike Store — 2026-05-12"`) indexed for alphabetical sorting (`ORDER BY display_title ASC`) and text search.
+  This allows frontend data tables to bind directly to `display_values["terminal-id"]` with custom typography (e.g. monospace font for IDs, badge for dates).
+- `display_title VARCHAR(255)`: Concatenated fallback (`"POS-042 — 2026-05-12"`) indexed for alphabetical sorting (`ORDER BY display_title ASC`) and text search.
+- **Singular Relations (`HasOne` / `BelongsToOne`) in `display_fields`**: Because `DocumentHeader` and composite display titles are used exclusively by the paginated Admin UI (~25 items per page), related entity titles are **not** materialized at write time (which would create stale titles whenever a related entity is renamed and require complex event-driven propagation). Instead, the single allowed relational display field is resolved via **Read-Time 2-Phase Batch Enrichment** inside `list_admin_headers`:
+  1. Phase 1 loads the page of `DocumentHeader` rows (along with the singular relation's target ID if referenced in `display_fields`).
+  2. Phase 2 executes **at most 1 batched lookup** (`WHERE id = ANY($1)`) against the target document type to fetch target `display_title`s and merges them into `display_values[rel_attr]` and `display_title` in memory.
 
 ### 4. Global Snapshot Store (`document_snapshots`)
 - Single static table recording immutable revision history across all content types.
@@ -202,6 +206,7 @@ At write time, the domain engine extracts these values into:
 2. **Admin Studio Listing (`list_admin_headers`)**:
    - For `draft_and_publish: false` types: queries the wide table directly (`status = 'published'`).
    - For `draft_and_publish: true` types: executes a union query between pure drafts (`document_drafts WHERE status = 'draft'`) and published documents from `[type]` (incorporating `has_pending_draft`), avoiding distributed cross-shard `FULL OUTER JOIN` bottlenecks.
+   - If `display_fields` includes singular relations (`HasOne` / `BelongsToOne`), performs a 2nd-phase batched lookup (`find_display_titles_by_ids`) for the page's referenced target IDs and enriches `display_values` and `display_title` before returning.
    - Returns lightweight `DocumentHeader` projections (`display_values` key-value map, `display_title`, `status`, audit timestamps).
 3. **Editing Fetch (`find_draft_by_id`)**:
    - Loads the full working draft JSONB by ID into the editor form (falling back to the wide table if no active draft exists).

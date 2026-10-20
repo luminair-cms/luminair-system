@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
+use indexmap::IndexMap;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::common::{Email, Url};
+use crate::content::instance::DocumentInstanceId;
+use crate::schema::attributes::AttributeId;
+use crate::schema::documents::DocumentType;
 use crate::schema::types::{FieldType, IntegerSize, PrimitiveType};
 use crate::system::LocaleId;
 
@@ -43,6 +47,15 @@ impl DomainValue {
             (DomainValue::Url(_), FieldType::Url) => true,
             (DomainValue::Json(_), FieldType::Json) => true,
             _ => false,
+        }
+    }
+
+    pub fn to_display_string(&self) -> Option<String> {
+        match self {
+            DomainValue::Primitive(p) => Some(p.to_display_string()),
+            DomainValue::Email(e) => Some(e.as_ref().to_string()),
+            DomainValue::Url(u) => Some(u.as_ref().to_string()),
+            DomainValue::Json(_) => None,
         }
     }
 }
@@ -97,13 +110,94 @@ impl PrimitiveValue {
                 let mantissa = d.mantissa().abs();
                 let num_digits = if mantissa == 0 { 1 } else { mantissa.ilog10() + 1 } as u8;
                 num_digits <= *precision
-            },
+            }
             (PrimitiveValue::Date(_), PrimitiveType::Date) => true,
             (PrimitiveValue::DateTime(_), PrimitiveType::DateTime) => true,
             (PrimitiveValue::Boolean(_), PrimitiveType::Boolean) => true,
             _ => false,
         }
     }
+
+    pub fn to_display_string(&self) -> String {
+        match self {
+            PrimitiveValue::Text(s) => s.clone(),
+            PrimitiveValue::Uid(s) => s.clone(),
+            PrimitiveValue::Uuid(u) => u.to_string(),
+            PrimitiveValue::Integer(val) => val.to_string(),
+            PrimitiveValue::Decimal(d) => d.to_string(),
+            PrimitiveValue::Date(d) => d.to_string(),
+            PrimitiveValue::DateTime(dt) => dt.to_rfc3339(),
+            PrimitiveValue::Boolean(b) => b.to_string(),
+        }
+    }
+}
+
+/// Extracts scalar and localized scalar values for the document's effective display fields,
+/// returning an ordered map of `AttributeId -> String` and a truncated composite `display_title`.
+///
+/// Singular relations declared in `display_fields` are skipped at write time (they are enriched
+/// at read time in CQRS query handlers).
+pub fn extract_display_identity(
+    doc_type: &DocumentType,
+    instance_id: DocumentInstanceId,
+    fields: &HashMap<AttributeId, ContentValue>,
+    default_locale: &LocaleId,
+) -> (IndexMap<AttributeId, String>, String) {
+    let mut display_values = IndexMap::new();
+
+    for attr_id in doc_type.effective_display_fields() {
+        // Singular relations are skipped at write time and enriched at read time
+        if !doc_type.fields.contains(&attr_id) {
+            continue;
+        }
+
+        match fields.get(&attr_id) {
+            Some(ContentValue::Scalar(dv)) => {
+                if let Some(s) = dv.to_display_string()
+                    && !s.is_empty()
+                {
+                    display_values.insert(attr_id, s);
+                }
+            }
+            Some(ContentValue::LocalizedText(map)) => {
+                let localized_str = map
+                    .get(default_locale)
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .or_else(|| {
+                        let mut entries: Vec<(&LocaleId, &String)> =
+                            map.iter().filter(|(_, s)| !s.is_empty()).collect();
+                        entries.sort_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()));
+                        entries.first().map(|(_, s)| (*s).clone())
+                    });
+                if let Some(s) = localized_str {
+                    display_values.insert(attr_id, s);
+                }
+            }
+            Some(ContentValue::Null) | None => {}
+        }
+    }
+
+    let display_title = if display_values.is_empty() {
+        instance_id.to_string()
+    } else {
+        let joined = display_values
+            .values()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" — ");
+        if joined.len() <= 255 {
+            joined
+        } else {
+            let mut end = 255;
+            while !joined.is_char_boundary(end) {
+                end -= 1;
+            }
+            joined[..end].to_string()
+        }
+    };
+
+    (display_values, display_title)
 }
 
 #[cfg(test)]
@@ -269,5 +363,228 @@ mod tests {
             };
             assert!(!val.matches_field_type(&mismatch_ft));
         }
+    }
+
+    #[test]
+    fn test_extract_display_identity_single_scalar() {
+        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+
+        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let doc_type = DocumentTypeBuilder::collection("article").with_field(f).build();
+        let instance_id = DocumentInstanceId::new(Uuid::now_v7());
+        let default_locale = test_locale_id("en");
+
+        let mut fields = HashMap::new();
+        fields.insert(
+            test_attr_id("title"),
+            ContentValue::Scalar(PrimitiveValue::Text("My Title".into()).into()),
+        );
+
+        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        assert_eq!(values.len(), 1);
+        assert_eq!(values.get(&test_attr_id("title")), Some(&"My Title".to_string()));
+        assert_eq!(title, "My Title");
+    }
+
+    #[test]
+    fn test_extract_display_identity_composite_three_fields() {
+        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+
+        let f1 = FieldDefinitionBuilder::new("terminal-id", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f2 = FieldDefinitionBuilder::new("brand-name", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f3 = FieldDefinitionBuilder::new("removing-date", FieldType::Primitive(PrimitiveType::Date)).build();
+
+        let doc_type = DocumentTypeBuilder::collection("terminal")
+            .with_field(f1)
+            .with_field(f2)
+            .with_field(f3)
+            .with_display_fields(vec![
+                test_attr_id("terminal-id"),
+                test_attr_id("brand-name"),
+                test_attr_id("removing-date"),
+            ])
+            .build();
+
+        let instance_id = DocumentInstanceId::new(Uuid::now_v7());
+        let default_locale = test_locale_id("en");
+        let date = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+
+        let mut fields = HashMap::new();
+        fields.insert(
+            test_attr_id("terminal-id"),
+            ContentValue::Scalar(PrimitiveValue::Text("T-100".into()).into()),
+        );
+        fields.insert(
+            test_attr_id("brand-name"),
+            ContentValue::Scalar(PrimitiveValue::Text("Acme".into()).into()),
+        );
+        fields.insert(
+            test_attr_id("removing-date"),
+            ContentValue::Scalar(PrimitiveValue::Date(date).into()),
+        );
+
+        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        let keys: Vec<_> = values.keys().cloned().collect();
+        assert_eq!(
+            keys,
+            vec![
+                test_attr_id("terminal-id"),
+                test_attr_id("brand-name"),
+                test_attr_id("removing-date"),
+            ]
+        );
+        assert_eq!(title, "T-100 — Acme — 2026-12-31");
+    }
+
+    #[test]
+    fn test_extract_display_identity_omits_null_and_missing_fields() {
+        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+
+        let f1 = FieldDefinitionBuilder::new("terminal-id", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f2 = FieldDefinitionBuilder::new("brand-name", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f3 = FieldDefinitionBuilder::new("removing-date", FieldType::Primitive(PrimitiveType::Date)).build();
+
+        let doc_type = DocumentTypeBuilder::collection("terminal")
+            .with_field(f1)
+            .with_field(f2)
+            .with_field(f3)
+            .with_display_fields(vec![
+                test_attr_id("terminal-id"),
+                test_attr_id("brand-name"),
+                test_attr_id("removing-date"),
+            ])
+            .build();
+
+        let instance_id = DocumentInstanceId::new(Uuid::now_v7());
+        let default_locale = test_locale_id("en");
+
+        let mut fields = HashMap::new();
+        fields.insert(
+            test_attr_id("terminal-id"),
+            ContentValue::Scalar(PrimitiveValue::Text("T-100".into()).into()),
+        );
+        fields.insert(test_attr_id("brand-name"), ContentValue::Null);
+        // removing-date omitted
+
+        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        assert_eq!(values.len(), 1);
+        assert_eq!(values.get(&test_attr_id("terminal-id")), Some(&"T-100".to_string()));
+        assert_eq!(title, "T-100");
+    }
+
+    #[test]
+    fn test_extract_display_identity_localized_text_default_and_fallback() {
+        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+
+        let f = FieldDefinitionBuilder::new("headline", FieldType::LocalizedText).build();
+        let doc_type = DocumentTypeBuilder::collection("news").with_field(f).build();
+        let instance_id = DocumentInstanceId::new(Uuid::now_v7());
+
+        // Case 1: default locale present
+        let mut map = HashMap::new();
+        map.insert(test_locale_id("en"), "Breaking News".to_string());
+        map.insert(test_locale_id("uk"), "Гарячі новини".to_string());
+
+        let mut fields = HashMap::new();
+        fields.insert(test_attr_id("headline"), ContentValue::LocalizedText(map));
+
+        let (_, title_en) = extract_display_identity(
+            &doc_type,
+            instance_id,
+            &fields,
+            &test_locale_id("en"),
+        );
+        assert_eq!(title_en, "Breaking News");
+
+        // Case 2: default locale absent -> lexicographically first locale with non-empty string
+        let mut map2 = HashMap::new();
+        map2.insert(test_locale_id("uk"), "Новини".to_string());
+        map2.insert(test_locale_id("de"), "Nachrichten".to_string());
+
+        let mut fields2 = HashMap::new();
+        fields2.insert(test_attr_id("headline"), ContentValue::LocalizedText(map2));
+
+        let (_, title_fallback) = extract_display_identity(
+            &doc_type,
+            instance_id,
+            &fields2,
+            &test_locale_id("fr"),
+        );
+        assert_eq!(title_fallback, "Nachrichten");
+    }
+
+    #[test]
+    fn test_extract_display_identity_skips_singular_relations() {
+        use crate::schema::attributes::{RelationDefinition, RelationType};
+        use crate::test_support::{
+            test_attr_id, test_doc_type_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder,
+        };
+
+        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let rel = RelationDefinition {
+            id: test_attr_id("author"),
+            relation_type: RelationType::HasOne,
+            target: test_doc_type_id("author"),
+        };
+
+        let doc_type = DocumentTypeBuilder::collection("book")
+            .with_field(f)
+            .with_relation(rel)
+            .with_display_fields(vec![test_attr_id("title"), test_attr_id("author")])
+            .build();
+
+        let instance_id = DocumentInstanceId::new(Uuid::now_v7());
+        let default_locale = test_locale_id("en");
+
+        let mut fields = HashMap::new();
+        fields.insert(
+            test_attr_id("title"),
+            ContentValue::Scalar(PrimitiveValue::Text("The Great Gatsby".into()).into()),
+        );
+
+        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        assert_eq!(values.len(), 1);
+        assert_eq!(values.get(&test_attr_id("title")), Some(&"The Great Gatsby".to_string()));
+        assert!(!values.contains_key(&test_attr_id("author")));
+        assert_eq!(title, "The Great Gatsby");
+    }
+
+    #[test]
+    fn test_extract_display_identity_fallback_to_instance_id() {
+        use crate::test_support::{test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+
+        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let doc_type = DocumentTypeBuilder::collection("article").with_field(f).build();
+        let instance_id = DocumentInstanceId::new(Uuid::now_v7());
+        let default_locale = test_locale_id("en");
+
+        let fields = HashMap::new(); // no values provided
+        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        assert!(values.is_empty());
+        assert_eq!(title, instance_id.to_string());
+    }
+
+    #[test]
+    fn test_extract_display_identity_truncation_utf8_safe() {
+        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+
+        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let doc_type = DocumentTypeBuilder::collection("article").with_field(f).build();
+        let instance_id = DocumentInstanceId::new(Uuid::now_v7());
+        let default_locale = test_locale_id("en");
+
+        // "Ж" is 2 bytes in UTF-8. 150 * 2 = 300 bytes > 255.
+        let long_cyrillic = "Ж".repeat(150);
+        let mut fields = HashMap::new();
+        fields.insert(
+            test_attr_id("title"),
+            ContentValue::Scalar(PrimitiveValue::Text(long_cyrillic).into()),
+        );
+
+        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        assert_eq!(values.len(), 1);
+        assert!(title.len() <= 255);
+        // Ensure valid UTF-8 and even number of bytes since "Ж" is 2 bytes: 254 bytes
+        assert_eq!(title.len(), 254);
     }
 }

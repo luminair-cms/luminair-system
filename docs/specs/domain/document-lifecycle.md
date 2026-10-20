@@ -26,18 +26,18 @@
 
 | ID | Status | Origin | Given State | Action / Input | Expected Result / Next State |
 |---|---|---|---|---|---|
-| `LC-01` | `Draft` | `adr:004` | `Draft(None)`, `Version(1)` | `Publish(Some("alice"), T1)` | `Ok(1)`, `Published(1)`, `Version(2)`, `updated_by == Some("alice")` |
-| `LC-02` | `Draft` | `adr:004` | `Published(1)`, `Version(2)` | `Publish(Some("bob"), T2)` | `Ok(2)`, `Published(2)`, `Version(3)`, `updated_by == Some("bob")` |
-| `LC-03` | `Draft` | `adr:004` | `Published(1)`, `Version(2)` | `Unpublish(Some("charlie"), T2)` | `Ok(())`, `Draft(Some(1))`, `Version(3)`, `updated_by == Some("charlie")` |
-| `LC-04` | `Draft` | `adr:004` | `Draft(Some(1))`, `Version(3)` | `Publish(Some("alice"), T3)` | `Ok(2)`, `Published(2)`, `Version(4)`, `updated_by == Some("alice")` |
-| `LC-05` | `Draft` | `adr:004` | `Draft(None)`, `Version(1)` | `Unpublish(Some("alice"), T1)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(1)` |
-| `LC-06` | `Draft` | `adr:004` | `Draft(Some(1))`, `Version(3)` | `Unpublish(Some("bob"), T4)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(3)` |
-| `LC-07` | `Draft` | `observed` | Initial `new(type, Some("alice"), T0)` | (constructed) | `Draft(None)`, `Version(1)`, `created_by == Some("alice")`, `updated_by == Some("alice")` |
-| `LC-08` | `Draft` | `observed` | Any instance with `Version(V)` | `Touch(Some("bob"), T1)` | `audit.version == V + 1`, `audit.updated_by == Some("bob")`, `audit.updated_at == T1` |
-| `LC-09` | `Draft` | `adr:004` | `Published(1)`, `Version(2)` | `EditDraft(Some("alice"), T3)` | `Modified(1)`, `Version(3)`, `updated_by == Some("alice")` |
+| `LC-01` | `Draft` | `adr:004` | `Draft(None)`, `Version(1)` | `Publish(Actor("alice"), T1)` | `Ok(1)`, `Published(1)`, `Version(2)`, `updated_by == Actor("alice")` |
+| `LC-02` | `Draft` | `adr:004` | `Published(1)`, `Version(2)` | `Publish(Actor("bob"), T2)` | `Ok(2)`, `Published(2)`, `Version(3)`, `updated_by == Actor("bob")` |
+| `LC-03` | `Draft` | `adr:004` | `Published(1)`, `Version(2)` | `Unpublish(Actor("charlie"), T2)` | `Ok(())`, `Unpublished(1)`, `Version(3)`, `updated_by == Actor("charlie")` |
+| `LC-04` | `Draft` | `adr:004` | `Unpublished(1)`, `Version(3)` | `Publish(Actor("alice"), T3)` | `Ok(2)`, `Published(2)`, `Version(4)`, `updated_by == Actor("alice")` |
+| `LC-05` | `Draft` | `adr:004` | `Draft(None)`, `Version(1)` | `Unpublish(Actor("alice"), T1)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(1)` |
+| `LC-06` | `Draft` | `adr:004` | `Unpublished(1)`, `Version(3)` | `Unpublish(Actor("bob"), T4)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(3)` |
+| `LC-07` | `Draft` | `observed` | Initial `new(type, Actor("alice"), T0)` | (constructed) | `Draft(None)`, `Version(1)`, `created_by == Actor("alice")`, `updated_by == Actor("alice")` |
+| `LC-08` | `Draft` | `observed` | Any instance with `Version(V)` | `Touch(Actor("bob"), T1)` | `audit.version == V + 1`, `audit.updated_by == Actor("bob")`, `audit.updated_at == T1` |
+| `LC-09` | `Draft` | `adr:004` | `Published(1)`, `Version(2)` | `EditDraft(Actor("alice"), T3)` | `Modified(1)`, `Version(3)`, `updated_by == Actor("alice")` |
 | `LC-10` | `Draft` | `adr:004` | `Modified(1)`, `Version(3)` | `DiscardDraft()` | `Published(1)`, `Version(3)` |
 | `LC-11` | `Draft` | `adr:004` | `Draft(None)`, `Version(1)` | `DiscardDraft()` | `Err(DomainError::InvalidStateTransition)` |
-| `LC-12` | `Draft` | `adr:004` | `Published(2)`, `Version(4)` | `RestoreSnapshot(Rev1, T5)` | `Modified(1)`, `Version(5)` |
+| `LC-12` | `Draft` | `adr:004` | `Published(2)`, `Version(4)` | `RestoreSnapshot(Rev1, T5)` | `Modified(2)`, `Version(5)` |
 
 ---
 
