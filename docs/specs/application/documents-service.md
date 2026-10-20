@@ -29,7 +29,7 @@
 - **Origin**: `adr:002`
 - **Given**: A valid collection document type in schema registry, and a caller with `CreateDocument` permission.
 - **When**: Caller invokes `service.create(&caller, CreateDocumentCommand::new(type_id, valid_fields)).await`.
-- **Then**: Returns `Ok(instance)` with `instance.audit.version == 1`, `instance.audit.created_by == Some(caller.user_id)`, `instance.content.publication_state` as `Draft { last_published_revision: None }`, and instance is retrievable from repository.
+- **Then**: Returns `Ok(instance)` with `instance.audit.version == 1`, `instance.audit.created_by == caller.actor`, `instance.content.publication_state` as `Draft { last_published_revision: None }`, and instance is retrievable from repository.
 
 ### DS-02 — Create Blocked for Second SingleType Instance
 - **Status**: `Draft`
@@ -50,7 +50,7 @@
 - **Origin**: `adr:002`
 - **Given**: An existing document instance with `audit.version == 1`.
 - **When**: Authorized caller updates a field via `service.update(&caller, UpdateDocumentCommand::new(type_id, instance_id, updated_fields)).await`.
-- **Then**: Returns `Ok(updated)` with `updated.audit.version == 2`, `updated.audit.updated_by == Some(caller.user_id)`, and updated fields are persisted in the repository.
+- **Then**: Returns `Ok(updated)` with `updated.audit.version == 2`, `updated.audit.updated_by == caller.actor`, and updated fields are persisted in the repository.
 
 ### DS-05 — Update Retains Unmentioned Fields and Clears Null Fields
 - **Status**: `Draft`

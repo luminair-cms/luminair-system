@@ -1,6 +1,6 @@
 //! Application-level error types.
 
-use domain::auth::{Permission, UserId};
+use domain::auth::{ActorId, Permission};
 use domain::errors::DomainError;
 use thiserror::Error;
 
@@ -12,10 +12,10 @@ pub enum ApplicationError {
     Domain(#[from] DomainError),
 
     /// The caller lacks the required permission to perform the action.
-    #[error("unauthorized: user '{user_id}' lacks permission for action '{action:?}'")]
+    #[error("unauthorized: actor '{actor}' lacks permission for action '{action:?}'")]
     Unauthorized {
-        /// Identifier of the user attempting the action.
-        user_id: UserId,
+        /// Identifier of the actor attempting the action.
+        actor: ActorId,
         /// The specific permission that was required.
         action: Permission,
     },
@@ -65,14 +65,16 @@ mod tests {
 
     #[test]
     fn test_unauthorized_error_display() {
+        use domain::auth::UserId;
+
         let user_id = UserId::try_new("user-123").expect("valid user id");
         let err = ApplicationError::Unauthorized {
-            user_id: user_id.clone(),
+            actor: ActorId::User(user_id),
             action: Permission::PublishDocument(None),
         };
 
         let msg = err.to_string();
-        assert!(msg.contains("user 'user-123'"));
+        assert!(msg.contains("actor 'user:user-123'"));
         assert!(msg.contains("PublishDocument"));
     }
 

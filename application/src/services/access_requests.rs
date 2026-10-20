@@ -6,7 +6,7 @@ use std::future::Future;
 use chrono::Utc;
 use domain::auth::{
     AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository, Permission,
-    RoleRepository, UserRoleAssignment, UserRoleAssignmentRepository,
+    RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentRepository,
 };
 use domain::errors::DomainError;
 
@@ -23,6 +23,9 @@ pub trait AccessRequestsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<AccessRequest, ApplicationError>> + Send;
 
     /// Approves a pending access request, assigning specified roles.
+    ///
+    /// In `infrastructure`, persisting `assignments` and `request` must execute
+    /// within a single database transaction wrapped in `with_occ_retry`.
     fn approve(
         &self,
         caller: &CallerContext,
@@ -101,6 +104,10 @@ where
         Ok(request)
     }
 
+    /// Approves a pending access request, assigning specified roles.
+    ///
+    /// Note: In `infrastructure`, persisting `assignments` and `request` must execute
+    /// within a single database transaction wrapped in `with_occ_retry`.
     async fn approve(
         &self,
         caller: &CallerContext,
@@ -129,7 +136,11 @@ where
             }
         }
 
-        let assignments = request.approve(caller.user_id.clone(), cmd.role_ids, Utc::now())?;
+        let reviewer_id = caller.user_id().cloned().unwrap_or_else(|| {
+            UserId::try_new(caller.actor.to_string()).unwrap_or_else(|_| unreachable!())
+        });
+
+        let assignments = request.approve(reviewer_id, cmd.role_ids, Utc::now())?;
 
         // Persist generated assignments in batch
         self.assignment_repo.save_all(&assignments).await?;
@@ -155,7 +166,11 @@ where
                 DomainError::AccessRequestNotFound(cmd.request_id),
             ))?;
 
-        request.reject(caller.user_id.clone(), cmd.reason, Utc::now())?;
+        let reviewer_id = caller.user_id().cloned().unwrap_or_else(|| {
+            UserId::try_new(caller.actor.to_string()).unwrap_or_else(|_| unreachable!())
+        });
+
+        request.reject(reviewer_id, cmd.reason, Utc::now())?;
         self.access_request_repo.save(&request).await?;
 
         Ok(request)
@@ -175,7 +190,7 @@ where
             ))?;
 
         // Requester can view their own request; other users require ManageUsers
-        if request.user_id != caller.user_id {
+        if caller.user_id() != Some(&request.user_id) {
             caller.check_permission(&Permission::ManageUsers, None)?;
         }
 

@@ -1,6 +1,8 @@
 //! Security and caller identity context.
 
-use domain::auth::{AuthorizationService, Permission, Role, RoleId, UserId};
+use domain::auth::{
+    ActorId, AuthorizationService, Permission, Role, RoleId, ServiceId, UserId,
+};
 use domain::content::DocumentInstance;
 
 use crate::errors::ApplicationError;
@@ -8,24 +10,31 @@ use crate::errors::ApplicationError;
 /// Authenticated caller context carrying the verified identity and roles of the actor.
 #[derive(Debug, Clone)]
 pub struct CallerContext {
-    /// The unique identifier of the authenticated user (e.g. OIDC sub claim).
-    pub user_id: UserId,
-    /// Roles assigned to the user.
+    /// The authenticated actor (human user, service/API token, or internal system).
+    pub actor: ActorId,
+    /// Roles assigned to the actor.
     pub roles: Vec<Role>,
 }
 
 impl CallerContext {
-    /// Creates a new `CallerContext` for a verified user and their roles.
-    pub fn new(user_id: UserId, roles: Vec<Role>) -> Self {
-        Self { user_id, roles }
+    /// Creates a new `CallerContext` for an authenticated actor (user, service, or system) and their roles.
+    pub fn new(actor: impl Into<ActorId>, roles: Vec<Role>) -> Self {
+        Self {
+            actor: actor.into(),
+            roles,
+        }
+    }
+
+    /// Creates a new `CallerContext` for a service actor.
+    pub fn service(service_id: ServiceId, roles: Vec<Role>) -> Self {
+        Self {
+            actor: ActorId::Service(service_id),
+            roles,
+        }
     }
 
     /// Creates an internal system caller context with administrative privileges.
     pub fn system() -> Self {
-        let user_id = match UserId::try_new("system-internal") {
-            Ok(id) => id,
-            Err(_) => unreachable!("hardcoded system-internal identifier is valid"),
-        };
         let admin_role = Role {
             id: RoleId::new(uuid::Uuid::nil()),
             name: "system_admin".to_string(),
@@ -42,19 +51,25 @@ impl CallerContext {
             ],
         };
         Self {
-            user_id,
+            actor: ActorId::System,
             roles: vec![admin_role],
         }
+    }
+
+    /// Returns the associated user ID if the actor is a human user.
+    pub fn user_id(&self) -> Option<&UserId> {
+        self.actor.as_user()
     }
 
     /// Evaluates whether the caller has permission to perform `action` on the optional `instance`.
     ///
     /// Precedence:
-    /// 1. Owner rule (creators have full rights to their own instances).
-    /// 2. RBAC (across all assigned roles).
-    /// 3. Default DENY.
+    /// 1. System bypass (system actor has all permissions).
+    /// 2. Owner rule (creators have full rights to their own instances, excluding publish).
+    /// 3. RBAC (across all assigned roles).
+    /// 4. Default DENY.
     pub fn can(&self, action: &Permission, instance: Option<&DocumentInstance>) -> bool {
-        AuthorizationService::can(&self.user_id, action, instance, &self.roles)
+        AuthorizationService::can_actor(&self.actor, action, instance, &self.roles)
     }
 
     /// Enforces that the caller has permission to perform `action` on the optional `instance`.
@@ -69,7 +84,7 @@ impl CallerContext {
             Ok(())
         } else {
             Err(ApplicationError::Unauthorized {
-                user_id: self.user_id.clone(),
+                actor: self.actor.clone(),
                 action: action.clone(),
             })
         }
@@ -115,10 +130,10 @@ mod tests {
         let res = ctx.check_permission(&Permission::DeleteDocument(Some(type_id.clone())), None);
         match res {
             Err(ApplicationError::Unauthorized {
-                user_id: err_user,
+                actor,
                 action,
             }) => {
-                assert_eq!(err_user, user_id);
+                assert_eq!(actor, ActorId::User(user_id));
                 assert_eq!(action, Permission::DeleteDocument(Some(type_id)));
             }
             _ => panic!("expected Unauthorized error"),
@@ -175,5 +190,31 @@ mod tests {
 
         assert!(ctx.can(&Permission::CreateDocument(Some(type_id.clone())), None));
         assert!(!ctx.can(&Permission::DeleteDocument(Some(type_id)), None));
+    }
+
+    #[test]
+    fn test_service_caller_rbac() {
+        let service_id = ServiceId::try_new("ci-pipeline").expect("valid service");
+        let type_id = DocumentTypeId::try_new("article").unwrap();
+        let role = Role {
+            id: RoleId::new(Uuid::now_v7()),
+            name: "ingestion".to_string(),
+            description: None,
+            permissions: vec![Permission::CreateDocument(Some(type_id.clone()))],
+        };
+        let ctx = CallerContext::service(service_id.clone(), vec![role]);
+
+        assert_eq!(ctx.user_id(), None);
+        assert!(ctx.can(&Permission::CreateDocument(Some(type_id.clone())), None));
+        assert!(!ctx.can(&Permission::DeleteDocument(Some(type_id.clone())), None));
+
+        let res = ctx.check_permission(&Permission::DeleteDocument(Some(type_id.clone())), None);
+        match res {
+            Err(ApplicationError::Unauthorized { actor, action }) => {
+                assert_eq!(actor, ActorId::Service(service_id));
+                assert_eq!(action, Permission::DeleteDocument(Some(type_id)));
+            }
+            _ => panic!("expected Unauthorized error"),
+        }
     }
 }

@@ -17,6 +17,7 @@ thiserror.workspace = true
 serde.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+indexmap.workspace = true
 
 [dev-dependencies]
 # Re-declare ourselves with the test-support feature so that integration tests
@@ -24,4 +25,3 @@ chrono.workspace = true
 application = { path = ".", features = ["test-support"] }
 domain = { path = "../domain", features = ["test-support"] }
 tokio.workspace = true
-indexmap.workspace = true

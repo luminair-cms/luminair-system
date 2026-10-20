@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::future::Future;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use super::header::{DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader};
 use super::instance::{DocumentInstance, DocumentInstanceId};
 use super::values::DomainValue;
 use crate::errors::DomainError;
@@ -32,11 +34,6 @@ pub struct Page<T> {
 }
 
 /// Equality filter on a single scalar field.
-///
-/// Contract for `DocumentInstanceRepository::find_by_type` / `count`:
-/// - an instance matches when its field `attribute_id` holds a scalar equal to `value`;
-/// - a missing field, a `Null` value and a localized text never match;
-/// - several filters are combined with logical AND; an empty list matches everything.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldFilter {
     pub attribute_id: AttributeId,
@@ -48,33 +45,68 @@ pub struct FieldFilter {
 pub type RelationMap = HashMap<AttributeId, HashMap<DocumentInstanceId, Vec<DocumentInstance>>>;
 
 pub trait DocumentInstanceRepository: Send + Sync {
-    /// Loads a single document instance by its type's table and its unique ID.
-    ///
-    /// `type_id` is required to resolve the per-type table name (ADR-007).
+    /// Loads a single document instance by its type and ID (returns working draft if present, otherwise published).
     fn find_by_id(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         id: DocumentInstanceId,
     ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
 
+    /// Loads the working draft by ID from the unified draft store (if any).
+    fn find_draft_by_id(
+        &self,
+        type_id: &DocumentTypeId,
+        id: DocumentInstanceId,
+    ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
+
+    /// Loads the live published document by ID from the wide table (if any).
+    fn find_published_by_id(
+        &self,
+        type_id: &DocumentTypeId,
+        id: DocumentInstanceId,
+    ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
+
+    /// Visitor query: queries strictly the published wide table (or all instances in legacy/find_by_type).
     fn find_by_type(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         pagination: Pagination,
         filters: Vec<FieldFilter>,
     ) -> impl Future<Output = Result<Page<DocumentInstance>, DomainError>> + Send;
 
+    /// Queries strictly published instances from the wide table.
+    fn find_published(
+        &self,
+        type_id: &DocumentTypeId,
+        pagination: Pagination,
+        filters: Vec<FieldFilter>,
+    ) -> impl Future<Output = Result<Page<DocumentInstance>, DomainError>> + Send;
+
+    /// Admin Studio listing: returns lightweight `DocumentHeader` projections across drafts and published rows.
+    fn list_admin_headers(
+        &self,
+        type_id: &DocumentTypeId,
+        pagination: Pagination,
+        status_filter: Option<DocumentStatus>,
+    ) -> impl Future<Output = Result<Page<DocumentHeader>, DomainError>> + Send;
+
+    /// Phase 2 batched lookup for singular relational display fields: returns `id -> display_title`.
+    fn find_display_titles_by_ids(
+        &self,
+        type_id: &DocumentTypeId,
+        ids: &[DocumentInstanceId],
+    ) -> impl Future<Output = Result<HashMap<DocumentInstanceId, String>, DomainError>> + Send;
+
     fn count(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         filters: Vec<FieldFilter>,
     ) -> impl Future<Output = Result<u64, DomainError>> + Send;
 
     /// Batch-loads relations for a set of parent instance IDs.
-    /// Returns a nested map: AttributeId -> (ParentInstanceId -> Vec<RelatedInstance>)
     fn fetch_relations(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         attributes: &[AttributeId],
         parent_ids: &[DocumentInstanceId],
     ) -> impl Future<Output = Result<RelationMap, DomainError>> + Send;
@@ -84,18 +116,67 @@ pub trait DocumentInstanceRepository: Send + Sync {
         instance: &DocumentInstance,
     ) -> impl Future<Output = Result<(), DomainError>> + Send;
 
-    /// Deletes a document instance from the type's table.
-    ///
-    /// `type_id` is required to resolve the per-type table name (ADR-007).
+    /// Persists a working draft (`Draft`, `Modified`, or `Unpublished`) along with materialized display identity.
+    fn save_draft(
+        &self,
+        instance: &DocumentInstance,
+        display_values: &IndexMap<AttributeId, String>,
+        display_title: &str,
+    ) -> impl Future<Output = Result<(), DomainError>> + Send;
+
+    /// Publishes the document instance to the wide table and clears any pending draft row.
+    fn publish(
+        &self,
+        instance: &DocumentInstance,
+        revision: u32,
+        display_values: &IndexMap<AttributeId, String>,
+        display_title: &str,
+    ) -> impl Future<Output = Result<(), DomainError>> + Send;
+
+    /// Unpublishes the document instance from the wide table and preserves it in `document_drafts` with `Unpublished` state.
+    fn unpublish(
+        &self,
+        instance: &DocumentInstance,
+        display_values: &IndexMap<AttributeId, String>,
+        display_title: &str,
+    ) -> impl Future<Output = Result<(), DomainError>> + Send;
+
+    /// Discards pending draft edits and restores the clean published row (`has_pending_draft = false`).
+    fn discard_draft(
+        &self,
+        type_id: &DocumentTypeId,
+        id: DocumentInstanceId,
+    ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
+
+    /// Deletes a document instance from both draft and published stores.
     fn delete(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         id: DocumentInstanceId,
     ) -> impl Future<Output = Result<(), DomainError>> + Send;
 
     fn exists_for_type(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
     ) -> impl Future<Output = Result<bool, DomainError>> + Send;
 }
 
+pub trait DocumentSnapshotRepository: Send + Sync {
+    fn save_snapshot(
+        &self,
+        snapshot: &DocumentSnapshot,
+    ) -> impl Future<Output = Result<(), DomainError>> + Send;
+
+    fn list_snapshots(
+        &self,
+        type_id: &DocumentTypeId,
+        doc_id: DocumentInstanceId,
+    ) -> impl Future<Output = Result<Vec<SnapshotHeader>, DomainError>> + Send;
+
+    fn get_snapshot(
+        &self,
+        type_id: &DocumentTypeId,
+        doc_id: DocumentInstanceId,
+        revision: u32,
+    ) -> impl Future<Output = Result<Option<DocumentSnapshot>, DomainError>> + Send;
+}

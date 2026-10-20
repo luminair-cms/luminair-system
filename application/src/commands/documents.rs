@@ -187,6 +187,8 @@ pub struct PublishDocumentCommand {
     pub document_instance_id: DocumentInstanceId,
     /// Document type of the target document.
     pub document_type: &'static DocumentTypeId,
+    /// Optional expected draft version for optimistic concurrency control.
+    pub expected_version: Option<u32>,
 }
 
 impl PublishDocumentCommand {
@@ -197,7 +199,13 @@ impl PublishDocumentCommand {
         Self {
             document_instance_id,
             document_type,
+            expected_version: None,
         }
+    }
+
+    pub fn with_expected_version(mut self, version: u32) -> Self {
+        self.expected_version = Some(version);
+        self
     }
 }
 
@@ -222,9 +230,93 @@ impl UnpublishDocumentCommand {
     }
 }
 
+/// Command to discard pending draft edits and revert to the live published state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscardDraftCommand {
+    pub document_instance_id: DocumentInstanceId,
+    pub document_type: &'static DocumentTypeId,
+}
+
+impl DiscardDraftCommand {
+    pub fn new(
+        document_instance_id: DocumentInstanceId,
+        document_type: &'static DocumentTypeId,
+    ) -> Self {
+        Self {
+            document_instance_id,
+            document_type,
+        }
+    }
+}
+
+/// Command to restore a historical snapshot revision into the working draft.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreSnapshotCommand {
+    pub document_instance_id: DocumentInstanceId,
+    pub document_type: &'static DocumentTypeId,
+    pub revision: u32,
+}
+
+impl RestoreSnapshotCommand {
+    pub fn new(
+        document_instance_id: DocumentInstanceId,
+        document_type: &'static DocumentTypeId,
+        revision: u32,
+    ) -> Self {
+        Self {
+            document_instance_id,
+            document_type,
+            revision,
+        }
+    }
+}
+
+/// Query command to list lightweight document headers for the Admin UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListAdminHeadersCommand {
+    pub document_type: &'static DocumentTypeId,
+    pub pagination: Pagination,
+    pub status_filter: Option<domain::content::DocumentStatus>,
+}
+
+impl ListAdminHeadersCommand {
+    pub fn new(document_type: &'static DocumentTypeId, pagination: Pagination) -> Self {
+        Self {
+            document_type,
+            pagination,
+            status_filter: None,
+        }
+    }
+
+    pub fn with_status_filter(mut self, status: domain::content::DocumentStatus) -> Self {
+        self.status_filter = Some(status);
+        self
+    }
+}
+
+/// Query command to list revision snapshot headers for a document instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListSnapshotsCommand {
+    pub document_type: &'static DocumentTypeId,
+    pub document_instance_id: DocumentInstanceId,
+}
+
+impl ListSnapshotsCommand {
+    pub fn new(
+        document_type: &'static DocumentTypeId,
+        document_instance_id: DocumentInstanceId,
+    ) -> Self {
+        Self {
+            document_type,
+            document_instance_id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::content::DocumentStatus;
     use uuid::Uuid;
 
     #[test]
@@ -272,10 +364,29 @@ mod tests {
         assert_eq!(delete.document_instance_id, id);
         assert_eq!(delete.document_type, type_id);
 
-        let pub_cmd = PublishDocumentCommand::new(id, type_id);
+        let pub_cmd = PublishDocumentCommand::new(id, type_id).with_expected_version(3);
         assert_eq!(pub_cmd.document_instance_id, id);
+        assert_eq!(pub_cmd.expected_version, Some(3));
 
         let unpub_cmd = UnpublishDocumentCommand::new(id, type_id);
         assert_eq!(unpub_cmd.document_instance_id, id);
+
+        let discard = DiscardDraftCommand::new(id, type_id);
+        assert_eq!(discard.document_instance_id, id);
+        assert_eq!(discard.document_type, type_id);
+
+        let restore = RestoreSnapshotCommand::new(id, type_id, 2);
+        assert_eq!(restore.document_instance_id, id);
+        assert_eq!(restore.document_type, type_id);
+        assert_eq!(restore.revision, 2);
+
+        let admin_cmd = ListAdminHeadersCommand::new(type_id, Pagination::default())
+            .with_status_filter(DocumentStatus::Draft);
+        assert_eq!(admin_cmd.document_type, type_id);
+        assert_eq!(admin_cmd.status_filter, Some(DocumentStatus::Draft));
+
+        let snapshots_cmd = ListSnapshotsCommand::new(type_id, id);
+        assert_eq!(snapshots_cmd.document_type, type_id);
+        assert_eq!(snapshots_cmd.document_instance_id, id);
     }
 }

@@ -9,11 +9,13 @@ use domain::auth::{
     UserRoleAssignmentRepository,
 };
 use domain::content::{
-    ContentValue, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, FieldFilter,
-    Page, Pagination, RelationMap,
+    ContentValue, DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
+    DocumentSnapshot, DocumentSnapshotRepository, DocumentStatus, FieldFilter, Page, Pagination,
+    PublicationState, RelationMap, SnapshotHeader,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentTypeId};
+use indexmap::IndexMap;
 
 /// Maps a poisoned `RwLock` to the error a real repository reports for a backend failure.
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> DomainError {
@@ -34,12 +36,19 @@ fn matches_filters(instance: &DocumentInstance, filters: &[FieldFilter]) -> bool
     })
 }
 
-/// Thread-safe in-memory fake for `DocumentInstanceRepository`.
+pub type DisplayMetaMap = HashMap<DocumentInstanceId, (IndexMap<AttributeId, String>, String)>;
+
+/// Thread-safe in-memory fake for `DocumentInstanceRepository` and `DocumentSnapshotRepository`.
 #[derive(Debug, Clone, Default)]
 pub struct FakeDocumentInstanceRepository {
     pub instances: Arc<RwLock<HashMap<DocumentInstanceId, DocumentInstance>>>,
+    pub published: Arc<RwLock<HashMap<DocumentInstanceId, DocumentInstance>>>,
+    pub display_meta: Arc<RwLock<DisplayMetaMap>>,
+    pub snapshots: Arc<RwLock<Vec<DocumentSnapshot>>>,
     pub relations: Arc<RwLock<RelationMap>>,
 }
+
+pub type FakeDocumentSnapshotRepository = FakeDocumentInstanceRepository;
 
 impl FakeDocumentInstanceRepository {
     pub fn new() -> Self {
@@ -69,16 +78,46 @@ impl FakeDocumentInstanceRepository {
 impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
     async fn find_by_id(
         &self,
-        _type_id: &'static DocumentTypeId,
+        _type_id: &DocumentTypeId,
         id: DocumentInstanceId,
     ) -> Result<Option<DocumentInstance>, DomainError> {
         let store = self.instances.read().map_err(lock_error)?;
         Ok(store.get(&id).cloned())
     }
 
+    async fn find_draft_by_id(
+        &self,
+        _type_id: &DocumentTypeId,
+        id: DocumentInstanceId,
+    ) -> Result<Option<DocumentInstance>, DomainError> {
+        let store = self.instances.read().map_err(lock_error)?;
+        Ok(store.get(&id).cloned())
+    }
+
+    async fn find_published_by_id(
+        &self,
+        _type_id: &DocumentTypeId,
+        id: DocumentInstanceId,
+    ) -> Result<Option<DocumentInstance>, DomainError> {
+        let pub_store = self.published.read().map_err(lock_error)?;
+        if let Some(inst) = pub_store.get(&id) {
+            return Ok(Some(inst.clone()));
+        }
+        let store = self.instances.read().map_err(lock_error)?;
+        if let Some(inst) = store.get(&id)
+            && matches!(
+                inst.content.publication_state,
+                PublicationState::Published { .. }
+            )
+        {
+            return Ok(Some(inst.clone()));
+        }
+        Ok(None)
+    }
+
     async fn find_by_type(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         pagination: Pagination,
         filters: Vec<FieldFilter>,
     ) -> Result<Page<DocumentInstance>, DomainError> {
@@ -93,8 +132,8 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
 
         let total = filtered.len() as u64;
-        let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
-            as usize;
+        let start = (u64::from(pagination.page.saturating_sub(1))
+            * u64::from(pagination.page_size)) as usize;
         let items: Vec<DocumentInstance> = filtered
             .into_iter()
             .skip(start)
@@ -109,9 +148,190 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         })
     }
 
+    async fn find_published(
+        &self,
+        type_id: &DocumentTypeId,
+        pagination: Pagination,
+        filters: Vec<FieldFilter>,
+    ) -> Result<Page<DocumentInstance>, DomainError> {
+        let pub_store = self.published.read().map_err(lock_error)?;
+        let inst_store = self.instances.read().map_err(lock_error)?;
+
+        let mut filtered: Vec<DocumentInstance> = if !pub_store.is_empty() {
+            pub_store
+                .values()
+                .filter(|inst| {
+                    inst.document_type_id == *type_id && matches_filters(inst, &filters)
+                })
+                .cloned()
+                .collect()
+        } else {
+            inst_store
+                .values()
+                .filter(|inst| {
+                    inst.document_type_id == *type_id
+                        && matches!(
+                            inst.content.publication_state,
+                            PublicationState::Published { .. } | PublicationState::Modified { .. }
+                        )
+                        && matches_filters(inst, &filters)
+                })
+                .cloned()
+                .collect()
+        };
+        filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
+
+        let total = filtered.len() as u64;
+        let start = (u64::from(pagination.page.saturating_sub(1))
+            * u64::from(pagination.page_size)) as usize;
+        let items: Vec<DocumentInstance> = filtered
+            .into_iter()
+            .skip(start)
+            .take(pagination.page_size as usize)
+            .collect();
+
+        Ok(Page {
+            items,
+            total,
+            page: pagination.page,
+            page_size: pagination.page_size,
+        })
+    }
+
+    async fn list_admin_headers(
+        &self,
+        type_id: &DocumentTypeId,
+        pagination: Pagination,
+        status_filter: Option<DocumentStatus>,
+    ) -> Result<Page<DocumentHeader>, DomainError> {
+        let inst_store = self.instances.read().map_err(lock_error)?;
+        let meta_store = self.display_meta.read().map_err(lock_error)?;
+
+        let mut headers = Vec::new();
+        for inst in inst_store.values() {
+            if inst.document_type_id != *type_id {
+                continue;
+            }
+
+            let status = DocumentStatus::from(&inst.content.publication_state);
+            if let Some(filter) = status_filter
+                && status != filter
+            {
+                continue;
+            }
+
+            let (display_values, display_title) = meta_store
+                .get(&inst.id)
+                .cloned()
+                .unwrap_or_else(|| (IndexMap::new(), inst.id.to_string()));
+
+            let mut rel_entries: Vec<_> = inst.relations.iter().collect();
+            rel_entries.sort_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()));
+            let relational_display_target = rel_entries.into_iter().find_map(|(attr, list)| {
+                list.first().map(|r| (attr.clone(), r.target_instance_id))
+            });
+
+            let (revision, draft_version, published_at, published_by) =
+                match &inst.content.publication_state {
+                    PublicationState::Draft {
+                        last_published_revision,
+                    } => (*last_published_revision, Some(inst.audit.version), None, None),
+                    PublicationState::Published {
+                        revision,
+                        published_at,
+                        published_by,
+                    } => (
+                        Some(*revision),
+                        None,
+                        Some(*published_at),
+                        Some(published_by.clone()),
+                    ),
+                    PublicationState::Modified {
+                        live_revision,
+                        published_at,
+                        published_by,
+                        draft_version,
+                    } => (
+                        Some(*live_revision),
+                        Some(*draft_version),
+                        Some(*published_at),
+                        Some(published_by.clone()),
+                    ),
+                    PublicationState::Unpublished {
+                        last_published_revision,
+                        unpublished_at: _,
+                        unpublished_by: _,
+                    } => (
+                        Some(*last_published_revision),
+                        Some(inst.audit.version),
+                        None,
+                        None,
+                    ),
+                };
+
+            headers.push(DocumentHeader {
+                id: inst.id,
+                document_type_id: inst.document_type_id.clone(),
+                display_values,
+                display_title,
+                relational_display_target,
+                status,
+                slug: None,
+                revision,
+                draft_version,
+                created_at: inst.audit.created_at,
+                created_by: inst.audit.created_by.clone(),
+                updated_at: inst.audit.updated_at,
+                updated_by: inst.audit.updated_by.clone(),
+                published_at,
+                published_by,
+            });
+        }
+
+        headers.sort_by_key(|h| (h.created_at, *h.id.as_ref()));
+
+        let total = headers.len() as u64;
+        let start = (u64::from(pagination.page.saturating_sub(1))
+            * u64::from(pagination.page_size)) as usize;
+        let items: Vec<DocumentHeader> = headers
+            .into_iter()
+            .skip(start)
+            .take(pagination.page_size as usize)
+            .collect();
+
+        Ok(Page {
+            items,
+            total,
+            page: pagination.page,
+            page_size: pagination.page_size,
+        })
+    }
+
+    async fn find_display_titles_by_ids(
+        &self,
+        type_id: &DocumentTypeId,
+        ids: &[DocumentInstanceId],
+    ) -> Result<HashMap<DocumentInstanceId, String>, DomainError> {
+        let meta_store = self.display_meta.read().map_err(lock_error)?;
+        let inst_store = self.instances.read().map_err(lock_error)?;
+        let mut result = HashMap::new();
+        for &id in ids {
+            if let Some(inst) = inst_store.get(&id)
+                && inst.document_type_id == *type_id
+            {
+                if let Some((_, title)) = meta_store.get(&id) {
+                    result.insert(id, title.clone());
+                } else {
+                    result.insert(id, id.to_string());
+                }
+            }
+        }
+        Ok(result)
+    }
+
     async fn count(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         filters: Vec<FieldFilter>,
     ) -> Result<u64, DomainError> {
         let store = self.instances.read().map_err(lock_error)?;
@@ -124,7 +344,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
 
     async fn fetch_relations(
         &self,
-        _type_id: &'static DocumentTypeId,
+        _type_id: &DocumentTypeId,
         attributes: &[AttributeId],
         parent_ids: &[DocumentInstanceId],
     ) -> Result<RelationMap, DomainError> {
@@ -167,13 +387,85 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         Ok(())
     }
 
+    async fn save_draft(
+        &self,
+        instance: &DocumentInstance,
+        display_values: &IndexMap<AttributeId, String>,
+        display_title: &str,
+    ) -> Result<(), DomainError> {
+        self.save(instance).await?;
+        let mut meta = self.display_meta.write().map_err(lock_error)?;
+        meta.insert(
+            instance.id,
+            (display_values.clone(), display_title.to_string()),
+        );
+        Ok(())
+    }
+
+    async fn publish(
+        &self,
+        instance: &DocumentInstance,
+        _revision: u32,
+        display_values: &IndexMap<AttributeId, String>,
+        display_title: &str,
+    ) -> Result<(), DomainError> {
+        self.save(instance).await?;
+        let mut pub_store = self.published.write().map_err(lock_error)?;
+        pub_store.insert(instance.id, instance.clone());
+        let mut meta = self.display_meta.write().map_err(lock_error)?;
+        meta.insert(
+            instance.id,
+            (display_values.clone(), display_title.to_string()),
+        );
+        Ok(())
+    }
+
+    async fn unpublish(
+        &self,
+        instance: &DocumentInstance,
+        display_values: &IndexMap<AttributeId, String>,
+        display_title: &str,
+    ) -> Result<(), DomainError> {
+        self.save(instance).await?;
+        let mut pub_store = self.published.write().map_err(lock_error)?;
+        pub_store.remove(&instance.id);
+        let mut meta = self.display_meta.write().map_err(lock_error)?;
+        meta.insert(
+            instance.id,
+            (display_values.clone(), display_title.to_string()),
+        );
+        Ok(())
+    }
+
+    async fn discard_draft(
+        &self,
+        _type_id: &DocumentTypeId,
+        id: DocumentInstanceId,
+    ) -> Result<Option<DocumentInstance>, DomainError> {
+        let pub_store = self.published.read().map_err(lock_error)?;
+        if let Some(clean) = pub_store.get(&id).cloned() {
+            drop(pub_store);
+            let mut inst_store = self.instances.write().map_err(lock_error)?;
+            inst_store.insert(id, clean.clone());
+            Ok(Some(clean))
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn delete(
         &self,
-        _type_id: &'static DocumentTypeId,
+        _type_id: &DocumentTypeId,
         id: DocumentInstanceId,
     ) -> Result<(), DomainError> {
         let mut store = self.instances.write().map_err(lock_error)?;
         store.remove(&id);
+
+        let mut pub_store = self.published.write().map_err(lock_error)?;
+        pub_store.remove(&id);
+
+        let mut meta = self.display_meta.write().map_err(lock_error)?;
+        meta.remove(&id);
 
         let mut rel_store = self.relations.write().map_err(lock_error)?;
         for by_parent in rel_store.values_mut() {
@@ -183,9 +475,49 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         Ok(())
     }
 
-    async fn exists_for_type(&self, type_id: &'static DocumentTypeId) -> Result<bool, DomainError> {
+    async fn exists_for_type(&self, type_id: &DocumentTypeId) -> Result<bool, DomainError> {
         let store = self.instances.read().map_err(lock_error)?;
         Ok(store.values().any(|inst| inst.document_type_id == *type_id))
+    }
+}
+
+impl DocumentSnapshotRepository for FakeDocumentInstanceRepository {
+    async fn save_snapshot(&self, snapshot: &DocumentSnapshot) -> Result<(), DomainError> {
+        let mut store = self.snapshots.write().map_err(lock_error)?;
+        store.push(snapshot.clone());
+        Ok(())
+    }
+
+    async fn list_snapshots(
+        &self,
+        type_id: &DocumentTypeId,
+        doc_id: DocumentInstanceId,
+    ) -> Result<Vec<SnapshotHeader>, DomainError> {
+        let store = self.snapshots.read().map_err(lock_error)?;
+        let mut list: Vec<SnapshotHeader> = store
+            .iter()
+            .filter(|s| s.document_type_id == *type_id && s.document_id == doc_id)
+            .map(SnapshotHeader::from)
+            .collect();
+        list.sort_by_key(|a| std::cmp::Reverse(a.revision));
+        Ok(list)
+    }
+
+    async fn get_snapshot(
+        &self,
+        type_id: &DocumentTypeId,
+        doc_id: DocumentInstanceId,
+        revision: u32,
+    ) -> Result<Option<DocumentSnapshot>, DomainError> {
+        let store = self.snapshots.read().map_err(lock_error)?;
+        Ok(store
+            .iter()
+            .find(|s| {
+                s.document_type_id == *type_id
+                    && s.document_id == doc_id
+                    && s.revision == revision
+            })
+            .cloned())
     }
 }
 

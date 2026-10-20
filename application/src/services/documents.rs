@@ -6,11 +6,15 @@ use std::future::Future;
 use chrono::Utc;
 use domain::auth::Permission;
 use domain::content::{
-    DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, RelationMap, validate_content,
+    extract_display_identity, validate_content, validate_publish_content, DocumentHeader,
+    DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, DocumentSnapshot,
+    DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader, SnapshotId,
+    SnapshotReason,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentKind, DocumentType, DocumentTypeId, RelationType};
 use domain::system::SystemContext;
+use uuid::Uuid;
 
 use crate::commands::documents::*;
 use crate::context::CallerContext;
@@ -66,6 +70,34 @@ pub trait DocumentsService: Send + Sync + 'static {
         caller: &CallerContext,
         cmd: UnpublishDocumentCommand,
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
+
+    /// Discards pending draft edits, reverting the document to its clean live published state.
+    fn discard_draft(
+        &self,
+        caller: &CallerContext,
+        cmd: DiscardDraftCommand,
+    ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
+
+    /// Restores a historical snapshot revision into the current draft.
+    fn restore_snapshot(
+        &self,
+        caller: &CallerContext,
+        cmd: RestoreSnapshotCommand,
+    ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
+
+    /// Lists lightweight document headers for Admin Studio views with 2-phase relational enrichment.
+    fn list_admin_headers(
+        &self,
+        caller: &CallerContext,
+        cmd: ListAdminHeadersCommand,
+    ) -> impl Future<Output = Result<(Vec<DocumentHeader>, u64), ApplicationError>> + Send;
+
+    /// Lists revision snapshot headers for a document instance.
+    fn list_snapshots(
+        &self,
+        caller: &CallerContext,
+        cmd: ListSnapshotsCommand,
+    ) -> impl Future<Output = Result<Vec<SnapshotHeader>, ApplicationError>> + Send;
 }
 
 /// Generic implementation of `DocumentsService` monomorphized over repository adapters.
@@ -76,7 +108,7 @@ pub struct DocumentsServiceImpl<R> {
 
 impl<R> DocumentsServiceImpl<R>
 where
-    R: DocumentInstanceRepository + 'static,
+    R: DocumentInstanceRepository + DocumentSnapshotRepository + 'static,
 {
     pub fn new(instance_repo: R, context: &'static SystemContext) -> Self {
         Self {
@@ -191,7 +223,7 @@ where
 
 impl<R> DocumentsService for DocumentsServiceImpl<R>
 where
-    R: DocumentInstanceRepository + 'static,
+    R: DocumentInstanceRepository + DocumentSnapshotRepository + 'static,
 {
     async fn find(
         &self,
@@ -286,7 +318,7 @@ where
 
         let mut instance = DocumentInstance::new(
             cmd.document_type.clone(),
-            caller.user_id.clone(),
+            caller.actor.clone(),
             Utc::now(),
         );
         instance.replace_fields(cmd.fields);
@@ -300,7 +332,16 @@ where
         // Apply and validate relational mutations
         self.validate_and_apply_relations(doc_type, &mut instance, cmd.relations)?;
 
-        self.instance_repo.save(&instance).await?;
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        self.instance_repo
+            .save_draft(&instance, &display_values, &display_title)
+            .await?;
 
         let populate = cmd.populate.as_deref().unwrap_or_default();
         if !populate.is_empty() {
@@ -344,7 +385,7 @@ where
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
         })?;
 
-        instance.touch(caller.user_id.clone(), Utc::now());
+        instance.edit_draft(caller.actor.clone(), Utc::now());
 
         // Revalidate against schema constraints
         if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
@@ -355,7 +396,16 @@ where
         // Apply and validate relational mutations
         self.validate_and_apply_relations(doc_type, &mut instance, cmd.relations)?;
 
-        self.instance_repo.save(&instance).await?;
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        self.instance_repo
+            .save_draft(&instance, &display_values, &display_title)
+            .await?;
 
         let populate = cmd.populate.as_deref().unwrap_or_default();
         if !populate.is_empty() {
@@ -425,8 +475,48 @@ where
             )));
         }
 
-        instance.publish(caller.user_id.clone(), Utc::now())?;
-        self.instance_repo.save(&instance).await?;
+        if let Some(expected) = cmd.expected_version
+            && instance.audit.version != expected
+        {
+            return Err(ApplicationError::Conflict(format!(
+                "version mismatch: expected {expected}, found {}",
+                instance.audit.version
+            )));
+        }
+
+        if let Err(errs) =
+            validate_publish_content(doc_type, &instance.content, &self.context.config)
+        {
+            let messages: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+            return Err(ApplicationError::Validation(messages));
+        }
+
+        let now = Utc::now();
+        let rev = instance.publish(caller.actor.clone(), now)?;
+
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        self.instance_repo
+            .publish(&instance, rev, &display_values, &display_title)
+            .await?;
+
+        let snapshot = DocumentSnapshot {
+            id: SnapshotId::new(Uuid::now_v7()),
+            document_type_id: instance.document_type_id.clone(),
+            document_id: instance.id,
+            revision: rev,
+            fields: instance.fields().clone(),
+            relations: instance.relations.clone(),
+            created_at: now,
+            created_by: caller.actor.clone(),
+            reason: SnapshotReason::Publish,
+        };
+        self.instance_repo.save_snapshot(&snapshot).await?;
 
         Ok(instance)
     }
@@ -461,10 +551,217 @@ where
             )));
         }
 
-        instance.unpublish(caller.user_id.clone(), Utc::now())?;
-        self.instance_repo.save(&instance).await?;
+        let now = Utc::now();
+        instance.unpublish(caller.actor.clone(), now)?;
+
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        self.instance_repo
+            .unpublish(&instance, &display_values, &display_title)
+            .await?;
+
+        let revision = match instance.content.publication_state {
+            PublicationState::Unpublished {
+                last_published_revision,
+                ..
+            } => last_published_revision,
+            _ => 0,
+        };
+
+        let snapshot = DocumentSnapshot {
+            id: SnapshotId::new(Uuid::now_v7()),
+            document_type_id: instance.document_type_id.clone(),
+            document_id: instance.id,
+            revision,
+            fields: instance.fields().clone(),
+            relations: instance.relations.clone(),
+            created_at: now,
+            created_by: caller.actor.clone(),
+            reason: SnapshotReason::Unpublish,
+        };
+        self.instance_repo.save_snapshot(&snapshot).await?;
 
         Ok(instance)
+    }
+
+    async fn discard_draft(
+        &self,
+        caller: &CallerContext,
+        cmd: DiscardDraftCommand,
+    ) -> Result<DocumentInstance, ApplicationError> {
+        let mut instance = self
+            .instance_repo
+            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .await?
+            .ok_or(ApplicationError::Domain(
+                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
+            ))?;
+
+        caller.check_permission(
+            &Permission::UpdateDocument(Some(instance.document_type_id.clone())),
+            Some(&instance),
+        )?;
+
+        instance.discard_draft()?;
+
+        let restored = self
+            .instance_repo
+            .discard_draft(cmd.document_type, cmd.document_instance_id)
+            .await?;
+
+        Ok(restored.unwrap_or(instance))
+    }
+
+    async fn restore_snapshot(
+        &self,
+        caller: &CallerContext,
+        cmd: RestoreSnapshotCommand,
+    ) -> Result<DocumentInstance, ApplicationError> {
+        let mut instance = self
+            .instance_repo
+            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .await?
+            .ok_or(ApplicationError::Domain(
+                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
+            ))?;
+
+        caller.check_permission(
+            &Permission::UpdateDocument(Some(instance.document_type_id.clone())),
+            Some(&instance),
+        )?;
+
+        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
+        })?;
+
+        let snapshot = self
+            .instance_repo
+            .get_snapshot(cmd.document_type, cmd.document_instance_id, cmd.revision)
+            .await?
+            .ok_or_else(|| ApplicationError::NotFound {
+                entity: "DocumentSnapshot",
+                id: format!("{}:v{}", cmd.document_instance_id, cmd.revision),
+            })?;
+
+        instance.restore_snapshot(&snapshot, caller.actor.clone(), Utc::now());
+
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        self.instance_repo
+            .save_draft(&instance, &display_values, &display_title)
+            .await?;
+
+        Ok(instance)
+    }
+
+    async fn list_admin_headers(
+        &self,
+        caller: &CallerContext,
+        cmd: ListAdminHeadersCommand,
+    ) -> Result<(Vec<DocumentHeader>, u64), ApplicationError> {
+        caller.check_permission(
+            &Permission::ReadDocument(Some(cmd.document_type.clone())),
+            None,
+        )?;
+
+        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
+        })?;
+
+        let mut page = self
+            .instance_repo
+            .list_admin_headers(cmd.document_type, cmd.pagination, cmd.status_filter)
+            .await?;
+
+        if let Some(rel_def) = doc_type.relational_display_field() {
+            let target_ids: Vec<DocumentInstanceId> = page
+                .items
+                .iter()
+                .filter_map(|header| {
+                    header
+                        .relational_display_target
+                        .as_ref()
+                        .filter(|(attr, _)| attr == &rel_def.id)
+                        .map(|(_, target_id)| *target_id)
+                })
+                .collect();
+
+            if !target_ids.is_empty() {
+                let titles = self
+                    .instance_repo
+                    .find_display_titles_by_ids(&rel_def.target, &target_ids)
+                    .await?;
+
+                let effective_fields = doc_type.effective_display_fields();
+
+                for header in &mut page.items {
+                    if let Some((attr, target_id)) = &header.relational_display_target
+                        && attr == &rel_def.id
+                        && let Some(target_title) = titles.get(target_id)
+                    {
+                        let mut new_display_values = header.display_values.clone();
+                    new_display_values.clear();
+                        for field_attr in &effective_fields {
+                            if field_attr == &rel_def.id {
+                                new_display_values.insert(field_attr.clone(), target_title.clone());
+                            } else if let Some(val) = header.display_values.get(field_attr) {
+                                new_display_values.insert(field_attr.clone(), val.clone());
+                            }
+                        }
+                        let new_title = if new_display_values.is_empty() {
+                            header.id.to_string()
+                        } else {
+                            let joined = new_display_values
+                                .values()
+                                .map(String::as_str)
+                                .collect::<Vec<_>>()
+                                .join(" — ");
+                            if joined.len() <= 255 {
+                                joined
+                            } else {
+                                let mut boundary = 252;
+                                while !joined.is_char_boundary(boundary) {
+                                    boundary -= 1;
+                                }
+                                format!("{}...", &joined[..boundary])
+                            }
+                        };
+                        header.display_values = new_display_values;
+                        header.display_title = new_title;
+                    }
+                }
+            }
+        }
+
+        Ok((page.items, page.total))
+    }
+
+    async fn list_snapshots(
+        &self,
+        caller: &CallerContext,
+        cmd: ListSnapshotsCommand,
+    ) -> Result<Vec<SnapshotHeader>, ApplicationError> {
+        caller.check_permission(
+            &Permission::ReadDocument(Some(cmd.document_type.clone())),
+            None,
+        )?;
+
+        let snapshots = self
+            .instance_repo
+            .list_snapshots(cmd.document_type, cmd.document_instance_id)
+            .await?;
+
+        Ok(snapshots)
     }
 }
 
@@ -704,7 +1001,7 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(unpublished.audit.updated_by, ActorId::User(caller.user_id));
+        assert_eq!(unpublished.audit.updated_by, caller.actor);
     }
 
     #[tokio::test]
