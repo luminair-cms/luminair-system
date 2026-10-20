@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use domain::auth::{
-    AccessRequest, AccessRequestId, AccessRequestRepository, AccessRequestStatus, Role, RoleId,
-    RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentId, UserRoleAssignmentRepository,
+    AccessRequest, AccessRequestId, AccessRequestRepository, AccessRequestStatus, Role,
+    RoleId, RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentId,
+    UserRoleAssignmentRepository,
 };
 use domain::content::{
     ContentValue, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, FieldFilter,
@@ -27,8 +28,8 @@ fn lock_error<T>(_: std::sync::PoisonError<T>) -> DomainError {
 fn matches_filters(instance: &DocumentInstance, filters: &[FieldFilter]) -> bool {
     filters.iter().all(|f| {
         matches!(
-            instance.content.fields.get(&f.attribute_id),
-            Some(ContentValue::Scalar(v)) if *v == f.value
+            instance.get_field(&f.attribute_id),
+            Some(ContentValue::Scalar(v)) if v == &f.value
         )
     })
 }
@@ -348,6 +349,7 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use chrono::{Duration, Utc};
+    use domain::auth::ActorId;
     use domain::content::{DomainValue, PrimitiveValue};
     use domain::test_support::{test_attr_id, test_doc_type_id, test_user_id};
 
@@ -365,11 +367,9 @@ mod tests {
         type_id: &'static DocumentTypeId,
         fields: &[(&str, ContentValue)],
     ) -> DocumentInstance {
-        let mut inst = DocumentInstance::new(type_id.clone(), None, Utc::now());
+        let mut inst = DocumentInstance::new(type_id.clone(), ActorId::System, Utc::now());
         for (name, value) in fields {
-            inst.content
-                .fields
-                .insert(test_attr_id(name), value.clone());
+            inst.set_field(test_attr_id(name), value.clone());
         }
         inst
     }

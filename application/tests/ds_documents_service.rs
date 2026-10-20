@@ -5,6 +5,7 @@ use application::context::CallerContext;
 use application::errors::ApplicationError;
 use application::services::{DocumentsService, DocumentsServiceImpl};
 use application::test_support::FakeDocumentInstanceRepository;
+use domain::auth::ActorId;
 use domain::content::{
     ContentValue, DomainValue, FieldFilter, Pagination, PrimitiveValue,
     PublicationState,
@@ -66,7 +67,7 @@ async fn ds_01_create_collection_draft_success() {
     assert!(res.is_ok(), "expected successful creation: {:?}", res);
     let inst = res.unwrap();
     assert_eq!(inst.audit.version, 1);
-    assert_eq!(inst.audit.created_by, Some(caller.user_id));
+    assert_eq!(inst.audit.created_by, ActorId::User(caller.user_id));
     assert!(matches!(
         inst.content.publication_state,
         PublicationState::Draft {
@@ -142,7 +143,7 @@ async fn ds_04_update_bumps_version_and_touches_audit_trail() {
         .unwrap();
 
     assert_eq!(updated.audit.version, 2);
-    assert_eq!(updated.audit.updated_by, Some(caller.user_id));
+    assert_eq!(updated.audit.updated_by, ActorId::User(caller.user_id));
 }
 
 #[tokio::test]
@@ -169,7 +170,7 @@ async fn ds_05_update_retains_unmentioned_fields() {
         .await
         .unwrap();
 
-    assert!(updated.content.fields.contains_key(&test_attr_id("title")));
+    assert!(updated.fields().contains_key(&test_attr_id("title")));
 }
 
 #[tokio::test]
@@ -247,8 +248,9 @@ async fn ds_08_unpublish_transitions_to_draft_with_last_revision() {
 
     assert!(matches!(
         draft.content.publication_state,
-        PublicationState::Draft {
-            last_published_revision: Some(1)
+        PublicationState::Unpublished {
+            last_published_revision: 1,
+            ..
         }
     ));
 }

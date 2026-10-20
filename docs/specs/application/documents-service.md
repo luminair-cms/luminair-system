@@ -73,12 +73,12 @@
 - **When**: Caller with `PublishDocument` permission invokes `service.publish(&caller, PublishDocumentCommand::new(type_id, instance_id)).await`.
 - **Then**: Returns `Err(ApplicationError::Conflict(msg))` containing `"does not support draft-and-publish"`.
 
-### DS-08 — Unpublish Transitions to Draft with Last Revision
+### DS-08 — Unpublish Transitions to Unpublished with Last Revision
 - **Status**: `Draft`
 - **Origin**: `adr:004`
 - **Given**: An existing published instance with revision `1` of a `DraftPublishOn` document type.
 - **When**: Caller with `PublishDocument` permission invokes `service.unpublish(&caller, UnpublishDocumentCommand::new(type_id, instance_id)).await`.
-- **Then**: Returns `Ok(draft)` with `publication_state` as `Draft { last_published_revision: Some(1) }`, audit version incremented, and saved in repository.
+- **Then**: Returns `Ok(unpublished)` with `publication_state` as `PublicationState::Unpublished { last_published_revision: 1, .. }`, audit version incremented, and saved in repository.
 
 ### DS-09 — Unpublish Rejects Already Draft Instance
 - **Status**: `Draft`

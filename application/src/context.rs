@@ -85,7 +85,7 @@ mod tests {
 
     fn make_test_instance(owner: &UserId) -> (DocumentTypeId, DocumentInstance) {
         let type_id = DocumentTypeId::try_new("article").unwrap();
-        let instance = DocumentInstance::new(type_id.clone(), Some(owner.clone()), Utc::now());
+        let instance = DocumentInstance::new(type_id.clone(), owner.clone(), Utc::now());
         (type_id, instance)
     }
 

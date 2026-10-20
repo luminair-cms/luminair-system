@@ -2,9 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use nutype::nutype;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::auth::UserId;
+use crate::auth::{ActorId, UserId};
+use crate::content::header::DocumentSnapshot;
 use crate::content::ContentValue;
 use crate::errors::DomainError;
 use crate::schema::{AttributeId, DocumentTypeId};
@@ -25,17 +27,9 @@ use crate::schema::{AttributeId, DocumentTypeId};
 ))]
 pub struct DocumentInstanceId(Uuid);
 
-/*
-Found issues for future investigation:
-Public mutable fields: External callers can mutate instance.content.fields directly, bypassing version increments (touch()) and publication state transitions.
-Missing set_field / get_field methods: The aggregate does not provide convenient domain methods to get or update field values.
-Leaked DB detail (db_row_id): db_row_id has no explanation, no domain semantics, and is only initialized to None. If this is an infrastructure surrogate key, it does not belong in the domain aggregate.
- */
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentInstance {
     pub id: DocumentInstanceId,
-    pub db_row_id: Option<DocumentInstanceId>,
     pub document_type_id: DocumentTypeId,
     pub content: DocumentContent,
     pub relations: HashMap<AttributeId, Vec<ResolvedRelation>>,
@@ -45,11 +39,43 @@ pub struct DocumentInstance {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentContent {
-    pub fields: HashMap<AttributeId, ContentValue>,
+    fields: HashMap<AttributeId, ContentValue>,
     pub publication_state: PublicationState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl DocumentContent {
+    pub fn new(
+        fields: HashMap<AttributeId, ContentValue>,
+        publication_state: PublicationState,
+    ) -> Self {
+        Self {
+            fields,
+            publication_state,
+        }
+    }
+
+    pub fn fields(&self) -> &HashMap<AttributeId, ContentValue> {
+        &self.fields
+    }
+
+    pub fn get_field(&self, attr_id: &AttributeId) -> Option<&ContentValue> {
+        self.fields.get(attr_id)
+    }
+
+    pub fn set_field(&mut self, attr_id: AttributeId, value: ContentValue) {
+        self.fields.insert(attr_id, value);
+    }
+
+    pub fn remove_field(&mut self, attr_id: &AttributeId) -> Option<ContentValue> {
+        self.fields.remove(attr_id)
+    }
+
+    pub fn replace_fields(&mut self, fields: HashMap<AttributeId, ContentValue>) {
+        self.fields = fields;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublicationState {
     Draft {
         last_published_revision: Option<u32>,
@@ -57,16 +83,27 @@ pub enum PublicationState {
     Published {
         revision: u32,
         published_at: DateTime<Utc>,
-        published_by: Option<UserId>,
+        published_by: ActorId,
+    },
+    Modified {
+        live_revision: u32,
+        published_at: DateTime<Utc>,
+        published_by: ActorId,
+        draft_version: u32,
+    },
+    Unpublished {
+        last_published_revision: u32,
+        unpublished_at: DateTime<Utc>,
+        unpublished_by: ActorId,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditTrail {
     pub created_at: DateTime<Utc>,
-    pub created_by: Option<UserId>,
+    pub created_by: ActorId,
     pub updated_at: DateTime<Utc>,
-    pub updated_by: Option<UserId>,
+    pub updated_by: ActorId,
     pub version: u32,
 }
 
@@ -77,17 +114,17 @@ pub struct ResolvedRelation {
 }
 
 impl DocumentInstance {
-    pub fn new(type_id: DocumentTypeId, by: Option<UserId>, now: DateTime<Utc>) -> Self {
+    pub fn new(type_id: DocumentTypeId, by: impl Into<ActorId>, now: DateTime<Utc>) -> Self {
+        let by = by.into();
         Self {
             id: DocumentInstanceId::new(Uuid::now_v7()),
-            db_row_id: None,
             document_type_id: type_id,
-            content: DocumentContent {
-                fields: HashMap::new(),
-                publication_state: PublicationState::Draft {
+            content: DocumentContent::new(
+                HashMap::new(),
+                PublicationState::Draft {
                     last_published_revision: None,
                 },
-            },
+            ),
             relations: HashMap::new(),
             populated_relations: HashMap::new(),
             audit: AuditTrail {
@@ -98,6 +135,26 @@ impl DocumentInstance {
                 version: 1,
             },
         }
+    }
+
+    pub fn fields(&self) -> &HashMap<AttributeId, ContentValue> {
+        self.content.fields()
+    }
+
+    pub fn get_field(&self, attr_id: &AttributeId) -> Option<&ContentValue> {
+        self.content.get_field(attr_id)
+    }
+
+    pub fn set_field(&mut self, attr_id: AttributeId, value: ContentValue) {
+        self.content.set_field(attr_id, value);
+    }
+
+    pub fn remove_field(&mut self, attr_id: &AttributeId) -> Option<ContentValue> {
+        self.content.remove_field(attr_id)
+    }
+
+    pub fn replace_fields(&mut self, fields: HashMap<AttributeId, ContentValue>) {
+        self.content.replace_fields(fields);
     }
 
     /// Returns a new instance with populated related document instances attached.
@@ -152,12 +209,18 @@ impl DocumentInstance {
     }
 
     /// Publishes the document instance, advancing its revision and returning the new revision number.
-    pub fn publish(&mut self, by: Option<UserId>, now: DateTime<Utc>) -> Result<u32, DomainError> {
+    pub fn publish(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) -> Result<u32, DomainError> {
+        let by = by.into();
         let new_revision = match self.content.publication_state {
             PublicationState::Draft {
                 last_published_revision,
             } => last_published_revision.unwrap_or(0) + 1,
             PublicationState::Published { revision, .. } => revision + 1,
+            PublicationState::Modified { live_revision, .. } => live_revision + 1,
+            PublicationState::Unpublished {
+                last_published_revision,
+                ..
+            } => last_published_revision + 1,
         };
 
         self.content.publication_state = PublicationState::Published {
@@ -171,31 +234,115 @@ impl DocumentInstance {
         Ok(new_revision)
     }
 
-    /// Transitions a published document back into a draft, recording the last published revision.
-    pub fn unpublish(&mut self, by: Option<UserId>, now: DateTime<Utc>) -> Result<(), DomainError> {
+    /// Transitions a published or modified document into unpublished state, recording the last revision.
+    pub fn unpublish(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) -> Result<(), DomainError> {
+        let by = by.into();
         match self.content.publication_state {
-            PublicationState::Published { revision, .. } => {
-                self.content.publication_state = PublicationState::Draft {
-                    last_published_revision: Some(revision),
+            PublicationState::Published { revision, .. }
+            | PublicationState::Modified {
+                live_revision: revision,
+                ..
+            } => {
+                self.content.publication_state = PublicationState::Unpublished {
+                    last_published_revision: revision,
+                    unpublished_at: now,
+                    unpublished_by: by.clone(),
                 };
                 self.touch(by, now);
                 Ok(())
             }
-            PublicationState::Draft { .. } => Err(DomainError::InvalidStateTransition {
-                reason: "cannot unpublish a document that is already a draft".to_string(),
+            PublicationState::Draft { .. } | PublicationState::Unpublished { .. } => {
+                Err(DomainError::InvalidStateTransition {
+                    reason: "cannot unpublish a document that is not currently published".to_string(),
+                })
+            }
+        }
+    }
+
+    /// Transitions a published document into modified state, updating draft_version and touching audit.
+    pub fn edit_draft(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) {
+        let by = by.into();
+        match self.content.publication_state.clone() {
+            PublicationState::Published {
+                revision,
+                published_at,
+                published_by,
+            } => {
+                self.touch(by, now);
+                self.content.publication_state = PublicationState::Modified {
+                    live_revision: revision,
+                    published_at,
+                    published_by,
+                    draft_version: self.audit.version,
+                };
+            }
+            PublicationState::Modified {
+                live_revision,
+                published_at,
+                published_by,
+                ..
+            } => {
+                self.touch(by, now);
+                self.content.publication_state = PublicationState::Modified {
+                    live_revision,
+                    published_at,
+                    published_by,
+                    draft_version: self.audit.version,
+                };
+            }
+            PublicationState::Draft { .. } | PublicationState::Unpublished { .. } => {
+                self.touch(by, now);
+            }
+        }
+    }
+
+    /// Discards a modified draft, restoring clean Published state without incrementing audit version.
+    pub fn discard_draft(&mut self) -> Result<(), DomainError> {
+        match self.content.publication_state.clone() {
+            PublicationState::Modified {
+                live_revision,
+                published_at,
+                published_by,
+                ..
+            } => {
+                self.content.publication_state = PublicationState::Published {
+                    revision: live_revision,
+                    published_at,
+                    published_by,
+                };
+                Ok(())
+            }
+            _ => Err(DomainError::InvalidStateTransition {
+                reason: "cannot discard draft when document is not in Modified state".to_string(),
             }),
         }
     }
 
+    /// Restores content and relations from a snapshot and marks the document as a modified draft.
+    pub fn restore_snapshot(
+        &mut self,
+        snapshot: &DocumentSnapshot,
+        by: impl Into<ActorId>,
+        now: DateTime<Utc>,
+    ) {
+        self.replace_fields(snapshot.fields.clone());
+        self.relations = snapshot.relations.clone();
+        self.edit_draft(by, now);
+    }
+
     /// Records an edit/touch on the instance, updating updated_at and incrementing version.
-    pub fn touch(&mut self, by: Option<UserId>, now: DateTime<Utc>) {
+    pub fn touch(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) {
         self.audit.updated_at = now;
-        self.audit.updated_by = by;
+        self.audit.updated_by = by.into();
         self.audit.version += 1;
     }
 
     pub fn is_owned_by(&self, user_id: &UserId) -> bool {
-        self.audit.created_by.as_ref() == Some(user_id)
+        self.audit.created_by.as_user() == Some(user_id)
+    }
+
+    pub fn is_owned_by_actor(&self, actor: &ActorId) -> bool {
+        &self.audit.created_by == actor
     }
 }
 
@@ -203,12 +350,14 @@ impl DocumentInstance {
 mod tests {
     use super::*;
     use chrono::Duration;
+    use crate::content::header::{SnapshotId, SnapshotReason};
+    use crate::content::values::{DomainValue, PrimitiveValue};
     use crate::test_support::{test_attr_id, test_doc_type_id, test_user_id};
 
     fn make_test_instance() -> (DocumentInstance, UserId, DateTime<Utc>) {
         let user = test_user_id("author-1");
         let now = Utc::now();
-        let instance = DocumentInstance::new(test_doc_type_id("article"), Some(user.clone()), now);
+        let instance = DocumentInstance::new(test_doc_type_id("article"), user.clone(), now);
         (instance, user, now)
     }
 
@@ -217,19 +366,19 @@ mod tests {
         let (mut instance, user, t0) = make_test_instance();
         let t1 = t0 + Duration::seconds(10);
 
-        let rev = instance.publish(Some(user.clone()), t1).unwrap();
+        let rev = instance.publish(user.clone(), t1).unwrap();
         assert_eq!(rev, 1);
         assert_eq!(instance.audit.version, 2);
         assert_eq!(instance.audit.updated_at, t1);
-        assert_eq!(instance.audit.updated_by, Some(user.clone()));
+        assert_eq!(instance.audit.updated_by, ActorId::User(user.clone()));
 
         assert!(matches!(
-            instance.content.publication_state,
+            &instance.content.publication_state,
             PublicationState::Published {
                 revision: 1,
                 published_at,
                 published_by,
-            } if published_at == t1 && published_by == Some(user)
+            } if *published_at == t1 && published_by == &ActorId::User(user)
         ));
     }
 
@@ -241,20 +390,21 @@ mod tests {
         let t3 = t0 + Duration::seconds(30);
 
         // Publish revision 1
-        instance.publish(Some(user.clone()), t1).unwrap();
-        // Unpublish back to draft
-        instance.unpublish(Some(user.clone()), t2).unwrap();
+        instance.publish(user.clone(), t1).unwrap();
+        // Unpublish to Unpublished
+        instance.unpublish(user.clone(), t2).unwrap();
         assert!(matches!(
             instance.content.publication_state,
-            PublicationState::Draft {
-                last_published_revision: Some(1)
+            PublicationState::Unpublished {
+                last_published_revision: 1,
+                ..
             }
         ));
-        assert_eq!(instance.audit.updated_by, Some(user.clone()));
+        assert_eq!(instance.audit.updated_by, ActorId::User(user.clone()));
         assert_eq!(instance.audit.updated_at, t2);
 
         // Re-publish should advance to revision 2
-        let rev = instance.publish(Some(user), t3).unwrap();
+        let rev = instance.publish(user, t3).unwrap();
         assert_eq!(rev, 2);
         assert!(matches!(
             instance.content.publication_state,
@@ -265,38 +415,149 @@ mod tests {
     #[test]
     fn test_publish_from_published_state_advances_revision() {
         let (mut instance, user, t0) = make_test_instance();
-        instance.publish(Some(user.clone()), t0).unwrap();
+        instance.publish(user.clone(), t0).unwrap();
         let t1 = t0 + Duration::seconds(15);
 
-        let rev = instance.publish(Some(user), t1).unwrap();
+        let rev = instance.publish(user, t1).unwrap();
         assert_eq!(rev, 2);
     }
 
     #[test]
-    fn test_unpublish_from_published_transitions_to_draft_with_last_revision() {
+    fn test_unpublish_from_published_transitions_to_unpublished_with_last_revision() {
         let (mut instance, user, t0) = make_test_instance();
-        instance.publish(Some(user.clone()), t0).unwrap();
+        instance.publish(user.clone(), t0).unwrap();
         let t1 = t0 + Duration::seconds(10);
 
-        instance.unpublish(Some(user.clone()), t1).unwrap();
+        instance.unpublish(user.clone(), t1).unwrap();
         assert!(matches!(
-            instance.content.publication_state,
-            PublicationState::Draft {
-                last_published_revision: Some(1)
-            }
+            &instance.content.publication_state,
+            PublicationState::Unpublished {
+                last_published_revision: 1,
+                unpublished_at,
+                unpublished_by,
+            } if *unpublished_at == t1 && unpublished_by == &ActorId::User(user.clone())
         ));
         assert_eq!(instance.audit.updated_at, t1);
-        assert_eq!(instance.audit.updated_by, Some(user));
+        assert_eq!(instance.audit.updated_by, ActorId::User(user));
     }
 
     #[test]
     fn test_unpublish_from_draft_fails_with_invalid_state_transition() {
         let (mut instance, user, t0) = make_test_instance();
-        let result = instance.unpublish(Some(user), t0);
+        let result = instance.unpublish(user, t0);
         assert!(matches!(
             result,
             Err(DomainError::InvalidStateTransition { .. })
         ));
+    }
+
+    #[test]
+    fn test_edit_draft_and_discard_draft_lifecycle() {
+        let (mut instance, user, t0) = make_test_instance();
+        let t1 = t0 + Duration::seconds(10);
+        let t2 = t0 + Duration::seconds(20);
+
+        // Publish revision 1
+        instance.publish(user.clone(), t1).unwrap();
+        assert_eq!(instance.audit.version, 2);
+
+        // Edit draft -> transitions to Modified, version bumps to 3
+        instance.edit_draft(user.clone(), t2);
+        assert_eq!(instance.audit.version, 3);
+        assert!(matches!(
+            instance.content.publication_state,
+            PublicationState::Modified {
+                live_revision: 1,
+                draft_version: 3,
+                ..
+            }
+        ));
+
+        // Discard draft -> transitions back to Published, version remains 3
+        instance.discard_draft().unwrap();
+        assert_eq!(instance.audit.version, 3);
+        assert!(matches!(
+            instance.content.publication_state,
+            PublicationState::Published { revision: 1, .. }
+        ));
+
+        // Discarding draft when not Modified returns error
+        assert!(matches!(
+            instance.discard_draft(),
+            Err(DomainError::InvalidStateTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn test_restore_snapshot() {
+        let (mut instance, user, t0) = make_test_instance();
+        let t1 = t0 + Duration::seconds(10);
+        let t2 = t0 + Duration::seconds(20);
+
+        instance.publish(user.clone(), t1).unwrap();
+        assert_eq!(instance.audit.version, 2);
+
+        let title_attr = test_attr_id("title");
+        let mut snap_fields = HashMap::new();
+        snap_fields.insert(
+            title_attr.clone(),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Snapshot Title".into()))),
+        );
+
+        let snapshot = DocumentSnapshot {
+            id: SnapshotId::new(Uuid::now_v7()),
+            document_type_id: instance.document_type_id.clone(),
+            document_id: instance.id,
+            revision: 1,
+            fields: snap_fields,
+            relations: HashMap::new(),
+            created_at: t1,
+            created_by: ActorId::User(user.clone()),
+            reason: SnapshotReason::Publish,
+        };
+
+        instance.restore_snapshot(&snapshot, user.clone(), t2);
+        assert_eq!(instance.audit.version, 3);
+        assert_eq!(instance.audit.updated_at, t2);
+        assert_eq!(
+            instance.get_field(&title_attr),
+            Some(&ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Snapshot Title".into()))))
+        );
+        assert!(matches!(
+            instance.content.publication_state,
+            PublicationState::Modified {
+                live_revision: 1,
+                draft_version: 3,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_encapsulated_field_accessors() {
+        let (mut instance, _, _) = make_test_instance();
+        let title_attr = test_attr_id("title");
+        let title_val = ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Rust".into())));
+
+        assert!(instance.fields().is_empty());
+        assert_eq!(instance.get_field(&title_attr), None);
+
+        instance.set_field(title_attr.clone(), title_val.clone());
+        assert_eq!(instance.get_field(&title_attr), Some(&title_val));
+        assert_eq!(instance.fields().len(), 1);
+
+        let removed = instance.remove_field(&title_attr);
+        assert_eq!(removed, Some(title_val));
+        assert_eq!(instance.get_field(&title_attr), None);
+
+        let mut new_fields = HashMap::new();
+        let desc_attr = test_attr_id("desc");
+        let desc_val = ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Desc".into())));
+        new_fields.insert(desc_attr.clone(), desc_val.clone());
+        instance.replace_fields(new_fields);
+
+        assert_eq!(instance.fields().len(), 1);
+        assert_eq!(instance.get_field(&desc_attr), Some(&desc_val));
     }
 
     #[test]
@@ -368,6 +629,8 @@ mod tests {
 
         assert!(instance.is_owned_by(&owner));
         assert!(!instance.is_owned_by(&stranger));
+        assert!(instance.is_owned_by_actor(&ActorId::User(owner)));
+        assert!(!instance.is_owned_by_actor(&ActorId::User(stranger)));
     }
 
     #[test]
@@ -377,9 +640,9 @@ mod tests {
         let editor = test_user_id("editor");
         let t1 = t0 + Duration::seconds(45);
 
-        instance.touch(Some(editor.clone()), t1);
+        instance.touch(editor.clone(), t1);
         assert_eq!(instance.audit.version, 2);
         assert_eq!(instance.audit.updated_at, t1);
-        assert_eq!(instance.audit.updated_by, Some(editor));
+        assert_eq!(instance.audit.updated_by, ActorId::User(editor));
     }
 }

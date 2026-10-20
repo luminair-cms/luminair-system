@@ -286,10 +286,10 @@ where
 
         let mut instance = DocumentInstance::new(
             cmd.document_type.clone(),
-            Some(caller.user_id.clone()),
+            caller.user_id.clone(),
             Utc::now(),
         );
-        instance.content.fields = cmd.fields;
+        instance.replace_fields(cmd.fields);
 
         // Schema constraint and required field validation
         if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
@@ -337,14 +337,14 @@ where
         // Apply updated fields (supports partial PATCH: omitted fields are retained,
         // while explicit ContentValue::Null clears/resets optional field values).
         for (attr, val) in cmd.fields {
-            instance.content.fields.insert(attr, val);
+            instance.set_field(attr, val);
         }
 
         let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
         })?;
 
-        instance.touch(Some(caller.user_id.clone()), Utc::now());
+        instance.touch(caller.user_id.clone(), Utc::now());
 
         // Revalidate against schema constraints
         if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
@@ -425,7 +425,7 @@ where
             )));
         }
 
-        instance.publish(Some(caller.user_id.clone()), Utc::now())?;
+        instance.publish(caller.user_id.clone(), Utc::now())?;
         self.instance_repo.save(&instance).await?;
 
         Ok(instance)
@@ -461,7 +461,7 @@ where
             )));
         }
 
-        instance.unpublish(Some(caller.user_id.clone()), Utc::now())?;
+        instance.unpublish(caller.user_id.clone(), Utc::now())?;
         self.instance_repo.save(&instance).await?;
 
         Ok(instance)
@@ -472,7 +472,7 @@ where
 mod tests {
     use super::*;
 
-    use domain::auth::UserId;
+    use domain::auth::{ActorId, UserId};
     use domain::content::{
         ContentValue, DomainValue, Pagination, PrimitiveValue, PublicationState,
     };
@@ -594,7 +594,7 @@ mod tests {
         // Setup relation data in fake repo
         let rel_attr = AttributeId::try_new("tags").unwrap();
         let tag_type_id = DocumentTypeId::try_new("tag").unwrap();
-        let related_tag = DocumentInstance::new(tag_type_id, None, Utc::now());
+        let related_tag = DocumentInstance::new(tag_type_id, ActorId::System, Utc::now());
 
         service.instance_repo.add_relation_data(
             rel_attr.clone(),
@@ -699,11 +699,12 @@ mod tests {
 
         assert!(matches!(
             unpublished.content.publication_state,
-            PublicationState::Draft {
-                last_published_revision: Some(1)
+            PublicationState::Unpublished {
+                last_published_revision: 1,
+                ..
             }
         ));
-        assert_eq!(unpublished.audit.updated_by, Some(caller.user_id));
+        assert_eq!(unpublished.audit.updated_by, ActorId::User(caller.user_id));
     }
 
     #[tokio::test]

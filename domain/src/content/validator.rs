@@ -101,8 +101,67 @@ fn evaluate_constraint(
     }
 }
 
-/// Validates document instance content against a `DocumentType` definition and `SystemConfig`.
-pub fn validate_content(
+/// Validates document instance content for draft saving (lenient: skips required checks for missing/null).
+pub fn validate_draft_content(
+    doc_type: &DocumentType,
+    content: &DocumentContent,
+    system_config: &SystemConfig,
+) -> Result<(), Vec<DomainError>> {
+    let mut errors = Vec::new();
+
+    // 1. Validate declared fields (lenient: skip required checks when missing or null)
+    for field_def in &doc_type.fields {
+        let attr_id = &field_def.id;
+        match content.get_field(attr_id) {
+            None | Some(ContentValue::Null) => {
+                // Incomplete drafts are allowed to omit required fields
+            }
+            Some(ContentValue::Scalar(val)) => {
+                if !val.matches_field_type(&field_def.field_type) {
+                    errors.push(DomainError::InvalidFieldValue {
+                        attribute_id: attr_id.clone(),
+                        reason: format!(
+                            "value does not match field type {:?}",
+                            field_def.field_type
+                        ),
+                    });
+                }
+            }
+            Some(ContentValue::LocalizedText(map)) => {
+                if field_def.field_type != FieldType::LocalizedText {
+                    errors.push(DomainError::InvalidFieldValue {
+                        attribute_id: attr_id.clone(),
+                        reason: "localized text value provided for non-localized field".to_string(),
+                    });
+                } else {
+                    let mut sorted_locales: Vec<_> = map.keys().collect();
+                    sorted_locales.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+                    for locale in sorted_locales {
+                        if !system_config.contains_locale(locale) {
+                            errors.push(DomainError::UnknownLocale(locale.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Reject undeclared fields
+    for attr_id in content.fields().keys() {
+        if !doc_type.fields.contains(attr_id) {
+            errors.push(DomainError::UnknownAttribute(attr_id.clone()));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Validates document instance content against strict schema rules for publication.
+pub fn validate_publish_content(
     doc_type: &DocumentType,
     content: &DocumentContent,
     system_config: &SystemConfig,
@@ -112,7 +171,7 @@ pub fn validate_content(
     // 1. Validate declared fields
     for field_def in &doc_type.fields {
         let attr_id = &field_def.id;
-        match content.fields.get(attr_id) {
+        match content.get_field(attr_id) {
             None | Some(ContentValue::Null) => {
                 if field_def.required {
                     errors.push(DomainError::InvalidFieldValue {
@@ -171,7 +230,7 @@ pub fn validate_content(
     }
 
     // 2. Reject undeclared fields
-    for attr_id in content.fields.keys() {
+    for attr_id in content.fields().keys() {
         if !doc_type.fields.contains(attr_id) {
             errors.push(DomainError::UnknownAttribute(attr_id.clone()));
         }
@@ -182,6 +241,15 @@ pub fn validate_content(
     } else {
         Err(errors)
     }
+}
+
+/// Backward-compatible alias delegating to `validate_publish_content`.
+pub fn validate_content(
+    doc_type: &DocumentType,
+    content: &DocumentContent,
+    system_config: &SystemConfig,
+) -> Result<(), Vec<DomainError>> {
+    validate_publish_content(doc_type, content, system_config)
 }
 
 #[cfg(test)]
@@ -420,6 +488,62 @@ mod tests {
         assert!(matches!(
             &errors[0],
             DomainError::UnknownAttribute(attr) if *attr == extra_attr
+        ));
+    }
+
+    #[test]
+    fn test_two_tier_validation_draft_vs_publish() {
+        let (doc_type, config, title_attr) = make_test_setup();
+        let (_, _, de) = test_locales();
+
+        // 1. Missing required field: Draft succeeds, Publish fails
+        let empty_content = draft_content(HashMap::new());
+        assert!(validate_draft_content(&doc_type, &empty_content, &config).is_ok());
+        let pub_errs = validate_publish_content(&doc_type, &empty_content, &config).unwrap_err();
+        assert_eq!(pub_errs.len(), 1);
+        assert!(matches!(&pub_errs[0], DomainError::InvalidFieldValue { attribute_id, .. } if *attribute_id == title_attr));
+
+        // 2. Null required field: Draft succeeds, Publish fails
+        let mut null_fields = HashMap::new();
+        null_fields.insert(title_attr.clone(), ContentValue::Null);
+        let null_content = draft_content(null_fields);
+        assert!(validate_draft_content(&doc_type, &null_content, &config).is_ok());
+        assert!(validate_publish_content(&doc_type, &null_content, &config).is_err());
+
+        // 3. Type mismatch on present field: Both Draft and Publish fail
+        let mut invalid_type_fields = HashMap::new();
+        invalid_type_fields.insert(
+            title_attr.clone(),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(123))),
+        );
+        let invalid_type_content = draft_content(invalid_type_fields);
+        assert!(validate_draft_content(&doc_type, &invalid_type_content, &config).is_err());
+        assert!(validate_publish_content(&doc_type, &invalid_type_content, &config).is_err());
+
+        // 4. Unknown locale on localized field: Both Draft and Publish fail
+        let localized_doc_type = DocumentTypeBuilder::collection("article-loc")
+            .with_field(localized_field("summary"))
+            .build();
+        let mut de_loc_map = HashMap::new();
+        de_loc_map.insert(de.clone(), "Hallo".to_string());
+        let mut loc_fields = HashMap::new();
+        loc_fields.insert(test_attr_id("summary"), ContentValue::LocalizedText(de_loc_map));
+        let loc_content = draft_content(loc_fields);
+        assert!(matches!(
+            &validate_draft_content(&localized_doc_type, &loc_content, &config).unwrap_err()[0],
+            DomainError::UnknownLocale(loc) if *loc == de
+        ));
+
+        // 5. Unknown attribute: Both Draft and Publish fail
+        let mut unknown_attr_fields = HashMap::new();
+        unknown_attr_fields.insert(
+            test_attr_id("unregistered-attr"),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("test".into()))),
+        );
+        let unknown_attr_content = draft_content(unknown_attr_fields);
+        assert!(matches!(
+            &validate_draft_content(&doc_type, &unknown_attr_content, &config).unwrap_err()[0],
+            DomainError::UnknownAttribute(attr) if attr.as_ref() == "unregistered-attr"
         ));
     }
 }

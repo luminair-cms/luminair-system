@@ -6,7 +6,7 @@ use super::ids::{test_doc_type_id, test_locales, test_user_id};
 use crate::auth::access_request::AccessRequest;
 use crate::auth::policy::AccessRequestPolicy;
 use crate::auth::role::{Permission, Role, RoleId};
-use crate::auth::user::UserId;
+use crate::auth::user::{ActorId, UserId};
 use crate::common::{DisplayName, Email};
 use crate::content::instance::{DocumentContent, DocumentInstance, PublicationState};
 use crate::content::values::ContentValue;
@@ -27,8 +27,10 @@ pub fn fixture_system_config() -> SystemConfig {
 /// Returns a new `DocumentInstance` in Draft state with audit initialized.
 pub fn fixture_document_instance(type_id: &str, owner_name: Option<&str>) -> DocumentInstance {
     let doc_type = test_doc_type_id(type_id);
-    let owner = owner_name.map(test_user_id);
-    DocumentInstance::new(doc_type, owner, Utc::now())
+    let actor = owner_name
+        .map(|n| ActorId::User(test_user_id(n)))
+        .unwrap_or(ActorId::System);
+    DocumentInstance::new(doc_type, actor, Utc::now())
 }
 
 /// Returns a pre-built `AccessRequest` in Pending state.
@@ -63,10 +65,10 @@ pub fn admin_role() -> Role {
 
 /// Shorthand to package a map of fields into `DocumentContent` in Draft state.
 pub fn draft_content(fields: HashMap<AttributeId, ContentValue>) -> DocumentContent {
-    DocumentContent {
+    DocumentContent::new(
         fields,
-        publication_state: PublicationState::Draft {
+        PublicationState::Draft {
             last_published_revision: None,
         },
-    }
+    )
 }
