@@ -73,6 +73,28 @@ impl FakeDocumentInstanceRepository {
         let parent_map = map.entry(attr).or_default();
         parent_map.insert(parent_id, related);
     }
+
+    fn save_internal(&self, instance: &DocumentInstance) -> Result<(), DomainError> {
+        let mut store = self.instances.write().map_err(lock_error)?;
+        store.insert(instance.id, instance.clone());
+
+        let mut rel_store = self.relations.write().map_err(lock_error)?;
+
+        for by_parent in rel_store.values_mut() {
+            by_parent.remove(&instance.id);
+        }
+
+        for (attr, resolved_list) in &instance.relations {
+            let by_parent = rel_store.entry(attr.clone()).or_default();
+            let related_instances: Vec<DocumentInstance> = resolved_list
+                .iter()
+                .filter_map(|r| store.get(&r.target_instance_id).cloned())
+                .collect();
+            by_parent.insert(instance.id, related_instances);
+        }
+
+        Ok(())
+    }
 }
 
 impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
@@ -365,35 +387,13 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         Ok(result)
     }
 
-    async fn save(&self, instance: &DocumentInstance) -> Result<(), DomainError> {
-        let mut store = self.instances.write().map_err(lock_error)?;
-        store.insert(instance.id, instance.clone());
-
-        let mut rel_store = self.relations.write().map_err(lock_error)?;
-
-        for by_parent in rel_store.values_mut() {
-            by_parent.remove(&instance.id);
-        }
-
-        for (attr, resolved_list) in &instance.relations {
-            let by_parent = rel_store.entry(attr.clone()).or_default();
-            let related_instances: Vec<DocumentInstance> = resolved_list
-                .iter()
-                .filter_map(|r| store.get(&r.target_instance_id).cloned())
-                .collect();
-            by_parent.insert(instance.id, related_instances);
-        }
-
-        Ok(())
-    }
-
     async fn save_draft(
         &self,
         instance: &DocumentInstance,
         display_values: &IndexMap<AttributeId, String>,
         display_title: &str,
     ) -> Result<(), DomainError> {
-        self.save(instance).await?;
+        self.save_internal(instance)?;
         let mut meta = self.display_meta.write().map_err(lock_error)?;
         meta.insert(
             instance.id,
@@ -408,15 +408,18 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         _revision: u32,
         display_values: &IndexMap<AttributeId, String>,
         display_title: &str,
+        snapshot: &DocumentSnapshot,
     ) -> Result<(), DomainError> {
-        self.save(instance).await?;
-        let mut pub_store = self.published.write().map_err(lock_error)?;
-        pub_store.insert(instance.id, instance.clone());
+        self.save_internal(instance)?;
+        let mut pub_map = self.published.write().map_err(lock_error)?;
+        pub_map.insert(instance.id, instance.clone());
         let mut meta = self.display_meta.write().map_err(lock_error)?;
         meta.insert(
             instance.id,
             (display_values.clone(), display_title.to_string()),
         );
+        let mut snaps = self.snapshots.write().map_err(lock_error)?;
+        snaps.push(snapshot.clone());
         Ok(())
     }
 
@@ -425,15 +428,18 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         instance: &DocumentInstance,
         display_values: &IndexMap<AttributeId, String>,
         display_title: &str,
+        snapshot: &DocumentSnapshot,
     ) -> Result<(), DomainError> {
-        self.save(instance).await?;
-        let mut pub_store = self.published.write().map_err(lock_error)?;
-        pub_store.remove(&instance.id);
+        self.save_internal(instance)?;
+        let mut pub_map = self.published.write().map_err(lock_error)?;
+        pub_map.remove(&instance.id);
         let mut meta = self.display_meta.write().map_err(lock_error)?;
         meta.insert(
             instance.id,
             (display_values.clone(), display_title.to_string()),
         );
+        let mut snaps = self.snapshots.write().map_err(lock_error)?;
+        snaps.push(snapshot.clone());
         Ok(())
     }
 
@@ -749,7 +755,10 @@ mod tests {
     async fn test_find_by_type_without_filters_returns_all_of_type() {
         let (repo, t) = seeded();
         let other = leak_type("other");
-        repo.save(&instance_with(other, &[])).await.unwrap();
+        let other_inst = instance_with(other, &[]);
+        repo.save_draft(&other_inst, &IndexMap::new(), &other_inst.id.to_string())
+            .await
+            .unwrap();
 
         let page = repo.find_by_type(t, all(), vec![]).await.unwrap();
         assert_eq!(page.total, 4);
@@ -802,7 +811,9 @@ mod tests {
             let mut inst = instance_with(t, &[("title", ContentValue::Scalar(text("x")))]);
             inst.audit.created_at = base + Duration::seconds(i);
             ids.push(inst.id);
-            repo.save(&inst).await.unwrap();
+            repo.save_draft(&inst, &IndexMap::new(), &inst.id.to_string())
+                .await
+                .unwrap();
         }
         let f = vec![filter("title", text("x"))];
 

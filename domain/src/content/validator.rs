@@ -101,47 +101,96 @@ fn evaluate_constraint(
     }
 }
 
-/// Validates document instance content for draft saving (lenient: skips required checks for missing/null).
-pub fn validate_draft_content(
+use std::collections::HashSet;
+
+fn validate_field_value(
+    attr_id: &AttributeId,
+    field_type: &FieldType,
+    constraints: Option<&HashSet<FieldConstraint>>,
+    val: &ContentValue,
+    system_config: &SystemConfig,
+    errors: &mut Vec<DomainError>,
+) {
+    match val {
+        ContentValue::Null => {}
+        ContentValue::Scalar(dv) => {
+            if !dv.matches_field_type(field_type) {
+                errors.push(DomainError::InvalidFieldValue {
+                    attribute_id: attr_id.clone(),
+                    reason: format!("value does not match field type {:?}", field_type),
+                });
+            } else if let Some(constraints) = constraints {
+                for constraint in constraints {
+                    if let Some(err) = evaluate_constraint(attr_id, constraint, dv) {
+                        errors.push(err);
+                    }
+                }
+            }
+        }
+        ContentValue::LocalizedText(map) => {
+            if *field_type != FieldType::LocalizedText {
+                errors.push(DomainError::InvalidFieldValue {
+                    attribute_id: attr_id.clone(),
+                    reason: "localized text value provided for non-localized field".to_string(),
+                });
+            } else {
+                let mut sorted_locales: Vec<_> = map.keys().collect();
+                sorted_locales.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+                for locale in sorted_locales {
+                    let localized_str = &map[locale];
+                    if !system_config.contains_locale(locale) {
+                        errors.push(DomainError::UnknownLocale(locale.clone()));
+                    } else if let Some(constraints) = constraints {
+                        for constraint in constraints {
+                            if let Some(err) = evaluate_str_constraint(
+                                attr_id,
+                                constraint,
+                                localized_str,
+                                Some(locale),
+                            ) {
+                                errors.push(err);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn validate_content_with_mode(
     doc_type: &DocumentType,
     content: &DocumentContent,
     system_config: &SystemConfig,
+    strict: bool,
 ) -> Result<(), Vec<DomainError>> {
     let mut errors = Vec::new();
 
-    // 1. Validate declared fields (lenient: skip required checks when missing or null)
+    // 1. Validate declared fields
     for field_def in &doc_type.fields {
         let attr_id = &field_def.id;
         match content.get_field(attr_id) {
             None | Some(ContentValue::Null) => {
-                // Incomplete drafts are allowed to omit required fields
-            }
-            Some(ContentValue::Scalar(val)) => {
-                if !val.matches_field_type(&field_def.field_type) {
+                if strict && field_def.required {
                     errors.push(DomainError::InvalidFieldValue {
                         attribute_id: attr_id.clone(),
-                        reason: format!(
-                            "value does not match field type {:?}",
-                            field_def.field_type
-                        ),
+                        reason: "field is required but missing or null".to_string(),
                     });
                 }
             }
-            Some(ContentValue::LocalizedText(map)) => {
-                if field_def.field_type != FieldType::LocalizedText {
-                    errors.push(DomainError::InvalidFieldValue {
-                        attribute_id: attr_id.clone(),
-                        reason: "localized text value provided for non-localized field".to_string(),
-                    });
-                } else {
-                    let mut sorted_locales: Vec<_> = map.keys().collect();
-                    sorted_locales.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
-                    for locale in sorted_locales {
-                        if !system_config.contains_locale(locale) {
-                            errors.push(DomainError::UnknownLocale(locale.clone()));
-                        }
-                    }
-                }
+            Some(val) => {
+                validate_field_value(
+                    attr_id,
+                    &field_def.field_type,
+                    if strict {
+                        Some(&field_def.constraints)
+                    } else {
+                        None
+                    },
+                    val,
+                    system_config,
+                    &mut errors,
+                );
             }
         }
     }
@@ -160,87 +209,22 @@ pub fn validate_draft_content(
     }
 }
 
+/// Validates document instance content for draft saving (lenient: skips required checks for missing/null).
+pub fn validate_draft_content(
+    doc_type: &DocumentType,
+    content: &DocumentContent,
+    system_config: &SystemConfig,
+) -> Result<(), Vec<DomainError>> {
+    validate_content_with_mode(doc_type, content, system_config, false)
+}
+
 /// Validates document instance content against strict schema rules for publication.
 pub fn validate_publish_content(
     doc_type: &DocumentType,
     content: &DocumentContent,
     system_config: &SystemConfig,
 ) -> Result<(), Vec<DomainError>> {
-    let mut errors = Vec::new();
-
-    // 1. Validate declared fields
-    for field_def in &doc_type.fields {
-        let attr_id = &field_def.id;
-        match content.get_field(attr_id) {
-            None | Some(ContentValue::Null) => {
-                if field_def.required {
-                    errors.push(DomainError::InvalidFieldValue {
-                        attribute_id: attr_id.clone(),
-                        reason: "field is required but missing or null".to_string(),
-                    });
-                }
-            }
-            Some(ContentValue::Scalar(val)) => {
-                if !val.matches_field_type(&field_def.field_type) {
-                    errors.push(DomainError::InvalidFieldValue {
-                        attribute_id: attr_id.clone(),
-                        reason: format!(
-                            "value does not match field type {:?}",
-                            field_def.field_type
-                        ),
-                    });
-                } else {
-                    // Evaluate FieldConstraints against the scalar value
-                    for constraint in &field_def.constraints {
-                        if let Some(err) = evaluate_constraint(attr_id, constraint, val) {
-                            errors.push(err);
-                        }
-                    }
-                }
-            }
-            Some(ContentValue::LocalizedText(map)) => {
-                if field_def.field_type != FieldType::LocalizedText {
-                    errors.push(DomainError::InvalidFieldValue {
-                        attribute_id: attr_id.clone(),
-                        reason: "localized text value provided for non-localized field".to_string(),
-                    });
-                } else {
-                    let mut sorted_locales: Vec<_> = map.keys().collect();
-                    sorted_locales.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
-                    for locale in sorted_locales {
-                        let localized_str = &map[locale];
-                        if !system_config.contains_locale(locale) {
-                            errors.push(DomainError::UnknownLocale(locale.clone()));
-                        } else {
-                            for constraint in &field_def.constraints {
-                                if let Some(err) = evaluate_str_constraint(
-                                    attr_id,
-                                    constraint,
-                                    localized_str,
-                                    Some(locale),
-                                ) {
-                                    errors.push(err);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. Reject undeclared fields
-    for attr_id in content.fields().keys() {
-        if !doc_type.fields.contains(attr_id) {
-            errors.push(DomainError::UnknownAttribute(attr_id.clone()));
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    validate_content_with_mode(doc_type, content, system_config, true)
 }
 
 /// Backward-compatible alias delegating to `validate_publish_content`.

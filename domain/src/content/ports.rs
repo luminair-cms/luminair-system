@@ -111,11 +111,6 @@ pub trait DocumentInstanceRepository: Send + Sync {
         parent_ids: &[DocumentInstanceId],
     ) -> impl Future<Output = Result<RelationMap, DomainError>> + Send;
 
-    fn save(
-        &self,
-        instance: &DocumentInstance,
-    ) -> impl Future<Output = Result<(), DomainError>> + Send;
-
     /// Persists a working draft (`Draft`, `Modified`, or `Unpublished`) along with materialized display identity.
     fn save_draft(
         &self,
@@ -124,21 +119,25 @@ pub trait DocumentInstanceRepository: Send + Sync {
         display_title: &str,
     ) -> impl Future<Output = Result<(), DomainError>> + Send;
 
-    /// Publishes the document instance to the wide table and clears any pending draft row.
+    /// Publishes the document instance to the wide table, clears any pending draft row,
+    /// and records the publication snapshot atomically.
     fn publish(
         &self,
         instance: &DocumentInstance,
         revision: u32,
         display_values: &IndexMap<AttributeId, String>,
         display_title: &str,
+        snapshot: &DocumentSnapshot,
     ) -> impl Future<Output = Result<(), DomainError>> + Send;
 
-    /// Unpublishes the document instance from the wide table and preserves it in `document_drafts` with `Unpublished` state.
+    /// Unpublishes the document instance from the wide table, preserves it in `document_drafts`
+    /// with `Unpublished` state, and records the unpublish snapshot atomically.
     fn unpublish(
         &self,
         instance: &DocumentInstance,
         display_values: &IndexMap<AttributeId, String>,
         display_title: &str,
+        snapshot: &DocumentSnapshot,
     ) -> impl Future<Output = Result<(), DomainError>> + Send;
 
     /// Discards pending draft edits and restores the clean published row (`has_pending_draft = false`).

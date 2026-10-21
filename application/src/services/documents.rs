@@ -101,18 +101,39 @@ pub trait DocumentsService: Send + Sync + 'static {
 }
 
 /// Generic implementation of `DocumentsService` monomorphized over repository adapters.
-pub struct DocumentsServiceImpl<R> {
+pub struct DocumentsServiceImpl<R, S = R> {
     pub instance_repo: R,
+    pub snapshot_repo: S,
     pub context: &'static SystemContext,
 }
 
-impl<R> DocumentsServiceImpl<R>
+impl<R> DocumentsServiceImpl<R, R>
 where
-    R: DocumentInstanceRepository + DocumentSnapshotRepository + 'static,
+    R: DocumentInstanceRepository + DocumentSnapshotRepository + Clone + 'static,
 {
     pub fn new(instance_repo: R, context: &'static SystemContext) -> Self {
+        let snapshot_repo = instance_repo.clone();
         Self {
             instance_repo,
+            snapshot_repo,
+            context,
+        }
+    }
+}
+
+impl<R, S> DocumentsServiceImpl<R, S>
+where
+    R: DocumentInstanceRepository + 'static,
+    S: DocumentSnapshotRepository + 'static,
+{
+    pub fn new_with_snapshots(
+        instance_repo: R,
+        snapshot_repo: S,
+        context: &'static SystemContext,
+    ) -> Self {
+        Self {
+            instance_repo,
+            snapshot_repo,
             context,
         }
     }
@@ -221,9 +242,10 @@ where
     }
 }
 
-impl<R> DocumentsService for DocumentsServiceImpl<R>
+impl<R, S> DocumentsService for DocumentsServiceImpl<R, S>
 where
-    R: DocumentInstanceRepository + DocumentSnapshotRepository + 'static,
+    R: DocumentInstanceRepository + 'static,
+    S: DocumentSnapshotRepository + 'static,
 {
     async fn find(
         &self,
@@ -339,9 +361,28 @@ where
             &self.context.config.default_locale,
         );
 
-        self.instance_repo
-            .save_draft(&instance, &display_values, &display_title)
-            .await?;
+        if doc_type.options.draft_and_publish {
+            self.instance_repo
+                .save_draft(&instance, &display_values, &display_title)
+                .await?;
+        } else {
+            let now = Utc::now();
+            let rev = instance.publish(caller.actor.clone(), now)?;
+            let snapshot = DocumentSnapshot {
+                id: SnapshotId::new(Uuid::now_v7()),
+                document_type_id: instance.document_type_id.clone(),
+                document_id: instance.id,
+                revision: rev,
+                fields: instance.fields().clone(),
+                relations: instance.relations.clone(),
+                created_at: now,
+                created_by: caller.actor.clone(),
+                reason: SnapshotReason::Publish,
+            };
+            self.instance_repo
+                .publish(&instance, rev, &display_values, &display_title, &snapshot)
+                .await?;
+        }
 
         let populate = cmd.populate.as_deref().unwrap_or_default();
         if !populate.is_empty() {
@@ -385,8 +426,6 @@ where
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
         })?;
 
-        instance.edit_draft(caller.actor.clone(), Utc::now());
-
         // Revalidate against schema constraints
         if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
             let messages: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
@@ -403,9 +442,29 @@ where
             &self.context.config.default_locale,
         );
 
-        self.instance_repo
-            .save_draft(&instance, &display_values, &display_title)
-            .await?;
+        if doc_type.options.draft_and_publish {
+            instance.edit_draft(caller.actor.clone(), Utc::now());
+            self.instance_repo
+                .save_draft(&instance, &display_values, &display_title)
+                .await?;
+        } else {
+            let now = Utc::now();
+            let rev = instance.publish(caller.actor.clone(), now)?;
+            let snapshot = DocumentSnapshot {
+                id: SnapshotId::new(Uuid::now_v7()),
+                document_type_id: instance.document_type_id.clone(),
+                document_id: instance.id,
+                revision: rev,
+                fields: instance.fields().clone(),
+                relations: instance.relations.clone(),
+                created_at: now,
+                created_by: caller.actor.clone(),
+                reason: SnapshotReason::Publish,
+            };
+            self.instance_repo
+                .publish(&instance, rev, &display_values, &display_title, &snapshot)
+                .await?;
+        }
 
         let populate = cmd.populate.as_deref().unwrap_or_default();
         if !populate.is_empty() {
@@ -501,10 +560,6 @@ where
             &self.context.config.default_locale,
         );
 
-        self.instance_repo
-            .publish(&instance, rev, &display_values, &display_title)
-            .await?;
-
         let snapshot = DocumentSnapshot {
             id: SnapshotId::new(Uuid::now_v7()),
             document_type_id: instance.document_type_id.clone(),
@@ -516,7 +571,10 @@ where
             created_by: caller.actor.clone(),
             reason: SnapshotReason::Publish,
         };
-        self.instance_repo.save_snapshot(&snapshot).await?;
+
+        self.instance_repo
+            .publish(&instance, rev, &display_values, &display_title, &snapshot)
+            .await?;
 
         Ok(instance)
     }
@@ -561,10 +619,6 @@ where
             &self.context.config.default_locale,
         );
 
-        self.instance_repo
-            .unpublish(&instance, &display_values, &display_title)
-            .await?;
-
         let revision = match instance.content.publication_state {
             PublicationState::Unpublished {
                 last_published_revision,
@@ -584,7 +638,10 @@ where
             created_by: caller.actor.clone(),
             reason: SnapshotReason::Unpublish,
         };
-        self.instance_repo.save_snapshot(&snapshot).await?;
+
+        self.instance_repo
+            .unpublish(&instance, &display_values, &display_title, &snapshot)
+            .await?;
 
         Ok(instance)
     }
@@ -640,7 +697,7 @@ where
         })?;
 
         let snapshot = self
-            .instance_repo
+            .snapshot_repo
             .get_snapshot(cmd.document_type, cmd.document_instance_id, cmd.revision)
             .await?
             .ok_or_else(|| ApplicationError::NotFound {
@@ -709,35 +766,11 @@ where
                         && attr == &rel_def.id
                         && let Some(target_title) = titles.get(target_id)
                     {
-                        let mut new_display_values = header.display_values.clone();
-                    new_display_values.clear();
-                        for field_attr in &effective_fields {
-                            if field_attr == &rel_def.id {
-                                new_display_values.insert(field_attr.clone(), target_title.clone());
-                            } else if let Some(val) = header.display_values.get(field_attr) {
-                                new_display_values.insert(field_attr.clone(), val.clone());
-                            }
-                        }
-                        let new_title = if new_display_values.is_empty() {
-                            header.id.to_string()
-                        } else {
-                            let joined = new_display_values
-                                .values()
-                                .map(String::as_str)
-                                .collect::<Vec<_>>()
-                                .join(" — ");
-                            if joined.len() <= 255 {
-                                joined
-                            } else {
-                                let mut boundary = 252;
-                                while !joined.is_char_boundary(boundary) {
-                                    boundary -= 1;
-                                }
-                                format!("{}...", &joined[..boundary])
-                            }
-                        };
-                        header.display_values = new_display_values;
-                        header.display_title = new_title;
+                        header.enrich_relational_display(
+                            &effective_fields,
+                            &rel_def.id,
+                            target_title.clone(),
+                        );
                     }
                 }
             }
@@ -757,7 +790,7 @@ where
         )?;
 
         let snapshots = self
-            .instance_repo
+            .snapshot_repo
             .list_snapshots(cmd.document_type, cmd.document_instance_id)
             .await?;
 

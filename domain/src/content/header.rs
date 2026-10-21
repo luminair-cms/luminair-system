@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::auth::ActorId;
 use crate::content::instance::{DocumentInstanceId, PublicationState, ResolvedRelation};
-use crate::content::values::ContentValue;
+use crate::content::values::{format_display_title, ContentValue};
 use crate::schema::{AttributeId, DocumentTypeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -48,6 +48,28 @@ pub struct DocumentHeader {
     pub updated_by: ActorId,
     pub published_at: Option<DateTime<Utc>>,
     pub published_by: Option<ActorId>,
+}
+
+impl DocumentHeader {
+    /// Enriches this header's `display_values` and `display_title` with a resolved relational target title
+    /// at the exact schema-defined attribute position in `effective_fields`.
+    pub fn enrich_relational_display(
+        &mut self,
+        effective_fields: &[AttributeId],
+        rel_attr: &AttributeId,
+        target_title: String,
+    ) {
+        let mut rebuilt = IndexMap::with_capacity(effective_fields.len());
+        for field_id in effective_fields {
+            if field_id == rel_attr {
+                rebuilt.insert(field_id.clone(), target_title.clone());
+            } else if let Some(val) = self.display_values.swap_remove(field_id) {
+                rebuilt.insert(field_id.clone(), val);
+            }
+        }
+        self.display_values = rebuilt;
+        self.display_title = format_display_title(&self.display_values, self.id);
+    }
 }
 
 #[nutype(derive(
@@ -115,7 +137,7 @@ impl From<&DocumentSnapshot> for SnapshotHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{test_doc_type_id, test_user_id};
+    use crate::test_support::{test_attr_id, test_doc_type_id, test_user_id};
 
     #[test]
     fn test_document_status_from_publication_state() {
@@ -184,5 +206,52 @@ mod tests {
         assert_eq!(header.created_at, now);
         assert_eq!(header.created_by, actor);
         assert_eq!(header.reason, SnapshotReason::Publish);
+    }
+
+    #[test]
+    fn test_enrich_relational_display() {
+        let now = Utc::now();
+        let actor = ActorId::User(test_user_id("alice"));
+        let doc_type = test_doc_type_id("article");
+        let doc_id = DocumentInstanceId::new(Uuid::now_v7());
+        let title_attr = test_attr_id("title");
+        let author_attr = test_attr_id("author");
+
+        let mut display_values = IndexMap::new();
+        display_values.insert(title_attr.clone(), "My Post".to_string());
+
+        let mut header = DocumentHeader {
+            id: doc_id,
+            document_type_id: doc_type,
+            display_values,
+            display_title: "My Post".to_string(),
+            relational_display_target: Some((
+                author_attr.clone(),
+                DocumentInstanceId::new(Uuid::now_v7()),
+            )),
+            status: DocumentStatus::Draft,
+            slug: None,
+            revision: None,
+            draft_version: Some(1),
+            created_at: now,
+            created_by: actor.clone(),
+            updated_at: now,
+            updated_by: actor,
+            published_at: None,
+            published_by: None,
+        };
+
+        let effective_fields = vec![title_attr.clone(), author_attr.clone()];
+        header.enrich_relational_display(&effective_fields, &author_attr, "Jane Doe".to_string());
+
+        assert_eq!(
+            header.display_values.get(&title_attr),
+            Some(&"My Post".to_string())
+        );
+        assert_eq!(
+            header.display_values.get(&author_attr),
+            Some(&"Jane Doe".to_string())
+        );
+        assert_eq!(header.display_title, "My Post — Jane Doe");
     }
 }

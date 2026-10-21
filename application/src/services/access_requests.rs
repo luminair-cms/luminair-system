@@ -6,7 +6,7 @@ use std::future::Future;
 use chrono::Utc;
 use domain::auth::{
     AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository, Permission,
-    RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentRepository,
+    RoleRepository, UserRoleAssignment, UserRoleAssignmentRepository,
 };
 use domain::errors::DomainError;
 
@@ -136,11 +136,7 @@ where
             }
         }
 
-        let reviewer_id = caller.user_id().cloned().unwrap_or_else(|| {
-            UserId::try_new(caller.actor.to_string()).unwrap_or_else(|_| unreachable!())
-        });
-
-        let assignments = request.approve(reviewer_id, cmd.role_ids, Utc::now())?;
+        let assignments = request.approve(caller.actor.clone(), cmd.role_ids, Utc::now())?;
 
         // Persist generated assignments in batch
         self.assignment_repo.save_all(&assignments).await?;
@@ -166,11 +162,7 @@ where
                 DomainError::AccessRequestNotFound(cmd.request_id),
             ))?;
 
-        let reviewer_id = caller.user_id().cloned().unwrap_or_else(|| {
-            UserId::try_new(caller.actor.to_string()).unwrap_or_else(|_| unreachable!())
-        });
-
-        request.reject(reviewer_id, cmd.reason, Utc::now())?;
+        request.reject(caller.actor.clone(), cmd.reason, Utc::now())?;
         self.access_request_repo.save(&request).await?;
 
         Ok(request)

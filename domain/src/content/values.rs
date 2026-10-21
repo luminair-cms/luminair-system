@@ -178,12 +178,23 @@ pub fn extract_display_identity(
         }
     }
 
-    let display_title = if display_values.is_empty() {
-        instance_id.to_string()
+    let display_title = format_display_title(&display_values, instance_id);
+
+    (display_values, display_title)
+}
+
+/// Formats an ordered map of display values into a human-readable title joined by `" — "`,
+/// falling back to `fallback_id` when empty and truncating safely on character boundaries to 255 characters.
+pub fn format_display_title(
+    display_values: &IndexMap<AttributeId, String>,
+    fallback_id: DocumentInstanceId,
+) -> String {
+    if display_values.is_empty() {
+        fallback_id.to_string()
     } else {
         let joined = display_values
             .values()
-            .map(String::as_str)
+            .cloned()
             .collect::<Vec<_>>()
             .join(" — ");
         if joined.len() <= 255 {
@@ -195,9 +206,7 @@ pub fn extract_display_identity(
             }
             joined[..end].to_string()
         }
-    };
-
-    (display_values, display_title)
+    }
 }
 
 #[cfg(test)]

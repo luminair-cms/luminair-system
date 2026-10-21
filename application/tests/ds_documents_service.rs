@@ -213,11 +213,44 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
         .await
         .unwrap();
 
+    assert!(
+        matches!(
+            inst.content.publication_state,
+            PublicationState::Published { revision: 1, .. }
+        ),
+        "expected created document to be immediately published with revision 1, got {:?}",
+        inst.content.publication_state
+    );
+
     let res = service
         .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
         .await;
 
     assert!(matches!(res, Err(ApplicationError::Conflict(_))));
+
+    let mut update_fields = HashMap::new();
+    update_fields.insert(
+        test_attr_id("title"),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Updated Static".into(),
+        ))),
+    );
+    let updated = service
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst.id, &doc_type.id, update_fields),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(
+            updated.content.publication_state,
+            PublicationState::Published { revision: 2, .. }
+        ),
+        "expected updated document to transition to published with revision 2, got {:?}",
+        updated.content.publication_state
+    );
 }
 
 #[tokio::test]

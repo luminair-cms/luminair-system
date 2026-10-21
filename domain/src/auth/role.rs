@@ -3,7 +3,7 @@ use nutype::nutype;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::auth::user::UserId;
+use crate::auth::user::{ActorId, UserId};
 use crate::schema::DocumentTypeId;
 
 #[nutype(derive(
@@ -93,7 +93,7 @@ pub struct UserRoleAssignment {
     pub user_id: UserId,
     pub role_id: RoleId,
     pub granted_at: DateTime<Utc>,
-    pub granted_by: Option<UserId>, // None = system / bootstrap grant
+    pub granted_by: Option<ActorId>, // None = system / bootstrap grant
 }
 
 #[cfg(test)]

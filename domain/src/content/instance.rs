@@ -137,6 +137,24 @@ impl DocumentInstance {
         }
     }
 
+    /// Reconstitutes a `DocumentInstance` from persistence state without incrementing version or generating new IDs.
+    pub fn reconstitute(
+        id: DocumentInstanceId,
+        document_type_id: DocumentTypeId,
+        content: DocumentContent,
+        relations: HashMap<AttributeId, Vec<ResolvedRelation>>,
+        audit: AuditTrail,
+    ) -> Self {
+        Self {
+            id,
+            document_type_id,
+            content,
+            relations,
+            populated_relations: HashMap::new(),
+            audit,
+        }
+    }
+
     pub fn fields(&self) -> &HashMap<AttributeId, ContentValue> {
         self.content.fields()
     }
@@ -644,5 +662,38 @@ mod tests {
         assert_eq!(instance.audit.version, 2);
         assert_eq!(instance.audit.updated_at, t1);
         assert_eq!(instance.audit.updated_by, ActorId::User(editor));
+    }
+
+    #[test]
+    fn test_reconstitute_preserves_state() {
+        let doc_id = DocumentInstanceId::new(Uuid::now_v7());
+        let doc_type = test_doc_type_id("article");
+        let now = Utc::now();
+        let actor = ActorId::User(test_user_id("creator"));
+        let audit = AuditTrail {
+            created_at: now,
+            created_by: actor.clone(),
+            updated_at: now,
+            updated_by: actor,
+            version: 7,
+        };
+        let content = DocumentContent::new(
+            HashMap::new(),
+            PublicationState::Draft {
+                last_published_revision: Some(2),
+            },
+        );
+        let instance = DocumentInstance::reconstitute(
+            doc_id,
+            doc_type.clone(),
+            content,
+            HashMap::new(),
+            audit,
+        );
+        assert_eq!(instance.id, doc_id);
+        assert_eq!(instance.document_type_id, doc_type);
+        assert_eq!(instance.audit.version, 7);
+        assert!(instance.relations.is_empty());
+        assert!(instance.populated_relations.is_empty());
     }
 }

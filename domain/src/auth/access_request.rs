@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::role::{RoleId, UserRoleAssignment, UserRoleAssignmentId};
-use super::user::UserId;
+use super::user::{ActorId, UserId};
 use crate::common::{DisplayName, Email};
 use crate::errors::DomainError;
 
@@ -32,7 +32,7 @@ pub struct AccessRequest {
     pub name: Option<DisplayName>,
     pub requested_at: DateTime<Utc>,
     pub status: AccessRequestStatus,
-    pub reviewed_by: Option<UserId>,
+    pub reviewed_by: Option<ActorId>,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub assigned_roles: Vec<RoleId>,
 }
@@ -63,7 +63,7 @@ impl AccessRequest {
 
     pub fn approve(
         &mut self,
-        by: UserId,
+        by: impl Into<ActorId>,
         roles: Vec<RoleId>,
         now: DateTime<Utc>,
     ) -> Result<Vec<UserRoleAssignment>, DomainError> {
@@ -73,9 +73,10 @@ impl AccessRequest {
             });
         }
 
-        if self.user_id == by {
+        let by = by.into();
+        if by.as_user() == Some(&self.user_id) {
             return Err(DomainError::Unauthorized(
-                "reviewer cannot review or approve their own access request".to_string(),
+                "users cannot approve their own access request".into(),
             ));
         }
 
@@ -114,7 +115,7 @@ impl AccessRequest {
 
     pub fn reject(
         &mut self,
-        by: UserId,
+        by: impl Into<ActorId>,
         reason: Option<String>,
         now: DateTime<Utc>,
     ) -> Result<(), DomainError> {
@@ -124,9 +125,10 @@ impl AccessRequest {
             });
         }
 
-        if self.user_id == by {
+        let by = by.into();
+        if by.as_user() == Some(&self.user_id) {
             return Err(DomainError::Unauthorized(
-                "reviewer cannot review or reject their own access request".to_string(),
+                "users cannot reject their own access request".into(),
             ));
         }
 
@@ -179,7 +181,7 @@ mod tests {
 
         req.approve(admin.clone(), vec![role], now).unwrap();
         assert_eq!(req.status, AccessRequestStatus::Approved);
-        assert_eq!(req.reviewed_by, Some(admin));
+        assert_eq!(req.reviewed_by, Some(ActorId::User(admin)));
         assert_eq!(req.reviewed_at, Some(now));
         assert_eq!(req.assigned_roles, vec![role]);
     }
@@ -195,7 +197,7 @@ mod tests {
         assert_eq!(assignments.len(), 2);
         assert_eq!(assignments[0].user_id, user);
         assert_eq!(assignments[0].role_id, role1);
-        assert_eq!(assignments[0].granted_by, Some(admin.clone()));
+        assert_eq!(assignments[0].granted_by, Some(ActorId::User(admin.clone())));
         assert_eq!(assignments[1].role_id, role2);
     }
 
@@ -226,7 +228,7 @@ mod tests {
                 reason: Some("Not authorized".into())
             }
         );
-        assert_eq!(req.reviewed_by, Some(admin));
+        assert_eq!(req.reviewed_by, Some(ActorId::User(admin)));
         assert_eq!(req.reviewed_at, Some(now));
     }
 
@@ -291,5 +293,17 @@ mod tests {
         let (mut req, user, now) = make_test_request();
         let res = req.reject(user, Some("self reject".into()), now);
         assert!(matches!(res, Err(DomainError::Unauthorized(_))));
+    }
+
+    #[test]
+    fn test_approve_by_system_actor() {
+        let (mut req, user, now) = make_test_request();
+        let role = RoleId::new(Uuid::now_v7());
+
+        let assignments = req.approve(ActorId::System, vec![role], now).unwrap();
+        assert_eq!(req.status, AccessRequestStatus::Approved);
+        assert_eq!(req.reviewed_by, Some(ActorId::System));
+        assert_eq!(assignments[0].granted_by, Some(ActorId::System));
+        assert_eq!(assignments[0].user_id, user);
     }
 }
