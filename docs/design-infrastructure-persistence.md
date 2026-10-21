@@ -171,30 +171,30 @@ LIMIT $1 OFFSET $2;
 To avoid cross-shard distributed `FULL OUTER JOIN` operations in AWS Aurora DSQL, execute an indexed `UNION ALL`:
 ```sql
 WITH combined AS (
-    -- 1. Unpublished pure drafts
+    -- 1. Working copies in document_drafts ('draft', 'modified', 'unpublished')
     SELECT 
         id,
         display_values,
         display_title,
-        'draft' AS status,
+        status,
         NULL::text AS slug,
-        NULL::int AS revision,
+        last_published_revision AS revision,
         version AS draft_version,
         created_at, created_by,
         updated_at, updated_by,
         NULL::timestamptz AS published_at,
         NULL::text AS published_by
     FROM document_drafts
-    WHERE document_type_id = $1 AND status = 'draft'
+    WHERE document_type_id = $1
 
     UNION ALL
 
-    -- 2. Published & Modified live items (driven by has_pending_draft)
+    -- 2. Clean published live items (where has_pending_draft = FALSE)
     SELECT 
         id,
         display_values,
         display_title,
-        CASE WHEN has_pending_draft THEN 'modified' ELSE 'published' END AS status,
+        'published' AS status,
         slug,
         revision,
         NULL::int AS draft_version,
@@ -202,6 +202,7 @@ WITH combined AS (
         updated_at, updated_by,
         published_at, published_by
     FROM [type]
+    WHERE has_pending_draft = FALSE
 )
 SELECT * FROM combined
 ORDER BY updated_at DESC
@@ -214,11 +215,11 @@ When a `DocumentType`'s `display_fields` contains a singular relation (`HasOne` 
 ```sql
 SELECT id, display_title
 FROM [target_type]
-WHERE id = ANY($1)
+WHERE has_pending_draft = FALSE AND id = ANY($1)
 UNION ALL
 SELECT id, display_title
 FROM document_drafts
-WHERE document_type_id = $2 AND status = 'draft' AND id = ANY($1);
+WHERE document_type_id = $2 AND id = ANY($1);
 ```
 This resolves all related entity titles for the page in a single extra round-trip per target type without any write-time denormalization or event cascade complexity.
 
@@ -230,53 +231,54 @@ Executed inside an explicit `sqlx::Transaction`:
 ```rust
 async fn publish_transaction(
     pool: &PgPool,
-    type_id: &DocumentTypeId,
     instance: &DocumentInstance,
     revision: u32,
-    actor: Option<&UserId>,
-    now: DateTime<Utc>,
+    display_values: &IndexMap<AttributeId, String>,
+    display_title: &str,
+    snapshot: &DocumentSnapshot,
 ) -> Result<(), RepositoryError> {
     let mut tx = pool.begin().await?;
 
     // 1. Upsert into wide table
-    // (sets has_pending_draft = false, revision = revision, published_at = now)
-    sqlx::query(&upsert_wide_table_sql(type_id))
+    // (sets has_pending_draft = false, revision = revision, display_values, display_title, fields = instance.fields())
+    sqlx::query(&upsert_wide_table_sql(&instance.document_type_id))
         .bind(...)
         .execute(&mut *tx)
         .await?;
 
     // 2. Synchronize junction rows
-    sqlx::query(&delete_junction_sql(type_id))
+    sqlx::query(&delete_junction_sql(&instance.document_type_id))
         .bind(instance.id)
         .execute(&mut *tx)
         .await?;
     for target_id in &related_ids {
-        sqlx::query(&insert_junction_sql(type_id))
+        sqlx::query(&insert_junction_sql(&instance.document_type_id))
             .bind(instance.id)
             .bind(target_id)
             .execute(&mut *tx)
             .await?;
     }
 
-    // 3. Append immutable revision snapshot
+    // 3. Append immutable revision snapshot directly from snapshot
     sqlx::query(
         "INSERT INTO document_snapshots (id, document_type_id, document_id, revision, content, relations, created_at, created_by, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'publish')"
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
     )
-    .bind(Uuid::now_v7())
-    .bind(type_id.as_ref())
-    .bind(instance.id.into_inner())
-    .bind(revision as i32)
-    .bind(serde_json::to_value(&instance.content.fields)?)
-    .bind(serde_json::to_value(&instance.relations)?)
-    .bind(now)
-    .bind(actor.map(|u| u.as_ref()))
+    .bind(snapshot.id.into_inner())
+    .bind(snapshot.document_type_id.as_ref())
+    .bind(snapshot.document_id.into_inner())
+    .bind(snapshot.revision as i32)
+    .bind(serde_json::to_value(&snapshot.fields)?)
+    .bind(serde_json::to_value(&snapshot.relations)?)
+    .bind(snapshot.created_at)
+    .bind(snapshot.created_by.to_urn())
+    .bind(snapshot.reason.as_str())
     .execute(&mut *tx)
     .await?;
 
     // 4. Clean up draft store
     sqlx::query("DELETE FROM document_drafts WHERE document_type_id = $1 AND id = $2")
-        .bind(type_id.as_ref())
+        .bind(instance.document_type_id.as_ref())
         .bind(instance.id.into_inner())
         .execute(&mut *tx)
         .await?;
@@ -292,21 +294,65 @@ async fn publish_transaction(
 ```rust
 async fn unpublish_transaction(
     pool: &PgPool,
-    type_id: &DocumentTypeId,
-    id: DocumentInstanceId,
-    actor: Option<&UserId>,
-    now: DateTime<Utc>,
+    instance: &DocumentInstance,
+    display_values: &IndexMap<AttributeId, String>,
+    display_title: &str,
+    snapshot: &DocumentSnapshot,
 ) -> Result<(), RepositoryError> {
     let mut tx = pool.begin().await?;
 
     // 1. Fetch current wide table row and ensure saved into document_drafts with status = 'unpublished'
+    sqlx::query(
+        "INSERT INTO document_drafts (id, document_type_id, display_values, display_title, status, content, relations, schema_version, version, last_published_revision, created_at, created_by, updated_at, updated_by)
+         VALUES ($1, $2, $3, $4, 'unpublished', $5, $6, 1, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (document_type_id, id) DO UPDATE SET
+             display_values = EXCLUDED.display_values,
+             display_title = EXCLUDED.display_title,
+             status = 'unpublished',
+             content = EXCLUDED.content,
+             relations = EXCLUDED.relations,
+             version = EXCLUDED.version,
+             last_published_revision = EXCLUDED.last_published_revision,
+             updated_at = EXCLUDED.updated_at,
+             updated_by = EXCLUDED.updated_by"
+    )
+    .bind(instance.id.into_inner())
+    .bind(instance.document_type_id.as_ref())
+    .bind(serde_json::to_value(display_values)?)
+    .bind(display_title)
+    .bind(serde_json::to_value(instance.fields())?)
+    .bind(serde_json::to_value(&instance.relations)?)
+    .bind(instance.audit.version as i32)
+    .bind(snapshot.revision as i32)
+    .bind(instance.audit.created_at)
+    .bind(instance.audit.created_by.to_urn())
+    .bind(instance.audit.updated_at)
+    .bind(instance.audit.updated_by.to_urn())
+    .execute(&mut *tx)
+    .await?;
+
     // 2. Delete from wide table [type] (cascading foreign keys remove junction rows)
-    sqlx::query(&format!("DELETE FROM {} WHERE id = $1", type_id.as_ref()))
-        .bind(id.into_inner())
+    sqlx::query(&format!("DELETE FROM {} WHERE id = $1", instance.document_type_id.as_ref()))
+        .bind(instance.id.into_inner())
         .execute(&mut *tx)
         .await?;
 
     // 3. Insert unpublish snapshot into document_snapshots with reason = 'unpublish'
+    sqlx::query(
+        "INSERT INTO document_snapshots (id, document_type_id, document_id, revision, content, relations, created_at, created_by, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'unpublish')"
+    )
+    .bind(snapshot.id.into_inner())
+    .bind(snapshot.document_type_id.as_ref())
+    .bind(snapshot.document_id.into_inner())
+    .bind(snapshot.revision as i32)
+    .bind(serde_json::to_value(&snapshot.fields)?)
+    .bind(serde_json::to_value(&snapshot.relations)?)
+    .bind(snapshot.created_at)
+    .bind(snapshot.created_by.to_urn())
+    .execute(&mut *tx)
+    .await?;
+
     // 4. Commit transaction
     tx.commit().await?;
     Ok(())
@@ -346,6 +392,10 @@ async fn discard_draft_transaction(
 
 ### 4.6 Multi-Repository Atomic Approval (`AccessRequest::approve`)
 When an administrator approves an `AccessRequest`, both the newly generated `UserRoleAssignment` rows and the updated `AccessRequest` status (`Approved`) must be persisted atomically inside a single `sqlx::Transaction` wrapped in `with_occ_retry` so a partial failure cannot leave a user enrolled while their request remains `Pending`.
+
+Attribution for reviews and grants uses `ActorId` URN serialization:
+- `AccessRequest.reviewed_by: Option<ActorId>` is persisted via `.map(|a| a.to_urn())`.
+- `UserRoleAssignment.granted_by: Option<ActorId>` is persisted via `.map(|a| a.to_urn())`.
 
 ---
 

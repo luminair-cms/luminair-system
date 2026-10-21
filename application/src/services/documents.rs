@@ -143,7 +143,7 @@ where
     /// 2. Stitches relations in-memory to each corresponding document instance.
     pub async fn enrich(
         &self,
-        type_id: &'static DocumentTypeId,
+        type_id: &DocumentTypeId,
         populate: &[AttributeId],
         instances: Vec<DocumentInstance>,
     ) -> Result<Vec<DocumentInstance>, ApplicationError> {
@@ -651,6 +651,10 @@ where
         caller: &CallerContext,
         cmd: DiscardDraftCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
+        self.context.find_type(cmd.document_type).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
+        })?;
+
         let mut instance = self
             .instance_repo
             .find_by_id(cmd.document_type, cmd.document_instance_id)
@@ -705,7 +709,8 @@ where
                 id: format!("{}:v{}", cmd.document_instance_id, cmd.revision),
             })?;
 
-        instance.restore_snapshot(&snapshot, caller.actor.clone(), Utc::now());
+        let now = Utc::now();
+        instance.restore_snapshot(&snapshot, caller.actor.clone(), now)?;
 
         let (display_values, display_title) = extract_display_identity(
             doc_type,
@@ -714,9 +719,27 @@ where
             &self.context.config.default_locale,
         );
 
-        self.instance_repo
-            .save_draft(&instance, &display_values, &display_title)
-            .await?;
+        if doc_type.options.draft_and_publish {
+            self.instance_repo
+                .save_draft(&instance, &display_values, &display_title)
+                .await?;
+        } else {
+            let rev = instance.publish(caller.actor.clone(), now)?;
+            let new_snapshot = DocumentSnapshot {
+                id: SnapshotId::new(Uuid::now_v7()),
+                document_type_id: instance.document_type_id.clone(),
+                document_id: instance.id,
+                revision: rev,
+                fields: instance.fields().clone(),
+                relations: instance.relations.clone(),
+                created_at: now,
+                created_by: caller.actor.clone(),
+                reason: SnapshotReason::Publish,
+            };
+            self.instance_repo
+                .publish(&instance, rev, &display_values, &display_title, &new_snapshot)
+                .await?;
+        }
 
         Ok(instance)
     }
@@ -788,6 +811,10 @@ where
             &Permission::ReadDocument(Some(cmd.document_type.clone())),
             None,
         )?;
+
+        self.context.find_type(cmd.document_type).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
+        })?;
 
         let snapshots = self
             .snapshot_repo

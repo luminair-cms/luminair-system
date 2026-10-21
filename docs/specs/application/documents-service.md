@@ -16,7 +16,7 @@
 | `Collection` | Document type with `DocumentKind::Collection` | Arbitrary number of instances |
 | `DraftPublishOn` | Document type with `draft_and_publish: true` | Publish & unpublish enabled |
 | `DraftPublishOff` | Document type with `draft_and_publish: false` | Publish & unpublish rejected |
-| `OwnerCaller` | Caller whose `user_id` matches `instance.audit.created_by` | Allowed read, update, delete without role |
+| `OwnerCaller` | Caller whose actor matches `instance.audit.created_by` | `instance.is_owned_by_actor(&caller.actor)` |
 | `AdminCaller` | Caller possessing all system permissions | `CallerContext::system()` |
 | `UnauthorizedCaller` | Caller without required permission or ownership | Triggers `ApplicationError::Unauthorized` |
 
@@ -25,105 +25,105 @@
 ## Rules
 
 ### DS-01 — Create Collection Draft Success
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:002`
 - **Given**: A valid collection document type in schema registry, and a caller with `CreateDocument` permission.
 - **When**: Caller invokes `service.create(&caller, CreateDocumentCommand::new(type_id, valid_fields)).await`.
 - **Then**: Returns `Ok(instance)` with `instance.audit.version == 1`, `instance.audit.created_by == caller.actor`, `instance.content.publication_state` as `Draft { last_published_revision: None }`, and instance is retrievable from repository.
 
 ### DS-02 — Create Blocked for Second SingleType Instance
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:002` (SingleType Guard Option C)
 - **Given**: A single-type document type in schema registry, and an existing instance already saved in the repository.
 - **When**: Any caller invokes `service.create(&caller, CreateDocumentCommand::new(type_id, valid_fields)).await`.
 - **Then**: Returns `Err(ApplicationError::Domain(DomainError::SingleTypeAlreadyExists(type_id)))`.
 
 ### DS-03 — Create Rejects Content Violating Field Constraints
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `doc:domain::content::validate_content`
 - **Given**: A document type with a required field `title` having `MinLength(5)`.
 - **When**: Caller provides fields with `title` shorter than 5 characters or missing.
 - **Then**: Returns `Err(ApplicationError::Validation(errors))` containing the failure reason; no instance is saved to the repository.
 
 ### DS-04 — Update Bumps Version and Touches Audit Trail
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:002`
 - **Given**: An existing document instance with `audit.version == 1`.
-- **When**: Authorized caller updates a field via `service.update(&caller, UpdateDocumentCommand::new(type_id, instance_id, updated_fields)).await`.
+- **When**: Authorized caller updates a field via `service.update(&caller, UpdateDocumentCommand::new(instance_id, type_id, updated_fields)).await`.
 - **Then**: Returns `Ok(updated)` with `updated.audit.version == 2`, `updated.audit.updated_by == caller.actor`, and updated fields are persisted in the repository.
 
 ### DS-05 — Update Retains Unmentioned Fields and Clears Null Fields
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `observed` (PATCH semantics)
 - **Given**: An instance holding optional fields `f1 = "val1"` and `f2 = "val2"`.
 - **When**: Caller updates with `cmd.fields` containing only `f2: ContentValue::Null`.
 - **Then**: `f1` retains `"val1"`, `f2` becomes `ContentValue::Null` (or removed), and other schema constraints pass.
 
 ### DS-06 — Publish Advances Revision on DraftPublish Enabled Type
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:004`
 - **Given**: An existing draft instance of a `DraftPublishOn` document type, and a caller with `PublishDocument` permission.
-- **When**: Caller invokes `service.publish(&caller, PublishDocumentCommand::new(type_id, instance_id)).await`.
+- **When**: Caller invokes `service.publish(&caller, PublishDocumentCommand::new(instance_id, type_id)).await`.
 - **Then**: Returns `Ok(published)` with `publication_state` as `Published { revision: 1, .. }`, version incremented, and saved in repository.
 
 ### DS-07 — Publish Rejects Document of DraftPublish Disabled Type
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:004`
-- **Given**: An existing draft instance of a `DraftPublishOff` document type.
-- **When**: Caller with `PublishDocument` permission invokes `service.publish(&caller, PublishDocumentCommand::new(type_id, instance_id)).await`.
-- **Then**: Returns `Err(ApplicationError::Conflict(msg))` containing `"does not support draft-and-publish"`.
+- **Given**: A document type with `draft_and_publish: false` (`DraftPublishOff`).
+- **When**: A caller creates an instance (or updates it), or explicitly calls `publish` / `unpublish`.
+- **Then**: `create` immediately publishes at `revision: 1` and persists to the wide table, `update` immediately advances to `revision: 2`, while explicit calls to `service.publish(&caller, PublishDocumentCommand::new(instance_id, type_id))` or `service.unpublish(&caller, UnpublishDocumentCommand::new(instance_id, type_id))` return `Err(ApplicationError::Conflict(msg))` containing `"does not support draft-and-publish"`.
 
 ### DS-08 — Unpublish Transitions to Unpublished with Last Revision
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:004`
 - **Given**: An existing published instance with revision `1` of a `DraftPublishOn` document type.
-- **When**: Caller with `PublishDocument` permission invokes `service.unpublish(&caller, UnpublishDocumentCommand::new(type_id, instance_id)).await`.
+- **When**: Caller with `PublishDocument` permission invokes `service.unpublish(&caller, UnpublishDocumentCommand::new(instance_id, type_id)).await`.
 - **Then**: Returns `Ok(unpublished)` with `publication_state` as `PublicationState::Unpublished { last_published_revision: 1, .. }`, audit version incremented, and saved in repository.
 
 ### DS-09 — Unpublish Rejects Already Draft Instance
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:004`
 - **Given**: An existing draft instance of a `DraftPublishOn` document type.
-- **When**: Authorized caller invokes `service.unpublish(&caller, UnpublishDocumentCommand::new(type_id, instance_id)).await`.
+- **When**: Authorized caller invokes `service.unpublish(&caller, UnpublishDocumentCommand::new(instance_id, type_id)).await`.
 - **Then**: Returns `Err(ApplicationError::Domain(DomainError::InvalidStateTransition { .. }))`.
 
 ### DS-10 — Delete Removes Instance and Relations
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:002`
 - **Given**: An existing instance in repository.
-- **When**: Authorized caller invokes `service.delete(&caller, DeleteDocumentCommand::new(type_id, instance_id)).await`.
+- **When**: Authorized caller invokes `service.delete(&caller, DeleteDocumentCommand::new(instance_id, type_id)).await`.
 - **Then**: Returns `Ok(())`, and subsequent `find_by_id` returns `Ok(None)`.
 
 ### DS-11 — Find Applies Filters and Returns Total Count
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `observed`
 - **Given**: Three instances in repository, two matching `status == "active"` and one `status == "archived"`.
 - **When**: Caller invokes `service.find(&caller, FindDocumentsCommand::new(type_id, pagination).with_filters(vec![filter("status", "active")])).await`.
 - **Then**: Returns `Ok((items, total))` where `total == 2` and `items.len() == 2`.
 
 ### DS-12 — Unauthorized Caller Denied on All Mutations
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:002`
 - **Given**: A non-owner caller with no roles.
 - **When**: Caller invokes `update`, `delete`, `publish`, or `unpublish`.
 - **Then**: Returns `Err(ApplicationError::Unauthorized { .. })` without repository modification.
 
 ### DS-13 — Discard Draft Reverts to Published State
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:004`
 - **Given**: An existing document instance in `Modified` state (published with pending draft changes).
-- **When**: Authorized caller invokes `service.discard_draft(&caller, DiscardDraftCommand::new(type_id, instance_id)).await`.
+- **When**: Authorized caller invokes `service.discard_draft(&caller, DiscardDraftCommand::new(instance_id, type_id)).await`.
 - **Then**: Returns `Ok(published)` with `publication_state` restored to clean `Published`, draft store cleared, and `has_pending_draft == false`.
 
 ### DS-14 — Restore Snapshot Loads Historical Revision to Draft
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:004`
 - **Given**: An existing published document instance with historical revision `1` in `document_snapshots`.
-- **When**: Authorized caller invokes `service.restore_snapshot(&caller, RestoreSnapshotCommand::new(type_id, instance_id, 1)).await`.
+- **When**: Authorized caller invokes `service.restore_snapshot(&caller, RestoreSnapshotCommand::new(instance_id, type_id, 1)).await`.
 - **Then**: Returns `Ok(modified)` with draft content matching revision `1`, draft status marked as `Modified`, and audit trail touched.
 
 ### DS-15 — List Admin Headers Returns Lightweight Projections
-- **Status**: `Draft`
+- **Status**: `Approved`
 - **Origin**: `adr:004`
 - **Given**: Document instances in draft, modified, and published states in the repository.
 - **When**: Authorized caller invokes `service.list_admin_headers(&caller, ListAdminHeadersCommand::new(type_id, pagination)).await`.
@@ -142,5 +142,5 @@
 
 | # | Location | Code Says | Doc / Spec Says | Impact |
 |---|---|---|---|---|
-| 1 | `application/src/services/documents.rs:421` | `publish` returns `ApplicationError::Conflict` when `draft_and_publish` is false | Clear conflict condition | Consistent |
-| 2 | `application/src/services/documents.rs:278` | SingleType check calls `exists_for_type` before validation | Fast-fail guard prevents unnecessary schema validation | Good optimization |
+| 1 | `application/src/services/documents.rs:530` | `publish` returns `ApplicationError::Conflict` when `draft_and_publish` is false | Clear conflict condition | Consistent |
+| 2 | `application/src/services/documents.rs:330` | SingleType check calls `exists_for_type` before validation | Fast-fail guard prevents unnecessary schema validation | Good optimization |

@@ -56,10 +56,9 @@ impl FakeDocumentInstanceRepository {
     }
 
     pub fn with_instance(self, instance: DocumentInstance) -> Self {
-        self.instances
-            .write()
-            .expect("lock write")
-            .insert(instance.id, instance);
+        if let Ok(mut guard) = self.instances.write() {
+            guard.insert(instance.id, instance);
+        }
         self
     }
 
@@ -69,9 +68,10 @@ impl FakeDocumentInstanceRepository {
         parent_id: DocumentInstanceId,
         related: Vec<DocumentInstance>,
     ) {
-        let mut map = self.relations.write().expect("lock write");
-        let parent_map = map.entry(attr).or_default();
-        parent_map.insert(parent_id, related);
+        if let Ok(mut map) = self.relations.write() {
+            let parent_map = map.entry(attr).or_default();
+            parent_map.insert(parent_id, related);
+        }
     }
 
     fn save_internal(&self, instance: &DocumentInstance) -> Result<(), DomainError> {
@@ -539,10 +539,9 @@ impl FakeRoleRepository {
     }
 
     pub fn with_role(self, role: Role) -> Self {
-        self.roles
-            .write()
-            .expect("lock write")
-            .insert(role.id, role);
+        if let Ok(mut guard) = self.roles.write() {
+            guard.insert(role.id, role);
+        }
         self
     }
 }

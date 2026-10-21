@@ -13,10 +13,11 @@ Documentation and Tests are written mostly by AI.
 
 Read in this order:
 1. [`README.md`](./README.md) — what, why, quick-start
-2. [`docs/roadmap.md`](./docs/roadmap.md) — complete milestone plan & dependencies
-3. [`docs/architecture.md`](./docs/architecture.md) — crate layout, hexagonal architecture, DDD
-4. [`docs/data-model.md`](./docs/data-model.md) — entities, schema, AWS DSQL specifics
-5. [`docs/api.md`](./docs/api.md) — REST API surface and conventions
+2. [`docs/architecture.md`](./docs/architecture.md) — crate layout, hexagonal architecture, DDD
+3. [`docs/design-infrastructure-persistence.md`](./docs/design-infrastructure-persistence.md) — persistence design and DSQL patterns
+4. [`docs/ui-architecture.md`](./docs/ui-architecture.md) — admin studio UI architecture
+
+*(Note: `docs/roadmap.md`, `docs/data-model.md`, and `docs/api.md` are planned milestone artifacts).*
 
 ## 2. Load Skills Before Acting
 
@@ -41,7 +42,7 @@ Read in this order:
 | [ADR-001](./docs/adr/ADR-001-declarative-test-specifications.md) | Declarative behavior specifications as the source of truth for tests | Accepted |
 | [ADR-002](./docs/adr/ADR-002-hexagonal-architecture.md) | Hexagonal Architecture and DDD Crate Layout | Accepted |
 | [ADR-003](./docs/adr/ADR-003-aws-dsql-database.md) | AWS Aurora DSQL with PostgreSQL Portability | Accepted |
-| [ADR-004](./docs/adr/ADR-004-draft-and-publish-table-pattern.md) | Asymmetric Hybrid Draft-and-Publish Persistence Pattern | Proposed |
+| [ADR-004](./docs/adr/ADR-004-draft-and-publish-table-pattern.md) | Asymmetric Hybrid Draft-and-Publish Persistence Pattern | Accepted |
 
 ## 4. Mandatory Workflow Rules
 

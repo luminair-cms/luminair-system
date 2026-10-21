@@ -12,8 +12,8 @@
 
 | Term | Meaning / API symbol | Concrete representation |
 |---|---|---|
-| `Owner` | User matches `instance.audit.created_by` | `user_id == instance.audit.created_by.unwrap()` |
-| `NonOwner` | User differs from `instance.audit.created_by` | `user_id != instance.audit.created_by.unwrap()` |
+| `Owner` | User matches `instance.audit.created_by` | `instance.is_owned_by(user_id)` (`instance.audit.created_by == ActorId::User(user_id.clone())`) |
+| `NonOwner` | User differs from `instance.audit.created_by` | `!instance.is_owned_by(user_id)` |
 | `NoInstance` | Operation evaluated without a specific target instance | `instance: None` |
 | `NoRoles` | Caller has empty assigned role list | `roles: &[]` |
 | `Role(Perm)` | Role containing permission `Perm` | `Role { permissions: vec![Perm], .. }` |
@@ -26,24 +26,26 @@
 
 | ID | Status | Origin | Instance & Ownership | Action | Assigned Roles | Expected Result |
 |---|---|---|---|---|---|---|
-| `AZ-01` | `Draft` | `adr:002` | `Owner` | `ReadDocument(Some("article"))` | `NoRoles` | `true` (Owner rule) |
-| `AZ-02` | `Draft` | `adr:002` | `Owner` | `UpdateDocument(Some("article"))` | `NoRoles` | `true` (Owner rule) |
-| `AZ-03` | `Draft` | `adr:002` | `Owner` | `DeleteDocument(Some("article"))` | `NoRoles` | `true` (Owner rule) |
-| `AZ-04` | `Draft` | `adr:002` | `Owner` | `PublishDocument(Some("article"))` | `NoRoles` | `false` (Publishing always requires RBAC) |
-| `AZ-05` | `Draft` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
-| `AZ-06` | `Draft` | `adr:002` | `NonOwner` | `UpdateDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
-| `AZ-07` | `Draft` | `adr:002` | `NonOwner` | `DeleteDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
-| `AZ-08` | `Draft` | `adr:002` | `NonOwner` | `PublishDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
-| `AZ-09` | `Draft` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `Role(Scoped(Read, "article"))` | `true` (Exact RBAC match) |
-| `AZ-10` | `Draft` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `Role(Scoped(Read, "news"))` | `false` (Type mismatch) |
-| `AZ-11` | `Draft` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `Role(Wildcard(Read))` | `true` (Wildcard RBAC match) |
-| `AZ-12` | `Draft` | `adr:002` | `Owner` | `PublishDocument(Some("article"))` | `Role(Scoped(Publish, "article"))` | `true` (RBAC grants publish) |
-| `AZ-13` | `Draft` | `adr:002` | `NonOwner` | `PublishDocument(Some("article"))` | `Role(Wildcard(Publish))` | `true` (Wildcard RBAC grants publish) |
-| `AZ-14` | `Draft` | `adr:002` | `NoInstance` | `CreateDocument(Some("article"))` | `Role(Scoped(Create, "article"))` | `true` (Creation permitted) |
-| `AZ-15` | `Draft` | `adr:002` | `NoInstance` | `CreateDocument(Some("article"))` | `NoRoles` | `false` (Creation denied without role) |
-| `AZ-16` | `Draft` | `adr:002` | `NoInstance` | `ManageSchema` | `Role(ManageSchema)` | `true` (Administrative permission) |
-| `AZ-17` | `Draft` | `adr:002` | `NoInstance` | `ManageRoles` | `Role(ManageUsers)` | `false` (Non-matching administrative permission) |
-| `AZ-18` | `Draft` | `adr:002` | `NonOwner` | `DeleteDocument(Some("article"))` | `AdminRole` | `true` (Admin role covers all document actions) |
+| `AZ-01` | `Approved` | `adr:002` | `Owner` | `ReadDocument(Some("article"))` | `NoRoles` | `true` (Owner rule) |
+| `AZ-02` | `Approved` | `adr:002` | `Owner` | `UpdateDocument(Some("article"))` | `NoRoles` | `true` (Owner rule) |
+| `AZ-03` | `Approved` | `adr:002` | `Owner` | `DeleteDocument(Some("article"))` | `NoRoles` | `true` (Owner rule) |
+| `AZ-04` | `Approved` | `adr:002` | `Owner` | `PublishDocument(Some("article"))` | `NoRoles` | `false` (Publishing always requires RBAC) |
+| `AZ-05` | `Approved` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
+| `AZ-06` | `Approved` | `adr:002` | `NonOwner` | `UpdateDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
+| `AZ-07` | `Approved` | `adr:002` | `NonOwner` | `DeleteDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
+| `AZ-08` | `Approved` | `adr:002` | `NonOwner` | `PublishDocument(Some("article"))` | `NoRoles` | `false` (Default deny) |
+| `AZ-09` | `Approved` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `Role(Scoped(Read, "article"))` | `true` (Exact RBAC match) |
+| `AZ-10` | `Approved` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `Role(Scoped(Read, "news"))` | `false` (Type mismatch) |
+| `AZ-11` | `Approved` | `adr:002` | `NonOwner` | `ReadDocument(Some("article"))` | `Role(Wildcard(Read))` | `true` (Wildcard RBAC match) |
+| `AZ-12` | `Approved` | `adr:002` | `Owner` | `PublishDocument(Some("article"))` | `Role(Scoped(Publish, "article"))` | `true` (RBAC grants publish) |
+| `AZ-13` | `Approved` | `adr:002` | `NonOwner` | `PublishDocument(Some("article"))` | `Role(Wildcard(Publish))` | `true` (Wildcard RBAC grants publish) |
+| `AZ-14` | `Approved` | `adr:002` | `NoInstance` | `CreateDocument(Some("article"))` | `Role(Scoped(Create, "article"))` | `true` (Creation permitted) |
+| `AZ-15` | `Approved` | `adr:002` | `NoInstance` | `CreateDocument(Some("article"))` | `NoRoles` | `false` (Creation denied without role) |
+| `AZ-16` | `Approved` | `adr:002` | `NoInstance` | `ManageSchema` | `Role(ManageSchema)` | `true` (Administrative permission) |
+| `AZ-17` | `Approved` | `adr:002` | `NoInstance` | `ManageRoles` | `Role(ManageUsers)` | `false` (Non-matching administrative permission) |
+| `AZ-18` | `Approved` | `adr:002` | `NonOwner` | `DeleteDocument(Some("article"))` | `AdminRole` | `true` (Admin role covers all document actions) |
+| `AZ-19` | `Approved` | `adr:004` | `Any / NoInstance` | `Any Permission` | `NoRoles (ActorId::System)` | `true` (System actor bypasses all checks) |
+| `AZ-20` | `Approved` | `adr:004` | `Any` | `ReadDocument(Some("article"))` | `Role(Scoped(Read, "article")) (ActorId::Service)` | `true` (Service actor evaluates RBAC without owner rule) |
 
 ---
 
@@ -59,4 +61,4 @@
 | # | Location | Code Says | Doc / Spec Says | Impact |
 |---|---|---|---|---|
 | 1 | `domain/src/auth/service.rs:8-13` | Doc comment historically claimed owner can publish | Code explicitly enforces that publish requires RBAC | Resolved in code before ADR-001 acceptance; doc comment updated |
-| 2 | `domain/src/auth/service.rs:27-31` | Owner check only checks `is_owned_by(user_id)` | If `instance.audit.created_by` is `None` (system created), nobody is owner | Desired behavior |
+| 2 | `domain/src/auth/service.rs` | Owner check checks `instance.is_owned_by(user_id)` | `instance.audit.created_by` is `ActorId`; system-created instances have `ActorId::System` (non-user, owner rule does not apply) | Desired behavior |

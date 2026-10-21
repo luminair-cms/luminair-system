@@ -1,6 +1,6 @@
 # ADR-004: Asymmetric Hybrid Draft-and-Publish Persistence Pattern
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-05 (original) · 2026-10-09 (revised)
 - **Deciders**: Dmitri Astafiev
 - **Research**: [`docs/research/audit-logging-and-domain-events.md`](../research/audit-logging-and-domain-events.md), [`docs/research/dsql-vs-postgres.md`](../research/dsql-vs-postgres.md)
@@ -168,7 +168,7 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 ### 2. Publication (`publish`)
 - Verifies optimistic concurrency token (`expected_version` matches `draft.version`).
 - Validates draft against strict schema constraints (required fields, regex patterns, number ranges, target existence).
-- Within a single database transaction:
+- `DocumentInstanceRepository::publish` accepts `snapshot: &DocumentSnapshot` directly (along with `instance`, `revision`, `display_values`, and `display_title`) so the wide table, `document_drafts`, and `document_snapshots` are mutated within a single atomic database transaction:
   1. Upserts the live row into the wide table `[type]` and sets `has_pending_draft = FALSE`.
   2. Synchronizes relational junction rows in `[type]_[attr]`.
   3. Appends an immutable revision row to `document_snapshots` (`reason = 'publish'`).
@@ -181,10 +181,10 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 - Updates `[type].has_pending_draft = TRUE` in the wide table.
 
 ### 4. Unpublishing (`unpublish`)
-- Within a single database transaction:
+- `DocumentInstanceRepository::unpublish` accepts `snapshot: &DocumentSnapshot` directly (along with `instance`, `display_values`, and `display_title`) within a single atomic database transaction:
   1. Preserves content in `document_drafts` with `status = 'unpublished'`.
   2. Deletes the live row from the wide table `[type]` (foreign keys cascade to published junction rows).
-  3. Appends a revision row to `document_snapshots` (`reason = 'unpublish'`).
+  3. Appends an immutable revision row to `document_snapshots` (`reason = 'unpublish'`).
 
 ### 5. Discarding Drafts (`discard_draft`)
 - Deletes the row from `document_drafts`.

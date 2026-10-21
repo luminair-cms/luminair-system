@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::content::DocumentContent;
 use crate::content::values::{ContentValue, DomainValue, PrimitiveValue};
 use crate::errors::DomainError;
@@ -101,12 +103,11 @@ fn evaluate_constraint(
     }
 }
 
-use std::collections::HashSet;
-
+#[allow(clippy::mutable_key_type)]
 fn validate_field_value(
     attr_id: &AttributeId,
     field_type: &FieldType,
-    constraints: Option<&HashSet<FieldConstraint>>,
+    constraints: &HashSet<FieldConstraint>,
     val: &ContentValue,
     system_config: &SystemConfig,
     errors: &mut Vec<DomainError>,
@@ -119,7 +120,7 @@ fn validate_field_value(
                     attribute_id: attr_id.clone(),
                     reason: format!("value does not match field type {:?}", field_type),
                 });
-            } else if let Some(constraints) = constraints {
+            } else {
                 for constraint in constraints {
                     if let Some(err) = evaluate_constraint(attr_id, constraint, dv) {
                         errors.push(err);
@@ -140,7 +141,7 @@ fn validate_field_value(
                     let localized_str = &map[locale];
                     if !system_config.contains_locale(locale) {
                         errors.push(DomainError::UnknownLocale(locale.clone()));
-                    } else if let Some(constraints) = constraints {
+                    } else {
                         for constraint in constraints {
                             if let Some(err) = evaluate_str_constraint(
                                 attr_id,
@@ -182,11 +183,7 @@ fn validate_content_with_mode(
                 validate_field_value(
                     attr_id,
                     &field_def.field_type,
-                    if strict {
-                        Some(&field_def.constraints)
-                    } else {
-                        None
-                    },
+                    &field_def.constraints,
                     val,
                     system_config,
                     &mut errors,
@@ -529,5 +526,18 @@ mod tests {
             &validate_draft_content(&doc_type, &unknown_attr_content, &config).unwrap_err()[0],
             DomainError::UnknownAttribute(attr) if attr.as_ref() == "unregistered-attr"
         ));
+
+        // 6. Field constraint violation on non-null present field: Both Draft and Publish fail
+        let constrained_doc_type = DocumentTypeBuilder::collection("article-constrained")
+            .with_field(text_field("title").min_len(5))
+            .build();
+        let mut short_fields = HashMap::new();
+        short_fields.insert(
+            test_attr_id("title"),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Hi".into()))),
+        );
+        let short_content = draft_content(short_fields);
+        assert!(validate_draft_content(&constrained_doc_type, &short_content, &config).is_err());
+        assert!(validate_publish_content(&constrained_doc_type, &short_content, &config).is_err());
     }
 }

@@ -1,8 +1,10 @@
 //! Spec: docs/specs/domain/authorization-service.md — generated from behavior specification rules.
 
-use domain::auth::{AuthorizationService, Permission, Role, RoleId};
+use domain::auth::{ActorId, AuthorizationService, Permission, Role, RoleId};
 use domain::content::DocumentInstance;
-use domain::test_support::{admin_role, fixture_document_instance, test_doc_type_id, test_user_id};
+use domain::test_support::{
+    admin_role, fixture_document_instance, test_doc_type_id, test_service_id, test_user_id,
+};
 use uuid::Uuid;
 
 enum TargetInstance<'a> {
@@ -121,4 +123,43 @@ fn test_az_authorization_decision_table() {
     }
 
     assert!(failures.is_empty(), "Failed cases:\n- {}", failures.join("\n- "));
+}
+
+#[test]
+fn test_az_actor_authorization_rules() {
+    let article_type = test_doc_type_id("article");
+    let instance = fixture_document_instance("article", Some("owner"));
+    let publisher_article_role = Role {
+        id: RoleId::new(Uuid::now_v7()),
+        name: "publisher_article".into(),
+        description: None,
+        permissions: vec![Permission::PublishDocument(Some(article_type.clone()))],
+    };
+
+    // "AZ-19": System actor bypasses all checks even with empty roles
+    let az_19_result = AuthorizationService::can_actor(
+        &ActorId::System,
+        &Permission::PublishDocument(Some(article_type.clone())),
+        Some(&instance),
+        &[],
+    );
+    assert!(az_19_result, "AZ-19: System actor must bypass all checks unconditionally");
+
+    // "AZ-20": Service actor has no owner privileges on instance with &[], and evaluates RBAC across assigned roles
+    let service_actor = ActorId::Service(test_service_id("sync-worker"));
+    let az_20_denied = AuthorizationService::can_actor(
+        &service_actor,
+        &Permission::ReadDocument(Some(article_type.clone())),
+        Some(&instance),
+        &[],
+    );
+    assert!(!az_20_denied, "AZ-20: Service actor with no roles must be denied even on existing instance");
+
+    let az_20_granted = AuthorizationService::can_actor(
+        &service_actor,
+        &Permission::PublishDocument(Some(article_type.clone())),
+        Some(&instance),
+        &[publisher_article_role],
+    );
+    assert!(az_20_granted, "AZ-20: Service actor with matching role must be granted access");
 }

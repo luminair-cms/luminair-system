@@ -342,10 +342,17 @@ impl DocumentInstance {
         snapshot: &DocumentSnapshot,
         by: impl Into<ActorId>,
         now: DateTime<Utc>,
-    ) {
+    ) -> Result<(), DomainError> {
+        if snapshot.document_id != self.id || snapshot.document_type_id != self.document_type_id {
+            return Err(DomainError::Validation(format!(
+                "snapshot {}:{} does not belong to document {}:{}",
+                snapshot.document_type_id, snapshot.document_id, self.document_type_id, self.id
+            )));
+        }
         self.replace_fields(snapshot.fields.clone());
         self.relations = snapshot.relations.clone();
         self.edit_draft(by, now);
+        Ok(())
     }
 
     /// Records an edit/touch on the instance, updating updated_at and incrementing version.
@@ -534,7 +541,7 @@ mod tests {
             reason: SnapshotReason::Publish,
         };
 
-        instance.restore_snapshot(&snapshot, user.clone(), t2);
+        instance.restore_snapshot(&snapshot, user.clone(), t2).unwrap();
         assert_eq!(instance.audit.version, 3);
         assert_eq!(instance.audit.updated_at, t2);
         assert_eq!(
@@ -549,6 +556,21 @@ mod tests {
                 ..
             }
         ));
+
+        // Foreign snapshot rejection
+        let foreign_snapshot = DocumentSnapshot {
+            id: SnapshotId::new(Uuid::now_v7()),
+            document_type_id: instance.document_type_id.clone(),
+            document_id: DocumentInstanceId::new(Uuid::now_v7()),
+            revision: 1,
+            fields: HashMap::new(),
+            relations: HashMap::new(),
+            created_at: t1,
+            created_by: ActorId::User(user.clone()),
+            reason: SnapshotReason::Publish,
+        };
+        let err = instance.restore_snapshot(&foreign_snapshot, user, t2);
+        assert!(matches!(err, Err(DomainError::Validation(_))));
     }
 
     #[test]

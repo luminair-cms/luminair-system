@@ -43,4 +43,18 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   4. **Domain Schema Purity**: `DocumentType`, `FieldDefinition`, and `RelationDefinition` remain free of Serde derives; JSON config loading and REST `GET` endpoints use dedicated DTOs in `infrastructure`.
   5. **See**: [`docs/refactoring-domain-and-application.md`](../docs/refactoring-domain-and-application.md).
 
+---
+
+### 2026-10-21 — ADR-004 Accepted & Domain/Application Review Hardening (Batches 1–5)
+
+- **Context**: Completing implementation and spec approval for the Asymmetric Hybrid Persistence Pattern (ADR-004) across `domain` and `application`.
+- **Decisions**:
+  1. **Atomic Snapshot Transactions & Port Realignment**: `DocumentInstanceRepository::publish` and `DocumentInstanceRepository::unpublish` accept `snapshot: &DocumentSnapshot` directly (along with `display_values` and `display_title`) so that the wide published table, `document_drafts`, and `document_snapshots` are committed atomically within a single database transaction. The legacy monolithic `save` method was completely removed in favor of explicit lifecycle-specific persistence operations.
+  2. **ISP Decoupling of Repositories in DocumentsService**: Decoupled `DocumentsServiceImpl<R, S = R>` using Interface Segregation Principle with constructors `new` (when `R` implements both instance and snapshot repositories) and `new_with_snapshots` (when independent repository implementations are provided).
+  3. **Universal Actor Attribution in Auth Entities**: Extended `ActorId` attribution to `AccessRequest.reviewed_by: Option<ActorId>` and `UserRoleAssignment.granted_by: Option<ActorId>`, with approval/rejection taking `impl Into<ActorId>` and serialized to database URN strings.
+  4. **Single-Lifecycle Immediate Publication**: For document types with `draft_and_publish: false`, `create` immediately publishes at `revision: 1` and persists to the wide table atomically with an initial snapshot, `update` immediately advances the published revision, and explicit `publish` or `unpublish` invocations return `ApplicationError::Conflict`.
+  5. **Schema Graph Cross-Validation**: `SchemaRegistry::try_new` and `SchemaRegistry::validate` validate the full schema graph on registration, enforcing `display_fields` rules, field constraint applicability, and relation target existence across all declared types.
+  6. **Identity Formatting & Reconstitution**: Added `format_display_title` for canonical composite title generation, `DocumentHeader::enrich_relational_display` for in-memory read-time Phase 2 relation enrichment, and `DocumentInstance::reconstitute` for pure repository entity reconstruction without triggering mutation events.
+
+
 

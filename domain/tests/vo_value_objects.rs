@@ -1,5 +1,6 @@
 //! Spec: docs/specs/domain/value-objects.md — generated from behavior specification rules.
 
+use domain::auth::{ActorId, ServiceId, UserId};
 use domain::schema::{AttributeId, DocumentTypeId, RegexPattern};
 use domain::system::LocaleId;
 use proptest::prelude::*;
@@ -103,4 +104,51 @@ fn vo_04_regex_pattern_boundary_examples() {
     assert!(RegexPattern::try_new("[a-z").is_err());
     assert!(RegexPattern::try_new("(").is_err());
     assert!(RegexPattern::try_new("*").is_err());
+}
+
+#[test]
+fn vo_05_user_id_and_service_id_bounds() {
+    // UserId bounds: 1..=255 trimmed characters
+    assert!(UserId::try_new("u").is_ok());
+    assert!(UserId::try_new("  valid-user  ").is_ok());
+    assert_eq!(UserId::try_new("  alice  ").unwrap().as_ref(), "alice");
+    assert!(UserId::try_new("a".repeat(255)).is_ok());
+
+    assert!(UserId::try_new("").is_err());
+    assert!(UserId::try_new("   ").is_err());
+    assert!(UserId::try_new("a".repeat(256)).is_err());
+
+    // ServiceId bounds: 1..=245 trimmed characters
+    assert!(ServiceId::try_new("s").is_ok());
+    assert!(ServiceId::try_new("  valid-service  ").is_ok());
+    assert_eq!(ServiceId::try_new("  worker  ").unwrap().as_ref(), "worker");
+    assert!(ServiceId::try_new("s".repeat(245)).is_ok());
+
+    assert!(ServiceId::try_new("").is_err());
+    assert!(ServiceId::try_new("   ").is_err());
+    assert!(ServiceId::try_new("s".repeat(246)).is_err());
+}
+
+#[test]
+fn vo_06_actor_id_urn_roundtrip() {
+    // ActorId::User roundtrip
+    let user = ActorId::User(UserId::try_new("alice").unwrap());
+    assert_eq!(user.to_urn(), "user:alice");
+    assert_eq!(ActorId::from_urn("user:alice").unwrap(), user);
+
+    // ActorId::Service roundtrip
+    let service = ActorId::Service(ServiceId::try_new("sync-worker").unwrap());
+    assert_eq!(service.to_urn(), "service:sync-worker");
+    assert_eq!(ActorId::from_urn("service:sync-worker").unwrap(), service);
+
+    // ActorId::System roundtrip
+    let system = ActorId::System;
+    assert_eq!(system.to_urn(), "system");
+    assert_eq!(ActorId::from_urn("system").unwrap(), system);
+
+    // Malformed URN rejections
+    assert!(ActorId::from_urn("unknown:x").is_err());
+    assert!(ActorId::from_urn("user:").is_err());
+    assert!(ActorId::from_urn("service:").is_err());
+    assert!(ActorId::from_urn("").is_err());
 }

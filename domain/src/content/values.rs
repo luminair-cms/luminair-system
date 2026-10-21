@@ -102,14 +102,27 @@ impl PrimitiveValue {
                 IntegerSize::I64 => true,
             },
             (PrimitiveValue::Decimal(d), PrimitiveType::Decimal { precision, scale }) => {
+                if *precision == 0 || *scale > *precision {
+                    return false;
+                }
                 let actual_scale = d.scale() as u8;
                 if actual_scale > *scale {
                     return false;
                 }
-                // Verify total digit count within precision
+                // Verify both total digits and integer digits (left of decimal point) fit NUMERIC(precision, scale)
                 let mantissa = d.mantissa().abs();
-                let num_digits = if mantissa == 0 { 1 } else { mantissa.ilog10() + 1 } as u8;
-                num_digits <= *precision
+                let num_digits = if mantissa == 0 {
+                    1
+                } else {
+                    mantissa.ilog10() + 1
+                } as u8;
+                let int_digits = if mantissa == 0 {
+                    0
+                } else {
+                    num_digits.saturating_sub(actual_scale)
+                };
+                let max_int_digits = precision.saturating_sub(*scale);
+                num_digits <= *precision && int_digits <= max_int_digits
             }
             (PrimitiveValue::Date(_), PrimitiveType::Date) => true,
             (PrimitiveValue::DateTime(_), PrimitiveType::DateTime) => true,
@@ -298,6 +311,18 @@ mod tests {
         // Precision violation: 1234.56 has 6 digits > 5
         let prec_overflow: DomainValue = PrimitiveValue::Decimal(Decimal::new(123456, 2)).into();
         assert!(!prec_overflow.matches_field_type(&ft));
+
+        // Integer digits violation: 12345 has 5 integer digits > max allowed (5 - 2 = 3)
+        let int_overflow_scale0: DomainValue = PrimitiveValue::Decimal(Decimal::new(12345, 0)).into();
+        assert!(!int_overflow_scale0.matches_field_type(&ft));
+
+        // Integer digits violation: 1234.5 has 4 integer digits > max allowed (5 - 2 = 3)
+        let int_overflow_scale1: DomainValue = PrimitiveValue::Decimal(Decimal::new(12345, 1)).into();
+        assert!(!int_overflow_scale1.matches_field_type(&ft));
+
+        // Valid small fraction: 0.05 has 0 integer digits <= 3, scale 2 <= 2
+        let fraction_valid: DomainValue = PrimitiveValue::Decimal(Decimal::new(5, 2)).into();
+        assert!(fraction_valid.matches_field_type(&ft));
     }
 
     #[test]

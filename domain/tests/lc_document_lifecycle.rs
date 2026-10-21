@@ -252,7 +252,7 @@ fn lc_12_restore_snapshot_transitions_to_modified() {
         reason: SnapshotReason::Publish,
     };
 
-    inst.restore_snapshot(&snap, alice.clone(), t3);
+    inst.restore_snapshot(&snap, alice.clone(), t3).unwrap();
     assert_eq!(inst.audit.version, 4);
     assert_eq!(inst.audit.updated_by, ActorId::User(alice));
     assert_eq!(inst.audit.updated_at, t3);

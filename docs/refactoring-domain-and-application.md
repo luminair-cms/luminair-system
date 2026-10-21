@@ -48,9 +48,9 @@ This document specifies the complete, merged refactoring plan for transitioning 
 ## Phase 1: Domain Crate Refactoring (`domain`)
 
 ### Step 1.0: Strongly-Typed `ActorId` Attribution
-* **Files**: `domain/src/auth/user.rs`, `domain/src/auth/service.rs`, `domain/src/auth/mod.rs`
+* **Files**: `domain/src/auth/user.rs`, `domain/src/auth/service.rs`, `domain/src/auth/mod.rs`, `domain/src/auth/access_request.rs`, `domain/src/auth/role.rs`
 * **Changes**:
-  1. Define `ServiceId` using `#[nutype]` (same validation rules as `UserId`: `sanitize(trim)`, `validate(not_empty, len_char_max = 250)`).
+  1. Define `ServiceId` using `#[nutype]` (`sanitize(trim)`, `validate(not_empty, len_char_max = 245)`, ensuring `245` + `8` bytes for `"service:"` prefix = `253 <= 255`).
   2. Define `ActorId`:
      ```rust
      #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -66,7 +66,10 @@ This document specifies the complete, merged refactoring plan for transitioning 
      - `ActorId::Service(s)` $\leftrightarrow$ `"service:<s_str>"`
      - `ActorId::System` $\leftrightarrow$ `"system"`
   4. Implement `From<UserId>` and `From<ServiceId>` for `ActorId`.
-  5. Update `AuthorizationService::can` to accept `actor: &ActorId`:
+  5. Attribution in Access Requests & Roles:
+     - `AccessRequest.reviewed_by` and `UserRoleAssignment.granted_by` use `Option<ActorId>`.
+     - `AccessRequest::approve` and `AccessRequest::reject` accept `impl Into<ActorId>`.
+  6. Update `AuthorizationService::can` to accept `actor: &ActorId`:
      - If `actor` is `ActorId::System`, allow all actions.
      - Owner rule (`inst.is_owned_by(actor)`) applies when `self.audit.created_by == *actor` for `ReadDocument`, `UpdateDocument`, and `DeleteDocument`.
      - Otherwise evaluates RBAC across `roles`.
@@ -87,6 +90,8 @@ This document specifies the complete, merged refactoring plan for transitioning 
        - **Rule 4 (Max 1 Relational Display Field)**: At most **1** attribute in `display_fields` may reference a relation in `self.relations`.
   3. **Fallback Helper (`effective_display_fields`)**:
      - `DocumentType::effective_display_fields(&self) -> Vec<AttributeId>`: if `info.display_fields` is non-empty, returns it; otherwise returns the first declared `Text`, `LocalizedText`, or `Uid` field in `self.fields` (if any).
+  4. **Full Schema Graph Validation (`SchemaRegistry::try_new` & `validate`)**:
+     - `SchemaRegistry::try_new(types)` / `SchemaRegistry::validate(&self)` validates the full schema graph across all registered types, including `display_fields` rules, field constraint applicability, and relation target existence.
 * **Verification**:
   - Unit tests verifying:
     - Valid `display_fields` with up to 3 fields (including 1 `HasOne` or `BelongsToOne`).
@@ -103,7 +108,11 @@ This document specifies the complete, merged refactoring plan for transitioning 
        - Extracts a formatted string representation of the scalar or localized value (using `default_locale` for `LocalizedText`, skipping `Null`).
        - Inserts `(attr_id, formatted_string)` into `IndexMap<AttributeId, String>`, preserving declaration order.
      - Attributes referring to a singular relation (`HasOne` / `BelongsToOne`) are skipped at write time (they are enriched at read time in `list_admin_headers`).
-     - Joins all non-empty values in declaration order with `" — "` (falling back to `instance_id.to_string()` if empty) and truncates to 255 characters to produce `display_title: String`.
+     - Delegates title formatting to `format_display_title(&display_values, instance_id)`.
+  2. Add `pub fn format_display_title(display_values: &IndexMap<AttributeId, String>, fallback_id: DocumentInstanceId) -> String`:
+     - Joins all non-empty values in declaration order with `" — "`.
+     - If all values are empty, falls back to `fallback_id.to_string()`.
+     - Truncates output to 255 characters to produce the final `display_title`.
 * **Verification**:
   - Unit tests covering single-field, composite 3-field (`terminal-id` + `brand-name` + `removing-date`), null-field omission, localized-field extraction, and empty-fallback to `instance_id`.
 
@@ -152,6 +161,9 @@ This document specifies the complete, merged refactoring plan for transitioning 
      - `unpublish(&mut self, by: ActorId, now: DateTime<Utc>) -> Result<(), DomainError>`: transitions `Published` or `Modified` to `Unpublished`, preserving `last_published_revision` and recording `unpublished_at` / `unpublished_by`. Rejects `Draft` and `Unpublished` with `DomainError::InvalidStateTransition`.
      - `edit_draft(&mut self, by: ActorId, now: DateTime<Utc>)`: transitions `Published { revision, published_at, published_by }` to `Modified { live_revision: revision, published_at, published_by, draft_version: self.audit.version + 1 }` and calls `self.touch(by, now)`. If already `Draft`, `Modified`, or `Unpublished`, increments draft version and touches audit trail.
      - `discard_draft(&mut self) -> Result<(), DomainError>`: transitions `Modified { live_revision, published_at, published_by, .. }` back to `Published { revision: live_revision, published_at, published_by }`. Rejects calls on `Draft`, `Published`, or `Unpublished` with `DomainError::InvalidStateTransition`.
+     - `restore_snapshot(&mut self, snapshot: &DocumentSnapshot, actor: ActorId, now: DateTime<Utc>) -> Result<(), DomainError>`: restores content and relations from historical snapshot, transitions to `Modified`, and updates audit trail.
+  6. **Reconstitution for Persistence Hydration**:
+     - `pub fn reconstitute(id: DocumentInstanceId, type_id: DocumentTypeId, content: DocumentContent, relations: HashMap<AttributeId, Vec<ResolvedRelation>>, audit: AuditTrail) -> Self`: constructs a `DocumentInstance` directly from repository storage state without triggering mutation events or bumping versions.
 * **Verification**:
   - Update inline unit tests and case table tests in `domain/tests/lc_document_lifecycle.rs` to cover `LC-01` through `LC-12`.
 
@@ -192,14 +204,18 @@ This document specifies the complete, merged refactoring plan for transitioning 
      }
      ```
   3. Define `SnapshotId` (UUIDv7 `nutype`), `SnapshotReason` (`Publish`, `Checkpoint`, `Unpublish`), `DocumentSnapshot`, and `SnapshotHeader` (with `created_by: ActorId`).
+  4. Implement `DocumentHeader::enrich_relational_display(&mut self, effective_fields: &[AttributeId], rel_attr: &AttributeId, target_title: String)`:
+     - Merges `target_title` into `display_values` under `rel_attr`.
+     - Rebuilds `display_values` in the canonical order of `effective_fields`.
+     - Recomputes `display_title` via `format_display_title` and clears `relational_display_target`.
 
 ### Step 1.5: Two-Tier Content Validation
 * **File**: `domain/src/content/validator.rs`
 * **Changes**:
   1. `validate_draft_content(doc_type, content, config) -> Result<(), Vec<DomainError>>`:
-     - Checks scalar type compatibility (`matches_field_type`) and locale validity for non-null fields.
+     - Checks scalar type compatibility (`matches_field_type`), locale validity, and field constraints for present non-null fields.
      - Rejects undeclared attributes (`DomainError::UnknownAttribute`).
-     - Skips `required: true` checks for missing/null fields so incomplete work-in-progress drafts can be saved.
+     - Skips `required: true` checks for missing/null fields so incomplete work-in-progress drafts can be saved, while enforcing type compatibility, locale validity, and field constraints on present non-null values.
   2. `validate_publish_content(doc_type, content, config) -> Result<(), Vec<DomainError>>`:
      - Enforces all strict schema rules (`required: true`, `FieldConstraint` bounds/lengths/regex, and locale checks).
      - Keep `validate_content` as an alias or delegate to `validate_publish_content` for backward compatibility with existing tests.
@@ -209,15 +225,16 @@ This document specifies the complete, merged refactoring plan for transitioning 
 * **Changes**:
   1. **Relax `'static` Lifetime on `DocumentTypeId` (Review Finding 1)**:
      - Change `type_id: &'static DocumentTypeId` to `type_id: &DocumentTypeId` across all methods on `DocumentInstanceRepository`.
-  2. **Expand `DocumentInstanceRepository` with CQRS & Lifecycle Methods**:
+  2. **Expand `DocumentInstanceRepository` with CQRS & Lifecycle Methods (Legacy `save` removed)**:
+     - The legacy `save` method is removed in favor of explicit lifecycle-specific persistence.
      - `find_published(type_id: &DocumentTypeId, pagination: Pagination, filters: Vec<FieldFilter>) -> Future<Result<Page<DocumentInstance>, DomainError>>`
      - `find_published_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
      - `find_draft_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
      - `list_admin_headers(type_id: &DocumentTypeId, pagination: Pagination, status_filter: Option<DocumentStatus>) -> Future<Result<Page<DocumentHeader>, DomainError>>`
      - `find_display_titles_by_ids(type_id: &DocumentTypeId, ids: &[DocumentInstanceId]) -> Future<Result<HashMap<DocumentInstanceId, String>, DomainError>>`
      - `save_draft(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`
-     - `publish(instance: &DocumentInstance, revision: u32, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`
-     - `unpublish(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`
+     - `publish(instance: &DocumentInstance, revision: u32, display_values: &IndexMap<AttributeId, String>, display_title: &str, snapshot: &DocumentSnapshot) -> Future<Result<(), DomainError>>`
+     - `unpublish(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str, snapshot: &DocumentSnapshot) -> Future<Result<(), DomainError>>`
      - `discard_draft(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
      - `delete(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<(), DomainError>>`
      - `count(type_id: &DocumentTypeId, filters: Vec<FieldFilter>) -> Future<Result<u64, DomainError>>`
@@ -245,22 +262,26 @@ This document specifies the complete, merged refactoring plan for transitioning 
 ### Step 2.2: Application Service Orchestration (`DocumentsService`)
 * **File**: `application/src/services/documents.rs`
 * **Changes**:
-  1. **`create` use case**:
+  1. **Generic ISP Decoupling (`DocumentsServiceImpl<R, S = R>`)**:
+     - Parameterized over `R: DocumentInstanceRepository` and `S: DocumentSnapshotRepository` (defaulting `S = R`).
+     - `DocumentsServiceImpl::new(instance_repo: R, context: &'static SystemContext) -> Self` for unified repos.
+     - `DocumentsServiceImpl::new_with_snapshots(instance_repo: R, snapshot_repo: S, context: &'static SystemContext) -> Self` for decoupled snapshot storage.
+  2. **`create` use case**:
      - Computes `(display_values, display_title)` via `extract_display_identity`.
      - If `draft_and_publish: true`: runs `validate_draft_content`, calls `repo.save_draft(&instance, &display_values, &display_title)`.
-     - If `draft_and_publish: false`: runs `validate_publish_content`, transitions to `Published`, calls `repo.publish(&instance, 1, &display_values, &display_title)`.
-  2. **`update` use case**:
+     - If `doc_type.options.draft_and_publish == false`: runs `validate_publish_content`, immediately transitions the instance via `instance.publish(caller.actor.clone(), now)`, constructs a `DocumentSnapshot` (`SnapshotReason::Publish`), and persists atomically via `repo.publish(&instance, 1, &display_values, &display_title, &snapshot)`.
+  3. **`update` use case**:
      - Loads working copy, calls `instance.edit_draft(caller.actor.clone(), Utc::now())`, updates fields/relations, recomputes `(display_values, display_title)`.
      - If `draft_and_publish: true`: runs `validate_draft_content`, saves via `repo.save_draft(...)`.
-     - If `draft_and_publish: false`: runs `validate_publish_content`, increments revision, saves via `repo.publish(...)`.
-  3. **`publish` use case**:
+     - If `doc_type.options.draft_and_publish == false`: runs `validate_publish_content`, immediately advances revision via `instance.publish(caller.actor.clone(), now)`, constructs a `DocumentSnapshot` (`SnapshotReason::Publish`), and persists atomically via `repo.publish(&instance, rev, &display_values, &display_title, &snapshot)`.
+  4. **`publish` use case**:
      - Verifies `Permission::PublishDocument`.
      - Verifies `expected_version` (if provided) matches `instance.audit.version`.
      - Runs strict `validate_publish_content`.
-     - Transitions via `instance.publish(caller.actor.clone(), now)`, persists via `repo.publish(...)`, and saves an immutable `DocumentSnapshot` (`SnapshotReason::Publish`).
-  4. **`unpublish` use case**:
+     - Transitions via `instance.publish(caller.actor.clone(), now)`, creates `DocumentSnapshot` (`SnapshotReason::Publish`), and persists atomically via `repo.publish(&instance, rev, &display_values, &display_title, &snapshot)`.
+  5. **`unpublish` use case**:
      - Verifies `Permission::PublishDocument`.
-     - Transitions via `instance.unpublish(caller.actor.clone(), now)`, persists via `repo.unpublish(...)`, and saves an immutable `DocumentSnapshot` (`SnapshotReason::Unpublish`).
+     - Transitions via `instance.unpublish(caller.actor.clone(), now)`, creates `DocumentSnapshot` (`SnapshotReason::Unpublish`), and persists atomically via `repo.unpublish(&instance, &display_values, &display_title, &snapshot)`.
   5. **`discard_draft` use case (`DS-13`)**:
      - Verifies `Permission::UpdateDocument` or document ownership.
      - Loads draft, calls `instance.discard_draft()`, and invokes `repo.discard_draft(type_id, id)` to restore clean `Published` state.

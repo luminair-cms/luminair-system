@@ -62,7 +62,7 @@ impl Eq for FieldDefinition {}
 
 impl Hash for FieldDefinition {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.as_ref().hash(state);
+        self.id.hash(state);
     }
 }
 
