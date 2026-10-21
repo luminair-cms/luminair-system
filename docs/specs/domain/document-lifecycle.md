@@ -37,7 +37,7 @@
 | `LC-04` | `Approved` | `adr:004` | `Unpublished(1)`, `Version(3)` | `Publish(Actor("alice"), T3)` | `Ok(2)`, `Published(2)`, `Version(4)`, `updated_by == Actor("alice")` |
 | `LC-05` | `Approved` | `adr:004` | `Draft(None)`, `Version(1)` | `Unpublish(Actor("alice"), T1)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(1)` |
 | `LC-06` | `Approved` | `adr:004` | `Unpublished(1)`, `Version(3)` | `Unpublish(Actor("bob"), T4)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(3)` |
-| `LC-07` | `Approved` | `adr:004` | `observed` | Initial `new(type, Actor("alice"), T0)` | (constructed) | `Draft(None)`, `Version(1)`, `created_by == Actor("alice")`, `updated_by == Actor("alice")` |
+| `LC-07` | `Approved` | `adr:004` | (none) | `new(type, Actor("alice"), T0)` | `Draft(None)`, `Version(1)`, `created_by == Actor("alice")`, `updated_by == Actor("alice")` |
 | `LC-08` | `Approved` | `adr:004` | `observed` | Any instance with `Version(V)` | `Touch(Actor("bob"), T1)` | `audit.version == V + 1`, `audit.updated_by == Actor("bob")`, `audit.updated_at == T1` |
 | `LC-09` | `Approved` | `adr:004` | `Published(1)`, `Version(2)` | `EditDraft(Actor("alice"), T3)` | `Modified(1)`, `Version(3)`, `updated_by == Actor("alice")` |
 | `LC-10` | `Approved` | `adr:004` | `Modified(1)`, `Version(3)` | `DiscardDraft()` | `Published(1)`, `Version(3)` |

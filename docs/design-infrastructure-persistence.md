@@ -366,7 +366,7 @@ async fn publish_transaction(
 
 When the document was in `'modified'` state (both a live row in `[type]` and pending edits in `document_drafts`), the caller selects `UnpublishDraftResolution`:
 - **`UnpublishDraftResolution::KeepDraft` *(default)***: Preserves the in-progress draft edits in `document_drafts` and transitions its status to `'unpublished'`.
-- **`UnpublishDraftResolution::ReplaceWithPublished`**: Replaces the draft in `document_drafts` with the live published content & relations (Optionally saving the overwritten draft as a `'checkpoint'` snapshot).
+- **`UnpublishDraftResolution::ReplaceWithPublished`**: Replaces the draft in `document_drafts` with the live published content & relations.
 
 *(In both cases, `instance` passed into `unpublish_transaction` already holds the resolved target draft content/relations and `PublicationState::Unpublished`, while `snapshot` holds the live published revision being taken offline from `[type]`).*
 

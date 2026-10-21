@@ -19,20 +19,20 @@ This document demonstrates the three specification formats described in [`GUIDEL
 
 ## Vocabulary
 - `Draft(None)`: Draft with no previous publication (`last_published_revision: None`).
-- `Draft(Some(N))`: Draft with last published revision `N`.
 - `Published(N)`: Published at revision `N`.
-- `Publish`: calling `instance.publish(user, now)`.
-- `Unpublish`: calling `instance.unpublish(user, now)`.
+- `Unpublished(N)`: Unpublished with historical revision `N`.
+- `Publish`: calling `instance.publish(actor, now)`.
+- `Unpublish`: calling `instance.unpublish(actor, now)`.
 
 ## Rules
 | ID | Status | Origin | Given State | Action | Expected Result | Next State |
 |---|---|---|---|---|---|---|
 | `LC-01` | `Approved` | `adr:004` | `Draft(None)` | `Publish` | `Ok(1)` | `Published(1)` |
 | `LC-02` | `Approved` | `adr:004` | `Published(1)` | `Publish` | `Ok(2)` | `Published(2)` |
-| `LC-03` | `Approved` | `adr:004` | `Published(2)` | `Unpublish` | `Ok(())` | `Draft(Some(2))` |
-| `LC-04` | `Approved` | `adr:004` | `Draft(Some(2))` | `Publish` | `Ok(3)` | `Published(3)` |
+| `LC-03` | `Approved` | `adr:004` | `Published(1)` | `Unpublish` | `Ok(())` | `Unpublished(1)` |
+| `LC-04` | `Approved` | `adr:004` | `Unpublished(1)` | `Publish` | `Ok(2)` | `Published(2)` |
 | `LC-05` | `Approved` | `adr:004` | `Draft(None)` | `Unpublish` | `Err(InvalidStateTransition)` | `Draft(None)` |
-| `LC-06` | `Approved` | `adr:004` | `Draft(Some(2))` | `Unpublish` | `Err(InvalidStateTransition)` | `Draft(Some(2))` |
+| `LC-06` | `Approved` | `adr:004` | `Unpublished(1)` | `Unpublish` | `Err(InvalidStateTransition)` | `Unpublished(1)` |
 ```
 
 ### The Rust Test Implementation (`domain/tests/lc_document_lifecycle.rs`)
@@ -41,15 +41,16 @@ This document demonstrates the three specification formats described in [`GUIDEL
 //! Spec: docs/specs/domain/document-lifecycle.md — generated from approved rules.
 
 use chrono::Utc;
+use domain::auth::ActorId;
 use domain::content::{DocumentInstance, PublicationState};
 use domain::errors::DomainError;
-use domain::test_support::fixture_document_instance;
+use domain::test_support::{fixture_document_instance, test_user_id};
 
 #[derive(Clone, Copy)]
 enum StartState {
     DraftNone,
-    DraftSome(u32),
     Published(u32),
+    Unpublished(u32),
 }
 
 #[derive(Clone, Copy)]
@@ -58,7 +59,7 @@ enum Action {
     Unpublish,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Expect {
     PublishOk(u32),
     UnpublishOk,
@@ -75,10 +76,10 @@ struct Case {
 const CASES: &[Case] = &[
     Case { id: "LC-01", start: StartState::DraftNone, action: Action::Publish, expect: Expect::PublishOk(1) },
     Case { id: "LC-02", start: StartState::Published(1), action: Action::Publish, expect: Expect::PublishOk(2) },
-    Case { id: "LC-03", start: StartState::Published(2), action: Action::Unpublish, expect: Expect::UnpublishOk },
-    Case { id: "LC-04", start: StartState::DraftSome(2), action: Action::Publish, expect: Expect::PublishOk(3) },
+    Case { id: "LC-03", start: StartState::Published(1), action: Action::Unpublish, expect: Expect::UnpublishOk },
+    Case { id: "LC-04", start: StartState::Unpublished(1), action: Action::Publish, expect: Expect::PublishOk(2) },
     Case { id: "LC-05", start: StartState::DraftNone, action: Action::Unpublish, expect: Expect::ErrInvalidTransition },
-    Case { id: "LC-06", start: StartState::DraftSome(2), action: Action::Unpublish, expect: Expect::ErrInvalidTransition },
+    Case { id: "LC-06", start: StartState::Unpublished(1), action: Action::Unpublish, expect: Expect::ErrInvalidTransition },
 ];
 
 #[test]
@@ -88,15 +89,36 @@ fn test_document_lifecycle_cases() {
 
     for case in CASES {
         let mut inst = fixture_document_instance("article", Some("alice"));
+        inst.audit.version = 1;
+
         match case.start {
-            StartState::DraftNone => inst.content.publication_state = PublicationState::Draft { last_published_revision: None },
-            StartState::DraftSome(r) => inst.content.publication_state = PublicationState::Draft { last_published_revision: Some(r) },
-            StartState::Published(r) => inst.content.publication_state = PublicationState::Published { revision: r, published_at: now, published_by: None },
+            StartState::DraftNone => {
+                inst.content.publication_state = PublicationState::Draft {
+                    last_published_revision: None,
+                };
+            }
+            StartState::Published(rev) => {
+                inst.content.publication_state = PublicationState::Published {
+                    revision: rev,
+                    published_at: now,
+                    published_by: ActorId::User(test_user_id("alice")),
+                };
+                inst.audit.version = 2;
+            }
+            StartState::Unpublished(rev) => {
+                inst.content.publication_state = PublicationState::Unpublished {
+                    last_published_revision: rev,
+                    unpublished_at: now,
+                    unpublished_by: ActorId::User(test_user_id("alice")),
+                };
+                inst.audit.version = 3;
+            }
         }
 
+        let user = ActorId::User(test_user_id("bob"));
         let res = match case.action {
-            Action::Publish => inst.publish(None, now).map(|rev| Expect::PublishOk(rev)),
-            Action::Unpublish => inst.unpublish(None, now).map(|_| Expect::UnpublishOk),
+            Action::Publish => inst.publish(user, now).map(Expect::PublishOk),
+            Action::Unpublish => inst.unpublish(user, now).map(|_| Expect::UnpublishOk),
         };
 
         let matched = match (&case.expect, res) {
@@ -134,14 +156,14 @@ fn test_document_lifecycle_cases() {
 - **Status**: `Approved`
 - **Origin**: `adr:004`
 - **Given**: A document type with `draft_and_publish: false` and an existing document instance.
-- **When**: Caller with `PublishDocument` permission invokes `service.publish(caller, PublishDocumentCommand::new(type_id, instance_id)).await`.
+- **When**: Caller with `PublishDocument` permission invokes `service.publish(caller, PublishDocumentCommand::new(instance_id, type_id)).await`.
 - **Then**: Returns `Err(ApplicationError::Conflict(msg))` containing `"does not support draft-and-publish"`.
 
 ### DS-02 — Non-Owner Denied Without Explicit Role
 - **Status**: `Approved`
 - **Origin**: `adr:002`
 - **Given**: A document created by `owner_user`, and a caller `stranger_user` with no roles.
-- **When**: Stranger invokes `service.update(caller, UpdateDocumentCommand::new(type_id, instance_id, fields)).await`.
+- **When**: Stranger invokes `service.update(caller, UpdateDocumentCommand::new(instance_id, type_id, fields)).await`.
 - **Then**: Returns `Err(ApplicationError::Unauthorized { .. })`.
 ```
 
@@ -156,11 +178,12 @@ use application::context::CallerContext;
 use application::errors::ApplicationError;
 use application::services::{DocumentsService, DocumentsServiceImpl};
 use application::test_support::FakeDocumentInstanceRepository;
-use domain::auth::Permission;
+use domain::auth::{ActorId, Permission};
 use domain::content::DocumentInstance;
 use domain::schema::{DocumentType, DocumentTypeBuilder, SchemaRegistry};
 use domain::system::SystemContext;
 use domain::test_support::{fixture_system_config, text_field};
+use indexmap::IndexMap;
 
 fn setup_test_context(draft_and_publish: bool) -> (&'static SystemContext, &'static DocumentType) {
     let mut builder = DocumentTypeBuilder::collection("article");
@@ -180,12 +203,12 @@ fn setup_test_context(draft_and_publish: bool) -> (&'static SystemContext, &'sta
 async fn ds_01_publish_requires_draft_and_publish_enabled() {
     let (ctx, doc_type) = setup_test_context(false);
     let repo = FakeDocumentInstanceRepository::new();
-    let inst = DocumentInstance::new(doc_type.id.clone(), None, chrono::Utc::now());
-    repo.save(&inst).await.expect("seeded instance");
+    let inst = DocumentInstance::new(doc_type.id.clone(), ActorId::System, chrono::Utc::now());
+    repo.save_draft(&inst, &IndexMap::new(), &inst.id.to_string()).await.expect("seeded instance");
     let service = DocumentsServiceImpl::new(repo, ctx);
     let caller = CallerContext::system();
 
-    let res = service.publish(&caller, PublishDocumentCommand::new(&doc_type.id, inst.id)).await;
+    let res = service.publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id)).await;
 
     assert!(matches!(res, Err(ApplicationError::Conflict(_))), "expected Conflict, got {:?}", res);
 }
@@ -197,12 +220,12 @@ async fn ds_02_non_owner_denied_without_explicit_role() {
     let owner_id = domain::test_support::test_user_id("owner");
     let stranger_id = domain::test_support::test_user_id("stranger");
     
-    let inst = DocumentInstance::new(doc_type.id.clone(), Some(owner_id), chrono::Utc::now());
-    repo.save(&inst).await.expect("seeded instance");
+    let inst = DocumentInstance::new(doc_type.id.clone(), ActorId::User(owner_id), chrono::Utc::now());
+    repo.save_draft(&inst, &IndexMap::new(), &inst.id.to_string()).await.expect("seeded instance");
     let service = DocumentsServiceImpl::new(repo, ctx);
-    let stranger_caller = CallerContext::new(stranger_id, vec![]);
+    let stranger_caller = CallerContext::new(ActorId::User(stranger_id), vec![]);
 
-    let res = service.update(&stranger_caller, UpdateDocumentCommand::new(&doc_type.id, inst.id, HashMap::new())).await;
+    let res = service.update(&stranger_caller, UpdateDocumentCommand::new(inst.id, &doc_type.id, HashMap::new())).await;
 
     assert!(matches!(res, Err(ApplicationError::Unauthorized { .. })), "expected Unauthorized, got {:?}", res);
 }

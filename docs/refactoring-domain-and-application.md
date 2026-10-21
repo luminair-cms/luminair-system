@@ -232,7 +232,7 @@ This document specifies the complete, merged refactoring plan for transitioning 
      - `list_admin_headers(type_id: &DocumentTypeId, pagination: Pagination, status_filter: Option<DocumentStatus>) -> Future<Result<Page<DocumentHeader>, DomainError>>`
      - `find_display_titles_by_ids(type_id: &DocumentTypeId, ids: &[DocumentInstanceId]) -> Future<Result<HashMap<DocumentInstanceId, String>, DomainError>>`
      - `save_draft(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`
-     - `publish(instance: &DocumentInstance, revision: u32, display_values: &IndexMap<AttributeId, String>, display_title: &str, snapshot: &DocumentSnapshot) -> Future<Result<(), DomainError>>`
+     - `publish(instance: &DocumentInstance, revision: u32, display_values: &IndexMap<AttributeId, String>, display_title: &str, archived_snapshot: Option<&DocumentSnapshot>) -> Future<Result<(), DomainError>>`
      - `unpublish(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str, snapshot: &DocumentSnapshot) -> Future<Result<(), DomainError>>`
      - `discard_draft(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
      - `delete(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<(), DomainError>>`
@@ -268,16 +268,17 @@ This document specifies the complete, merged refactoring plan for transitioning 
   2. **`create` use case**:
      - Computes `(display_values, display_title)` via `extract_display_identity`.
      - If `draft_and_publish: true`: runs `validate_draft_content`, calls `repo.save_draft(&instance, &display_values, &display_title)`.
-     - If `doc_type.options.draft_and_publish == false`: runs `validate_publish_content`, immediately transitions the instance via `instance.publish(caller.actor.clone(), now)`, constructs a `DocumentSnapshot` (`SnapshotReason::Publish`), and persists atomically via `repo.publish(&instance, 1, &display_values, &display_title, &snapshot)`.
+     - If `doc_type.options.draft_and_publish == false`: runs `validate_publish_content`, immediately transitions the instance via `instance.publish(caller.actor.clone(), now)`, and persists atomically via `repo.publish(&instance, 1, &display_values, &display_title, None)`.
   3. **`update` use case**:
      - Loads working copy, calls `instance.edit_draft(caller.actor.clone(), Utc::now())`, updates fields/relations, recomputes `(display_values, display_title)`.
      - If `draft_and_publish: true`: runs `validate_draft_content`, saves via `repo.save_draft(...)`.
-     - If `doc_type.options.draft_and_publish == false`: runs `validate_publish_content`, immediately advances revision via `instance.publish(caller.actor.clone(), now)`, constructs a `DocumentSnapshot` (`SnapshotReason::Publish`), and persists atomically via `repo.publish(&instance, rev, &display_values, &display_title, &snapshot)`.
+     - If `doc_type.options.draft_and_publish == false`: captures superseded live version into `prev_snapshot = DocumentSnapshot { revision: prev_rev, reason: SnapshotReason::Publish, .. }`, runs `validate_publish_content`, immediately advances revision via `instance.publish(caller.actor.clone(), now)`, and persists atomically via `repo.publish(&instance, rev, &display_values, &display_title, prev_snapshot.as_ref())`.
   4. **`publish` use case**:
      - Verifies `Permission::PublishDocument`.
      - Verifies `expected_version` (if provided) matches `instance.audit.version`.
      - Runs strict `validate_publish_content`.
-     - Transitions via `instance.publish(caller.actor.clone(), now)`, creates `DocumentSnapshot` (`SnapshotReason::Publish`), and persists atomically via `repo.publish(&instance, rev, &display_values, &display_title, &snapshot)`.
+     - Loads previous live version (if any); if a previous live revision exists, captures it as `archived_snapshot = Some(DocumentSnapshot { .. reason: SnapshotReason::Publish })`.
+     - Transitions working copy via `instance.publish(caller.actor.clone(), now)`, and persists atomically via `repo.publish(&instance, rev, &display_values, &display_title, archived_snapshot.as_ref())`.
   5. **`unpublish` use case**:
      - Verifies `Permission::PublishDocument`.
      - Transitions via `instance.unpublish(caller.actor.clone(), now)`, creates `DocumentSnapshot` (`SnapshotReason::Unpublish`), and persists atomically via `repo.unpublish(&instance, &display_values, &display_title, &snapshot)`.
