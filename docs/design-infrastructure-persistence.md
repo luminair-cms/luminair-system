@@ -139,16 +139,16 @@ CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles (published_at D
 CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles (updated_at DESC);
 ```
 
-### 3.3 Relational Junction Tables (`[type]_[attr]`, e.g. `article_tags`)
+### 3.3 Relational Junction Tables (`[type]_[attr]_links`, e.g. `article_tags_links`)
 For each `HasMany` relation definition:
 ```sql
-CREATE TABLE IF NOT EXISTS article_tags (
+CREATE TABLE IF NOT EXISTS article_tags_links (
     article_id UUID NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
     tag_id     UUID NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
     PRIMARY KEY (article_id, tag_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_article_tags_tag_id ON article_tags (tag_id);
+CREATE INDEX IF NOT EXISTS idx_article_tags_links_tag_id ON article_tags_links (tag_id);
 ```
 
 ---

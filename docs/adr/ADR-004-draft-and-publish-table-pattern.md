@@ -30,7 +30,7 @@ Adopt the **Asymmetric Hybrid Persistence Pattern**:
 1. **Per-Type Wide Relational Table (`[type]`)**: Dedicated strictly to **live published instances** (and single-lifecycle document types where `draft_and_publish: false`). Includes a `has_pending_draft` flag to eliminate distributed outer joins.
 2. **Unified Draft Store (`document_drafts`)**: A **single static system table** holding working drafts as **JSONB** across all document types, augmented with materialized identity maps (`display_values JSONB` as key-value pairs) and workflow metadata.
 3. **Global Snapshot Store (`document_snapshots`)**: A **single static system table** recording immutable **JSONB** snapshots for publication history, manual checkpoints, and rollbacks.
-4. **Relational Junction Tables (`[type]_[attr]`)**: Maintained strictly for published associations with foreign keys (`ON DELETE CASCADE`).
+4. **Relational Junction Tables (`[type]_[attr]_links`)**: Maintained strictly for published associations with foreign keys (`ON DELETE CASCADE`).
 
 ---
 
@@ -64,7 +64,7 @@ Adopt the **Asymmetric Hybrid Persistence Pattern**:
                            │ 1 : N (FK ON DELETE CASCADE)
                            ▼
 ┌────────────────────────────────────────────────────────┐
-│             [type]_[attr] (e.g. article_tags)          │  <-- Published Junction Table
+│        [type]_[attr]_links (e.g. article_tags_links)   │  <-- Published Junction Table
 ├────────────────────────────────────────────────────────┤
 │ (article_id, tag_id) [PK]                              │
 └────────────────────────────────────────────────────────┘
@@ -176,7 +176,7 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 - Validates draft against strict schema constraints (required fields, regex patterns, number ranges, target existence).
 - `DocumentInstanceRepository::publish` accepts `snapshot: &DocumentSnapshot` directly (along with `instance`, `revision`, `display_values`, and `display_title`) so the wide table, `document_drafts`, and `document_snapshots` are mutated within a single atomic database transaction:
   1. Upserts the live row into the wide table `[type]` and sets `has_pending_draft = FALSE`.
-  2. Synchronizes relational junction rows in `[type]_[attr]`.
+  2. Synchronizes relational junction rows in `[type]_[attr]_links`.
   3. Appends an immutable revision row to `document_snapshots` (`reason = 'publish'`).
   4. Deletes the draft row from `document_drafts`.
 - If an OCC serialization conflict (`40001`) occurs in DSQL, the transaction runner retries automatically with exponential backoff and randomized jitter.

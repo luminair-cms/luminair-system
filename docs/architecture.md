@@ -67,7 +67,7 @@ Luminair employs an **Asymmetric Hybrid Persistence Pattern** to balance public 
 - **Per-Type Wide Relational Table (`[type]`)**: Contains only live published instances (and single-lifecycle types where `draft_and_publish: false`). Features typed columns, B-tree indexes, foreign keys, and `has_pending_draft BOOLEAN NOT NULL DEFAULT FALSE` to eliminate distributed cross-shard joins. Public visitor queries target this table directly.
 - **Unified Draft Store (`document_drafts`)**: A single static system table holding in-progress content and relations as JSONB across all content types. Tracks `schema_version`, `status` (`draft`, `modified`, `unpublished`), and materialized `display_values` (`IndexMap<AttributeId, String>`) for rapid Admin table rendering.
 - **Global Snapshot Store (`document_snapshots`)**: A single static append-only table recording immutable JSONB snapshots for publication history, manual checkpoints, and rollbacks with zero OCC write contention.
-- **Relational Junction Tables (`[type]_[attr]`)**: Maintained strictly for published associations with foreign keys (`ON DELETE CASCADE`).
+- **Relational Junction Tables (`[type]_[attr]_links`)**: Maintained strictly for published associations with foreign keys (`ON DELETE CASCADE`).
 - **Composite Identity**: Schemas declare `display_fields: Vec<AttributeId>`, materialized at write-time into self-describing key-value maps (`display_values JSONB`) and a joined text fallback (`display_title`).
 
 ## Deployment Environments
