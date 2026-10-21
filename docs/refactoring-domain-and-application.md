@@ -41,7 +41,7 @@ This document specifies the complete, merged refactoring plan for transitioning 
    - Split validation into **lenient draft validation** (`validate_draft_content`) and **strict publication validation** (`validate_publish_content`).
 6. **CQRS Repository Ports & Lifetime Ergonomics**:
    - Relax `type_id: &'static DocumentTypeId` to `type_id: &DocumentTypeId` across `DocumentInstanceRepository`.
-   - Replace generic `find_by_type` with decoupled CQRS methods (`find_published`, `list_admin_headers`, `find_display_titles_by_ids`, `find_draft_by_id`, `find_published_by_id`, `save_draft`, `publish`, `unpublish`, `discard_draft`) and `DocumentSnapshotRepository`.
+   - Replace generic `find_by_type` with decoupled CQRS methods (`find_published`, `list_admin_headers`, `find_display_titles_by_ids`, `find_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId, view: VersionView)`, `save_draft`, `publish`, `unpublish`, `discard_draft`) and `DocumentSnapshotRepository`.
 
 ---
 
@@ -228,8 +228,7 @@ This document specifies the complete, merged refactoring plan for transitioning 
   2. **Expand `DocumentInstanceRepository` with CQRS & Lifecycle Methods (Legacy `save` removed)**:
      - The legacy `save` method is removed in favor of explicit lifecycle-specific persistence.
      - `find_published(type_id: &DocumentTypeId, pagination: Pagination, filters: Vec<FieldFilter>) -> Future<Result<Page<DocumentInstance>, DomainError>>`
-     - `find_published_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
-     - `find_draft_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId) -> Future<Result<Option<DocumentInstance>, DomainError>>`
+     - `find_by_id(type_id: &DocumentTypeId, id: DocumentInstanceId, view: VersionView) -> Future<Result<Option<DocumentInstance>, DomainError>>`
      - `list_admin_headers(type_id: &DocumentTypeId, pagination: Pagination, status_filter: Option<DocumentStatus>) -> Future<Result<Page<DocumentHeader>, DomainError>>`
      - `find_display_titles_by_ids(type_id: &DocumentTypeId, ids: &[DocumentInstanceId]) -> Future<Result<HashMap<DocumentInstanceId, String>, DomainError>>`
      - `save_draft(instance: &DocumentInstance, display_values: &IndexMap<AttributeId, String>, display_title: &str) -> Future<Result<(), DomainError>>`

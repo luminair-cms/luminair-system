@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+pub use domain::content::VersionView;
 use domain::content::{ContentValue, DocumentInstanceId, FieldFilter, Pagination};
 use domain::schema::{AttributeId, DocumentTypeId};
 
@@ -46,6 +47,8 @@ pub struct FindByIdCommand {
     pub document_type: &'static DocumentTypeId,
     /// Unique identifier of the document instance.
     pub document_instance_id: DocumentInstanceId,
+    /// Lifecycle representation to retrieve (`Published` by default, or `Working` for the Admin draft tab).
+    pub view: VersionView,
     /// Optional list of relation attribute IDs to populate in the returned document.
     pub populate: Option<Vec<AttributeId>>,
 }
@@ -58,8 +61,14 @@ impl FindByIdCommand {
         Self {
             document_type,
             document_instance_id,
+            view: VersionView::default(),
             populate: None,
         }
+    }
+
+    pub fn with_view(mut self, view: VersionView) -> Self {
+        self.view = view;
+        self
     }
 
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
@@ -343,7 +352,11 @@ mod tests {
         let cmd = FindByIdCommand::new(type_id, id).with_populate(vec![attr.clone()]);
         assert_eq!(cmd.document_type, type_id);
         assert_eq!(cmd.document_instance_id, id);
+        assert_eq!(cmd.view, VersionView::Published);
         assert_eq!(cmd.populate, Some(vec![attr]));
+
+        let working_cmd = FindByIdCommand::new(type_id, id).with_view(VersionView::Working);
+        assert_eq!(working_cmd.view, VersionView::Working);
     }
 
     #[test]

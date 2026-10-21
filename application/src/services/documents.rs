@@ -9,7 +9,7 @@ use domain::content::{
     extract_display_identity, validate_content, validate_publish_content, DocumentHeader,
     DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, DocumentSnapshot,
     DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader, SnapshotId,
-    SnapshotReason,
+    SnapshotReason, VersionView,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentKind, DocumentType, DocumentTypeId, RelationType};
@@ -290,7 +290,7 @@ where
     ) -> Result<Option<DocumentInstance>, ApplicationError> {
         let instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .find_by_id(cmd.document_type, cmd.document_instance_id, cmd.view)
             .await?;
 
         match instance {
@@ -405,7 +405,7 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -487,7 +487,7 @@ where
     ) -> Result<(), ApplicationError> {
         let instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -511,7 +511,7 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -586,7 +586,7 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -657,7 +657,7 @@ where
 
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -685,7 +685,7 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id)
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -889,10 +889,21 @@ mod tests {
             .await
             .expect("create success");
 
-        let fetched = service
+        // Newly created draft is not published yet: default VersionView::Published returns None
+        let published_res = service
             .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, created.id))
             .await
-            .expect("find success")
+            .unwrap();
+        assert!(published_res.is_none());
+
+        // Working view returns the draft document
+        let fetched = service
+            .find_by_id(
+                &caller,
+                FindByIdCommand::new(&doc_type.id, created.id).with_view(VersionView::Working),
+            )
+            .await
+            .unwrap()
             .expect("found document");
 
         assert_eq!(fetched.id, created.id);
@@ -1156,12 +1167,24 @@ mod tests {
             .await
             .expect("delete succeeds");
 
-        // After delete: instance is gone
+        // After delete: instance is gone from both published and working views
         let found = service
             .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, created.id))
             .await
             .expect("find_by_id returns Ok");
         assert!(found.is_none(), "instance should be gone after delete");
+
+        let found_working = service
+            .find_by_id(
+                &caller,
+                FindByIdCommand::new(&doc_type.id, created.id).with_view(VersionView::Working),
+            )
+            .await
+            .expect("find_by_id returns Ok");
+        assert!(
+            found_working.is_none(),
+            "working instance should be gone after delete"
+        );
     }
 
     fn make_relational_fixture() -> (

@@ -7,7 +7,7 @@ use application::services::{DocumentsService, DocumentsServiceImpl};
 use application::test_support::FakeDocumentInstanceRepository;
 use domain::content::{
     ContentValue, DocumentStatus, DomainValue, FieldFilter, Pagination, PrimitiveValue,
-    PublicationState,
+    PublicationState, VersionView,
 };
 use domain::errors::DomainError;
 use domain::schema::{DocumentType, RelationDefinition, RelationType, SchemaRegistry};
@@ -287,6 +287,30 @@ async fn ds_08_unpublish_transitions_to_draft_with_last_revision() {
             ..
         }
     ));
+
+    // Verify Published view returns None after unpublish
+    let published_view = service
+        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .await
+        .unwrap();
+    assert!(published_view.is_none());
+
+    // Verify Working view returns the instance in Unpublished state
+    let working_view = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("found in working view");
+    assert!(matches!(
+        working_view.content.publication_state,
+        PublicationState::Unpublished {
+            last_published_revision: 1,
+            ..
+        }
+    ));
 }
 
 #[tokio::test]
@@ -339,8 +363,16 @@ async fn ds_10_delete_removes_instance() {
         .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
         .await
         .unwrap();
-
     assert!(fetched.is_none());
+
+    let fetched_working = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap();
+    assert!(fetched_working.is_none());
 }
 
 #[tokio::test]
@@ -590,14 +622,41 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         )))
     );
 
-    // Verify fetched working copy has restored content
-    let fetched = service
+    // Verify default view (Published) returns live revision 2
+    let published_view = service
         .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
         .await
         .unwrap()
-        .expect("found");
+        .expect("found published view");
+    assert!(matches!(
+        published_view.content.publication_state,
+        PublicationState::Published { revision: 2, .. }
+    ));
     assert_eq!(
-        fetched.get_field(&test_attr_id("title")),
+        published_view.get_field(&test_attr_id("title")),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("V2 Title".into())
+        )))
+    );
+
+    // Verify Working view returns restored revision 1 in Modified state
+    let working_view = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("found working view");
+    assert!(matches!(
+        working_view.content.publication_state,
+        PublicationState::Modified {
+            live_revision: 2,
+            ..
+        }
+    ));
+    assert_eq!(
+        working_view.get_field(&test_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("V1 Title".into())
         )))
@@ -763,4 +822,183 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     assert_eq!(draft_total, 1);
     assert_eq!(draft_headers.len(), 1);
     assert_eq!(draft_headers[0].status, DocumentStatus::Draft);
+}
+
+#[tokio::test]
+async fn test_version_views_across_all_four_document_states() {
+    let (service, doc_type, caller) = setup_service_fixture(true, false);
+    let title_attr = test_attr_id("title");
+
+    // 1. State: Draft
+    let mut draft_fields = HashMap::new();
+    draft_fields.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft Title".into()))),
+    );
+    let inst = service
+        .create(&caller, CreateDocumentCommand::new(&doc_type.id, draft_fields))
+        .await
+        .unwrap();
+
+    let pub_view_1 = service
+        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .await
+        .unwrap();
+    assert!(pub_view_1.is_none(), "Draft must not be visible in Published tab");
+
+    let work_view_1 = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("Draft must be visible in Working tab");
+    assert!(matches!(
+        work_view_1.content.publication_state,
+        PublicationState::Draft {
+            last_published_revision: None
+        }
+    ));
+    assert_eq!(
+        work_view_1.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Draft Title".into())
+        )))
+    );
+
+    // 2. State: Published
+    service
+        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .await
+        .unwrap();
+
+    let pub_view_2 = service
+        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .await
+        .unwrap()
+        .expect("Published instance must be visible in Published tab");
+    assert!(matches!(
+        pub_view_2.content.publication_state,
+        PublicationState::Published { revision: 1, .. }
+    ));
+    assert_eq!(
+        pub_view_2.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Draft Title".into())
+        )))
+    );
+
+    let work_view_2 = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("Published instance must be visible in Working tab");
+    assert!(matches!(
+        work_view_2.content.publication_state,
+        PublicationState::Published { revision: 1, .. }
+    ));
+    assert_eq!(
+        work_view_2.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Draft Title".into())
+        )))
+    );
+
+    // 3. State: Modified (Live Published + Pending Draft Edits)
+    let mut modified_fields = HashMap::new();
+    modified_fields.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Modified Title".into(),
+        ))),
+    );
+    service
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst.id, &doc_type.id, modified_fields),
+        )
+        .await
+        .unwrap();
+
+    let pub_view_3 = service
+        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .await
+        .unwrap()
+        .expect("Live published content must remain visible in Published tab");
+    assert!(matches!(
+        pub_view_3.content.publication_state,
+        PublicationState::Published { revision: 1, .. }
+    ));
+    assert_eq!(
+        pub_view_3.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Draft Title".into())
+        )))
+    );
+
+    let work_view_3 = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("Pending draft content must be visible in Working tab");
+    assert!(matches!(
+        work_view_3.content.publication_state,
+        PublicationState::Modified {
+            live_revision: 1,
+            ..
+        }
+    ));
+    assert_eq!(
+        work_view_3.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Modified Title".into())
+        )))
+    );
+
+    // 4. State: Unpublished
+    service
+        .unpublish(
+            &caller,
+            UnpublishDocumentCommand::new(inst.id, &doc_type.id),
+        )
+        .await
+        .unwrap();
+
+    let pub_view_4 = service
+        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .await
+        .unwrap();
+    assert!(
+        pub_view_4.is_none(),
+        "Unpublished instance must not be visible in Published tab"
+    );
+
+    let work_view_4 = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("Unpublished instance must be visible in Working tab");
+    assert!(matches!(
+        work_view_4.content.publication_state,
+        PublicationState::Unpublished {
+            last_published_revision: 1,
+            ..
+        }
+    ));
+    assert_eq!(
+        work_view_4.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Modified Title".into())
+        )))
+    );
 }

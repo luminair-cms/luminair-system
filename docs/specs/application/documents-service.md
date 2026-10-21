@@ -19,6 +19,8 @@
 | `OwnerCaller` | Caller whose actor matches `instance.audit.created_by` | `instance.is_owned_by_actor(&caller.actor)` |
 | `AdminCaller` | Caller possessing all system permissions | `CallerContext::system()` |
 | `UnauthorizedCaller` | Caller without required permission or ownership | Triggers `ApplicationError::Unauthorized` |
+| `VersionView::Published` | Default view for `FindByIdCommand`: returns strictly the live published wide table row | `VersionView::Published` |
+| `VersionView::Working` | Working draft view for `FindByIdCommand`: returns working draft from draft store or falls back to wide table | `VersionView::Working` |
 
 ---
 
@@ -120,7 +122,7 @@
 - **Origin**: `adr:004`
 - **Given**: An existing published document instance with historical revision `1` in `document_snapshots`.
 - **When**: Authorized caller invokes `service.restore_snapshot(&caller, RestoreSnapshotCommand::new(instance_id, type_id, 1)).await`.
-- **Then**: Returns `Ok(modified)` with draft content matching revision `1`, draft status marked as `Modified`, and audit trail touched.
+- **Then**: Returns `Ok(modified)` with draft content matching revision `1`, draft status marked as `Modified`, and audit trail touched; subsequent `FindByIdCommand` with `VersionView::Working` returns the restored draft (`revision 1` content), while default `VersionView::Published` continues returning the live published revision (`revision 2`).
 
 ### DS-15 — List Admin Headers Returns Lightweight Projections
 - **Status**: `Approved`

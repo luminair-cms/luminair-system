@@ -11,6 +11,19 @@ use crate::content::instance::{DocumentInstanceId, PublicationState, ResolvedRel
 use crate::content::values::{format_display_title, ContentValue};
 use crate::schema::{AttributeId, DocumentTypeId};
 
+/// Specifies which lifecycle representation of a single document instance to retrieve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionView {
+    /// Strictly the live published representation from the wide table (`[type]`).
+    /// This is the default for public visitor queries and the read-only "Published" tab in the Admin UI.
+    #[default]
+    Published,
+    /// The latest working representation (`document_drafts` if present, otherwise falling back to `[type]`).
+    /// Used for the editable "Draft" tab in the Admin UI.
+    Working,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentStatus {
@@ -253,5 +266,20 @@ mod tests {
             Some(&"Jane Doe".to_string())
         );
         assert_eq!(header.display_title, "My Post — Jane Doe");
+    }
+
+    #[test]
+    fn test_version_view_default_and_serde() {
+        assert_eq!(VersionView::default(), VersionView::Published);
+
+        let json_pub = serde_json::to_string(&VersionView::Published).unwrap();
+        assert_eq!(json_pub, "\"published\"");
+        let deserialized_pub: VersionView = serde_json::from_str(&json_pub).unwrap();
+        assert_eq!(deserialized_pub, VersionView::Published);
+
+        let json_work = serde_json::to_string(&VersionView::Working).unwrap();
+        assert_eq!(json_work, "\"working\"");
+        let deserialized_work: VersionView = serde_json::from_str(&json_work).unwrap();
+        assert_eq!(deserialized_work, VersionView::Working);
     }
 }

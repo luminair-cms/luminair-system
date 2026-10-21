@@ -4,7 +4,7 @@ use std::future::Future;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use super::header::{DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader};
+use super::header::{DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader, VersionView};
 use super::instance::{DocumentInstance, DocumentInstanceId};
 use super::values::DomainValue;
 use crate::errors::DomainError;
@@ -45,25 +45,14 @@ pub struct FieldFilter {
 pub type RelationMap = HashMap<AttributeId, HashMap<DocumentInstanceId, Vec<DocumentInstance>>>;
 
 pub trait DocumentInstanceRepository: Send + Sync {
-    /// Loads a single document instance by its type and ID (returns working draft if present, otherwise published).
+    /// Loads a single document instance by its type, ID, and requested lifecycle view:
+    /// - `VersionView::Published`: strictly loads the live published row from the wide table (`[type]`).
+    /// - `VersionView::Working`: loads the working copy from `document_drafts` if present, otherwise falls back to `[type]`.
     fn find_by_id(
         &self,
         type_id: &DocumentTypeId,
         id: DocumentInstanceId,
-    ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
-
-    /// Loads the working draft by ID from the unified draft store (if any).
-    fn find_draft_by_id(
-        &self,
-        type_id: &DocumentTypeId,
-        id: DocumentInstanceId,
-    ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
-
-    /// Loads the live published document by ID from the wide table (if any).
-    fn find_published_by_id(
-        &self,
-        type_id: &DocumentTypeId,
-        id: DocumentInstanceId,
+        view: VersionView,
     ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
 
     /// Visitor query: queries strictly the published wide table (or all instances in legacy/find_by_type).

@@ -130,10 +130,10 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 ### 4. Global Snapshot Store (`document_snapshots`)
 - Single static table recording immutable revision history across all content types.
 - Append-only inserts with UUIDv7 primary keys eliminate OCC serialization conflicts in DSQL.
-- Stores frozen JSONB representation of content and relations along with `reason VARCHAR(32)` (`SnapshotReason`):
-  - `'publish'` (`SnapshotReason::Publish`): Created atomically during `publish` (or auto-publish when `draft_and_publish: false`) to record the newly published revision.
-  - `'checkpoint'` (`SnapshotReason::Checkpoint`): Manual or automatic editorial savepoint created without publishing to the wide table (e.g., saving a draft milestone or taking a pre-restore / pre-migration safety backup via `DocumentSnapshotRepository::save_snapshot`).
-  - `'unpublish'` (`SnapshotReason::Unpublish`): Created atomically during `unpublish` to record an audit trail of the document state at the moment it was taken offline.
+- Stores frozen JSONB representation of historical content and relations along with `reason VARCHAR(32)` (`SnapshotReason`):
+  - `'publish'` (`SnapshotReason::Publish`): Created atomically during `publish` when a **previous** live version in `[type]` is superseded by a newly published revision (no snapshot is created on the first publish `revision = 1` because it is currently live in `[type]`).
+  - `'checkpoint'` (`SnapshotReason::Checkpoint`): Manual or automatic editorial savepoint of a working draft created without publishing to the wide table — automatically saved before `restore_snapshot` overwrites an in-progress `Modified` draft, or triggered manually via `DocumentSnapshotRepository::save_snapshot`.
+  - `'unpublish'` (`SnapshotReason::Unpublish`): Created atomically during `unpublish` to archive the live published revision from `[type]` at the moment it is taken offline.
 
 ---
 
@@ -174,10 +174,10 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 ### 2. Publication (`publish`)
 - Verifies optimistic concurrency token (`expected_version` matches `draft.version`).
 - Validates draft against strict schema constraints (required fields, regex patterns, number ranges, target existence).
-- `DocumentInstanceRepository::publish` accepts `snapshot: &DocumentSnapshot` directly (along with `instance`, `revision`, `display_values`, and `display_title`) so the wide table, `document_drafts`, and `document_snapshots` are mutated within a single atomic database transaction:
-  1. Upserts the live row into the wide table `[type]` and sets `has_pending_draft = FALSE`.
-  2. Synchronizes relational junction rows in `[type]_[attr]_links`.
-  3. Appends an immutable revision row to `document_snapshots` (`reason = 'publish'`).
+- `DocumentInstanceRepository::publish` accepts `archived_snapshot: Option<&DocumentSnapshot>` (along with `instance`, `revision`, `display_values`, and `display_title`) so the wide table, `document_drafts`, and `document_snapshots` are mutated within a single atomic database transaction:
+  1. If a previous live revision already existed in `[type]` (`archived_snapshot = Some(..)`), archives that superseded live version to `document_snapshots` (`reason = 'publish'`).
+  2. Upserts the new live row into the wide table `[type]` and sets `has_pending_draft = FALSE`.
+  3. Synchronizes relational junction rows in `[type]_[attr]_links`.
   4. Deletes the draft row from `document_drafts`.
 - If an OCC serialization conflict (`40001`) occurs in DSQL, the transaction runner retries automatically with exponential backoff and randomized jitter.
 
@@ -186,20 +186,25 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 - Mutates or creates a row in `document_drafts` with `status = 'modified'` and increments `version`.
 - Updates `[type].has_pending_draft = TRUE` in the wide table.
 
-### 4. Unpublishing (`unpublish`)
-- `DocumentInstanceRepository::unpublish` accepts `snapshot: &DocumentSnapshot` directly (along with `instance`, `display_values`, and `display_title`) within a single atomic database transaction:
-  1. Preserves content in `document_drafts` with `status = 'unpublished'`.
-  2. Deletes the live row from the wide table `[type]` (foreign keys cascade to published junction rows).
-  3. Appends an immutable revision row to `document_snapshots` (`reason = 'unpublish'`).
+### 4. Unpublishing (`unpublish` — Take Offline)
+- Removes the live published state from `[type]` so public visitors no longer see the document.
+- When unpublishing a `'modified'` document (which has both a live row in `[type]` and pending edits in `document_drafts`), `UnpublishDocumentCommand` specifies `UnpublishDraftResolution`:
+  - `KeepDraft` (default): Keeps the working draft in `document_drafts` (`status = 'unpublished'`).
+  - `ReplaceWithPublished`: Replaces `document_drafts` with the live published content & relations (`status = 'unpublished'`).
+- `DocumentInstanceRepository::unpublish` accepts `snapshot: &DocumentSnapshot` (capturing the live revision leaving `[type]`) within a single atomic database transaction:
+  1. Archives the live published row from `[type]` to `document_snapshots` (`reason = 'unpublish'`).
+  2. Deletes the live row from the wide table `[type]` (foreign keys cascade to `[type]_[attr]_links`).
+  3. Upserts the resolved draft into `document_drafts` with `status = 'unpublished'`.
 
 ### 5. Discarding Drafts (`discard_draft`)
 - Deletes the row from `document_drafts`.
 - Updates `[type].has_pending_draft = FALSE`.
 - The document remains cleanly published in the wide table.
 
-### 6. Restoring Snapshots (`restore_snapshot`)
+### 6. Restoring Snapshots (`restore_snapshot` — Rollback)
 - Loads the historical snapshot from `document_snapshots`.
-- Writes the snapshot content into `document_drafts` with `status = 'modified'` for editorial review and subsequent republishing.
+- If the document is currently in `Modified` state (uncommitted draft edits exist in `document_drafts`), automatically saves the current working draft to `document_snapshots` with `reason = 'checkpoint'` so in-progress work is never lost.
+- Writes the restored snapshot content into `document_drafts` (`status = 'modified'` if live, or `'unpublished'` / `'draft'`) for editorial review and subsequent republishing.
 
 ---
 
@@ -211,12 +216,12 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
    - Zero draft leakage; optimal throughput.
 2. **Admin Studio Listing (`list_admin_headers`)**:
    - For `draft_and_publish: false` types: queries the wide table directly (`status = 'published'`).
-   - For `draft_and_publish: true` types: executes a union query between pure drafts (`document_drafts WHERE status = 'draft'`) and published documents from `[type]` (incorporating `has_pending_draft`), avoiding distributed cross-shard `FULL OUTER JOIN` bottlenecks.
+   - For `draft_and_publish: true` types: executes a `UNION ALL` query between all working copies in `document_drafts` (`'draft'`, `'modified'`, `'unpublished'`) and clean published documents from `[type]` (`WHERE has_pending_draft = FALSE`), avoiding duplicate rows for `'modified'` documents and eliminating distributed cross-shard `FULL OUTER JOIN` bottlenecks.
    - If `display_fields` includes singular relations (`HasOne` / `BelongsToOne`), performs a 2nd-phase batched lookup (`find_display_titles_by_ids`) for the page's referenced target IDs and enriches `display_values` and `display_title` before returning.
    - Returns lightweight `DocumentHeader` projections (`display_values` key-value map, `display_title`, `status`, audit timestamps).
-3. **Editing Fetch (`find_draft_by_id`)**:
-   - Loads the full working draft JSONB by ID into the editor form (falling back to the wide table if no active draft exists).
-   - Reconciles `draft.schema_version` against the current schema definition.
+3. **Single Document Fetch (`find_by_id(type_id, id, view: VersionView)`)**:
+   - `VersionView::Published`: strictly loads the live published row from the wide table (`[type]`).
+   - `VersionView::Working`: loads the working copy from `document_drafts` (falling back to the clean published row in the wide table if no active draft exists). Reconciles `draft.schema_version` against the current schema definition.
 4. **Revision History (`list_snapshots`)**:
    - Scoped strictly to a single document ID (`WHERE document_type_id = $1 AND document_id = $2`).
 

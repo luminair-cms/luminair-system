@@ -86,13 +86,13 @@ CREATE INDEX IF NOT EXISTS idx_document_snapshots_lookup
 
 #### Semantics of `document_snapshots.reason` (`SnapshotReason`)
 
-`document_snapshots` is an append-only audit and revision history log. Every snapshot records the `reason` why that point-in-time state was captured:
+`document_snapshots` is an append-only archive of **historical revisions** that are no longer the active live row in `[type]` (or draft checkpoints). Every snapshot records the `reason` why that point-in-time state was captured:
 
 | `reason` Value | Domain Variant (`SnapshotReason`) | Trigger / Workflow | Meaning |
 |---|---|---|---|
-| `'publish'` | `SnapshotReason::Publish` | `publish` (or auto-publish on `create`/`update`/`restore_snapshot` when `draft_and_publish: false`) | Recorded atomically inside `publish_transaction` whenever a document is published. Captures the exact fields and relations of the newly published `revision`. |
-| `'checkpoint'` | `SnapshotReason::Checkpoint` | `DocumentSnapshotRepository::save_snapshot` (manual savepoint or pre-destructive backup) | An editorial or system savepoint created **without** publishing to the live wide table — e.g., when an editor saves a named milestone of a work-in-progress draft, or when the system automatically records a safety backup before a destructive action (such as overwriting draft edits during `restore_snapshot` or running a bulk schema migration). |
-| `'unpublish'` | `SnapshotReason::Unpublish` | `unpublish` | Recorded atomically inside `unpublish_transaction` when a live document is taken offline. Captures an immutable audit record of the state (`revision = last_published_revision`) at the exact moment it was unpublished. |
+| `'publish'` | `SnapshotReason::Publish` | `publish` (when overwriting an existing live row in `[type]`) | Recorded atomically inside `publish_transaction` when a **previous** live revision (`N - 1`) in `[type]` is superseded by a newly published revision (`N`). (On the first publish `revision = 1`, no previous row exists in `[type]`, so no `'publish'` snapshot is created yet). |
+| `'checkpoint'` | `SnapshotReason::Checkpoint` | `restore_snapshot` (when in `Modified` state) or manual savepoint via `save_snapshot` | An editorial or system savepoint of a **working draft** created without publishing to the wide table — automatically recorded before `restore_snapshot` overwrites in-progress `Modified` draft changes, or triggered manually before risky edits/migrations. |
+| `'unpublish'` | `SnapshotReason::Unpublish` | `unpublish` | Recorded atomically inside `unpublish_transaction` when a live document (`revision = N`) is taken offline from `[type]`. Archives the unpublished live version into `document_snapshots` before deleting the row from `[type]`. |
 
 ---
 
@@ -165,6 +165,45 @@ LIMIT 25 OFFSET 0;
 ```
 * **Performance**: Direct B-tree index lookup; zero joins with draft tables; zero status filtering.
 
+### 4.1.2 Single Document Fetch by ID (`find_by_id`)
+
+Single-document retrieval supports both public visitor queries and the Admin Studio's **2-tab editor** (`Published` and `Draft` tabs) through `find_by_id(type_id, id, view: VersionView)`:
+
+- **Published (read-only) tab (`VersionView::Published`)**: Fetches strictly from the wide table via `find_by_id(type_id, id, VersionView::Published)`. This guarantees public visitors and editors inspecting live content always see the exact live representation without draft pollution.
+- **Draft (editable) tab (`VersionView::Working`)**: Fetches the latest working state via `find_by_id(type_id, id, VersionView::Working)`. It checks `document_drafts` first; if absent, it falls back to the clean published row in the wide table.
+
+#### State Resolution Across Editor Tabs
+
+| Document State | In `document_drafts`? | In Wide Table `[type]`? | Published Tab (`VersionView::Published`) | Draft / Working Tab (`VersionView::Working`) | Description |
+|---|---|---|---|---|---|
+| **1. `'draft'`** *(never published)* | **Yes** (`status = 'draft'`) | No | `None` | `Some` (draft content) | Newly created document; no public version exists. |
+| **2. `'published'`** *(clean live)* | No | **Yes** (`has_pending_draft = FALSE`) | `Some` (live content) | `Some` (live content via fallback) | Published live document with no uncommitted changes. Both tabs show identical content. |
+| **3. `'modified'`** *(live + pending edits)* | **Yes** (`status = 'modified'`) | **Yes** (`has_pending_draft = TRUE`) | `Some` (live revision content) | `Some` (pending draft content) | Document is published live, but has uncommitted edits or a restored snapshot in the draft store. |
+| **4. `'unpublished'`** *(taken offline)* | **Yes** (`status = 'unpublished'`) | No *(deleted on unpublish)* | `None` | `Some` (offline draft content) | Document was taken offline; public view returns 404/None, while draft tab preserves content and `last_published_revision`. |
+
+#### SQL Implementations
+
+**Path 1: `find_by_id` (`VersionView::Published`)**
+Direct primary key index lookup against the wide table:
+```sql
+SELECT * FROM [type]
+WHERE id = $1;
+```
+* **Performance**: Single-row point lookup by primary key; 0 joins; returns `None` if document is unpublished or still a draft.
+
+**Path 2: `find_by_id` (`VersionView::Working`)**
+Two-step lookup with wide-table fallback:
+```sql
+-- Step 1: Check unified draft store for working copy
+SELECT * FROM document_drafts
+WHERE document_type_id = $1 AND id = $2;
+
+-- Step 2: If Step 1 returns NULL, fall back to clean published row
+SELECT * FROM [type]
+WHERE id = $1;
+```
+* **Correctness**: Preserves working draft isolation while seamlessly exposing clean published instances in the editable tab when no draft changes are pending.
+
 ---
 
 ### 4.2 Admin List Headers (`list_admin_headers`)
@@ -188,7 +227,17 @@ LIMIT $1 OFFSET $2;
 ```
 
 #### Path B: For Draft-Enabled Types (`draft_and_publish: true`)
-To avoid cross-shard distributed `FULL OUTER JOIN` operations in AWS Aurora DSQL, execute an indexed `UNION ALL`:
+
+Because a document can exist in `document_drafts`, in the wide table `[type]`, or in **both** simultaneously (when in `'modified'` state), here is where each document state physically lives and which branch of the `UNION ALL` selects it:
+
+| Document State | In `document_drafts`? | In Wide Table `[type]`? | Selected by Branch | Why |
+|---|---|---|---|---|
+| **1. `'draft'`** *(never published)* | **Yes** (`status = 'draft'`) | No | **Branch 1** (`document_drafts`) | Only exists in `document_drafts`. |
+| **2. `'unpublished'`** *(taken offline)* | **Yes** (`status = 'unpublished'`) | No *(deleted on unpublish)* | **Branch 1** (`document_drafts`) | Only exists in `document_drafts`. |
+| **3. `'modified'`** *(live + pending edits)* | **Yes** (`status = 'modified'`) | **Yes** (`has_pending_draft = TRUE`) | **Branch 1** (`document_drafts`) | Exists in **both** tables. Branch 1 selects the working copy (with the latest edited `display_title`, `updated_at`, and `version`), while Branch 2 skips it via `WHERE has_pending_draft = FALSE` so the document is **not duplicated**. |
+| **4. `'published'`** *(live, no pending edits)* | No *(deleted on publish / discard)* | **Yes** (`has_pending_draft = FALSE`) | **Branch 2** (`[type]`) | Only exists in `[type]` with `has_pending_draft = FALSE`. |
+
+To avoid cross-shard distributed `FULL OUTER JOIN` operations in AWS Aurora DSQL, `list_admin_headers` executes this two-branch `UNION ALL`:
 ```sql
 WITH combined AS (
     -- 1. Working copies in document_drafts ('draft', 'modified', 'unpublished')
@@ -246,7 +295,7 @@ This resolves all related entity titles for the page in a single extra round-tri
 ---
 
 ### 4.3 Atomic Publication Transaction (`publish`)
-Executed inside an explicit `sqlx::Transaction`:
+Executed inside an explicit `sqlx::Transaction`. Notice that `archived_snapshot: Option<&DocumentSnapshot>` is `Some` **only** when a previous live revision already existed in `[type]` (which is now being superseded by `revision`), and `None` on initial publication (`revision == 1`):
 
 ```rust
 async fn publish_transaction(
@@ -255,18 +304,36 @@ async fn publish_transaction(
     revision: u32,
     display_values: &IndexMap<AttributeId, String>,
     display_title: &str,
-    snapshot: &DocumentSnapshot,
+    archived_snapshot: Option<&DocumentSnapshot>,
 ) -> Result<(), RepositoryError> {
     let mut tx = pool.begin().await?;
 
-    // 1. Upsert into wide table
+    // 1. If a previous live version existed in [type], archive it to document_snapshots (reason = 'publish')
+    if let Some(snapshot) = archived_snapshot {
+        sqlx::query(
+            "INSERT INTO document_snapshots (id, document_type_id, document_id, revision, content, relations, created_at, created_by, reason)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'publish')"
+        )
+        .bind(snapshot.id.into_inner())
+        .bind(snapshot.document_type_id.as_ref())
+        .bind(snapshot.document_id.into_inner())
+        .bind(snapshot.revision as i32)
+        .bind(serde_json::to_value(&snapshot.fields)?)
+        .bind(serde_json::to_value(&snapshot.relations)?)
+        .bind(snapshot.created_at)
+        .bind(snapshot.created_by.to_urn())
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // 2. Upsert the new live revision into wide table [type]
     // (sets has_pending_draft = false, revision = revision, display_values, display_title, fields = instance.fields())
     sqlx::query(&upsert_wide_table_sql(&instance.document_type_id))
         .bind(...)
         .execute(&mut *tx)
         .await?;
 
-    // 2. Synchronize junction rows
+    // 3. Synchronize junction rows in [type]_[attr]_links
     sqlx::query(&delete_junction_sql(&instance.document_type_id))
         .bind(instance.id)
         .execute(&mut *tx)
@@ -278,23 +345,6 @@ async fn publish_transaction(
             .execute(&mut *tx)
             .await?;
     }
-
-    // 3. Append immutable revision snapshot directly from snapshot
-    sqlx::query(
-        "INSERT INTO document_snapshots (id, document_type_id, document_id, revision, content, relations, created_at, created_by, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
-    )
-    .bind(snapshot.id.into_inner())
-    .bind(snapshot.document_type_id.as_ref())
-    .bind(snapshot.document_id.into_inner())
-    .bind(snapshot.revision as i32)
-    .bind(serde_json::to_value(&snapshot.fields)?)
-    .bind(serde_json::to_value(&snapshot.relations)?)
-    .bind(snapshot.created_at)
-    .bind(snapshot.created_by.to_urn())
-    .bind(snapshot.reason.as_str())
-    .execute(&mut *tx)
-    .await?;
 
     // 4. Clean up draft store
     sqlx::query("DELETE FROM document_drafts WHERE document_type_id = $1 AND id = $2")
@@ -310,7 +360,16 @@ async fn publish_transaction(
 
 ---
 
-### 4.4 Unpublish Transaction (`unpublish`)
+### 4.4 Unpublish Transaction (`unpublish` — Take Offline)
+
+`unpublish` removes the live published state from `[type]` so the document is no longer visible to public visitors, and archives the unpublished live version into `document_snapshots` (`reason = 'unpublish'`).
+
+When the document was in `'modified'` state (both a live row in `[type]` and pending edits in `document_drafts`), the caller selects `UnpublishDraftResolution`:
+- **`UnpublishDraftResolution::KeepDraft` *(default)***: Preserves the in-progress draft edits in `document_drafts` and transitions its status to `'unpublished'`.
+- **`UnpublishDraftResolution::ReplaceWithPublished`**: Replaces the draft in `document_drafts` with the live published content & relations (Optionally saving the overwritten draft as a `'checkpoint'` snapshot).
+
+*(In both cases, `instance` passed into `unpublish_transaction` already holds the resolved target draft content/relations and `PublicationState::Unpublished`, while `snapshot` holds the live published revision being taken offline from `[type]`).*
+
 ```rust
 async fn unpublish_transaction(
     pool: &PgPool,
@@ -321,7 +380,29 @@ async fn unpublish_transaction(
 ) -> Result<(), RepositoryError> {
     let mut tx = pool.begin().await?;
 
-    // 1. Fetch current wide table row and ensure saved into document_drafts with status = 'unpublished'
+    // 1. Archive the live published version from [type] into document_snapshots with reason = 'unpublish'
+    sqlx::query(
+        "INSERT INTO document_snapshots (id, document_type_id, document_id, revision, content, relations, created_at, created_by, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'unpublish')"
+    )
+    .bind(snapshot.id.into_inner())
+    .bind(snapshot.document_type_id.as_ref())
+    .bind(snapshot.document_id.into_inner())
+    .bind(snapshot.revision as i32)
+    .bind(serde_json::to_value(&snapshot.fields)?)
+    .bind(serde_json::to_value(&snapshot.relations)?)
+    .bind(snapshot.created_at)
+    .bind(snapshot.created_by.to_urn())
+    .execute(&mut *tx)
+    .await?;
+
+    // 2. Delete from wide table [type] (cascading foreign keys remove [type]_[attr]_links rows)
+    sqlx::query(&format!("DELETE FROM {} WHERE id = $1", instance.document_type_id.as_ref()))
+        .bind(instance.id.into_inner())
+        .execute(&mut *tx)
+        .await?;
+
+    // 3. Upsert resolved working copy into document_drafts with status = 'unpublished'
     sqlx::query(
         "INSERT INTO document_drafts (id, document_type_id, display_values, display_title, status, content, relations, schema_version, version, last_published_revision, created_at, created_by, updated_at, updated_by)
          VALUES ($1, $2, $3, $4, 'unpublished', $5, $6, 1, $7, $8, $9, $10, $11, $12)
@@ -351,28 +432,6 @@ async fn unpublish_transaction(
     .execute(&mut *tx)
     .await?;
 
-    // 2. Delete from wide table [type] (cascading foreign keys remove junction rows)
-    sqlx::query(&format!("DELETE FROM {} WHERE id = $1", instance.document_type_id.as_ref()))
-        .bind(instance.id.into_inner())
-        .execute(&mut *tx)
-        .await?;
-
-    // 3. Insert unpublish snapshot into document_snapshots with reason = 'unpublish'
-    sqlx::query(
-        "INSERT INTO document_snapshots (id, document_type_id, document_id, revision, content, relations, created_at, created_by, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'unpublish')"
-    )
-    .bind(snapshot.id.into_inner())
-    .bind(snapshot.document_type_id.as_ref())
-    .bind(snapshot.document_id.into_inner())
-    .bind(snapshot.revision as i32)
-    .bind(serde_json::to_value(&snapshot.fields)?)
-    .bind(serde_json::to_value(&snapshot.relations)?)
-    .bind(snapshot.created_at)
-    .bind(snapshot.created_by.to_urn())
-    .execute(&mut *tx)
-    .await?;
-
     // 4. Commit transaction
     tx.commit().await?;
     Ok(())
@@ -381,7 +440,9 @@ async fn unpublish_transaction(
 
 ---
 
-### 4.5 Discard Draft (`discard_draft`)
+### 4.5 Discard Draft (`discard_draft`) & Restore Snapshot (`restore_snapshot`)
+
+#### 4.5.1 Discard Draft (`discard_draft`)
 ```rust
 async fn discard_draft_transaction(
     pool: &PgPool,
@@ -407,6 +468,12 @@ async fn discard_draft_transaction(
     Ok(())
 }
 ```
+
+#### 4.5.2 Restore Snapshot (`restore_snapshot` — Rollback to Historical Revision)
+When rolling back to a previous revision from `document_snapshots`:
+1. If the document is currently in `Modified` state (meaning an editor has uncommitted draft changes in `document_drafts`), `DocumentsService::restore_snapshot` first saves the current working draft to `document_snapshots` with **`reason = 'checkpoint'`** (`snapshot_repo.save_snapshot(&checkpoint)`), ensuring in-progress draft work is never lost.
+2. The target historical snapshot's `fields` and `relations` are loaded into the working draft (`status = 'modified'` if a live version exists in `[type]`, or `'unpublished'` / `'draft'` otherwise) and persisted via `save_draft` (and `[type].has_pending_draft = TRUE`).
+3. The editor can then review the restored content in the Draft tab and click **Publish** to make it live.
 
 ---
 

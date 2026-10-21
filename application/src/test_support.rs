@@ -11,7 +11,7 @@ use domain::auth::{
 use domain::content::{
     ContentValue, DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
     DocumentSnapshot, DocumentSnapshotRepository, DocumentStatus, FieldFilter, Page, Pagination,
-    PublicationState, RelationMap, SnapshotHeader,
+    PublicationState, RelationMap, SnapshotHeader, VersionView,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentTypeId};
@@ -102,39 +102,34 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         &self,
         _type_id: &DocumentTypeId,
         id: DocumentInstanceId,
+        view: VersionView,
     ) -> Result<Option<DocumentInstance>, DomainError> {
-        let store = self.instances.read().map_err(lock_error)?;
-        Ok(store.get(&id).cloned())
-    }
-
-    async fn find_draft_by_id(
-        &self,
-        _type_id: &DocumentTypeId,
-        id: DocumentInstanceId,
-    ) -> Result<Option<DocumentInstance>, DomainError> {
-        let store = self.instances.read().map_err(lock_error)?;
-        Ok(store.get(&id).cloned())
-    }
-
-    async fn find_published_by_id(
-        &self,
-        _type_id: &DocumentTypeId,
-        id: DocumentInstanceId,
-    ) -> Result<Option<DocumentInstance>, DomainError> {
-        let pub_store = self.published.read().map_err(lock_error)?;
-        if let Some(inst) = pub_store.get(&id) {
-            return Ok(Some(inst.clone()));
+        match view {
+            VersionView::Published => {
+                let pub_store = self.published.read().map_err(lock_error)?;
+                if let Some(inst) = pub_store.get(&id) {
+                    return Ok(Some(inst.clone()));
+                }
+                let store = self.instances.read().map_err(lock_error)?;
+                if let Some(inst) = store.get(&id)
+                    && matches!(
+                        inst.content.publication_state,
+                        PublicationState::Published { .. }
+                    )
+                {
+                    return Ok(Some(inst.clone()));
+                }
+                Ok(None)
+            }
+            VersionView::Working => {
+                let store = self.instances.read().map_err(lock_error)?;
+                if let Some(inst) = store.get(&id) {
+                    return Ok(Some(inst.clone()));
+                }
+                let pub_store = self.published.read().map_err(lock_error)?;
+                Ok(pub_store.get(&id).cloned())
+            }
         }
-        let store = self.instances.read().map_err(lock_error)?;
-        if let Some(inst) = store.get(&id)
-            && matches!(
-                inst.content.publication_state,
-                PublicationState::Published { .. }
-            )
-        {
-            return Ok(Some(inst.clone()));
-        }
-        Ok(None)
     }
 
     async fn find_by_type(
