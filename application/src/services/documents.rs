@@ -9,7 +9,7 @@ use domain::content::{
     extract_display_identity, validate_content, validate_publish_content, DocumentHeader,
     DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, DocumentSnapshot,
     DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader, SnapshotId,
-    SnapshotReason, VersionView,
+    SnapshotReason, UnpublishDraftResolution, VersionView,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentKind, DocumentType, DocumentTypeId, RelationType};
@@ -368,19 +368,8 @@ where
         } else {
             let now = Utc::now();
             let rev = instance.publish(caller.actor.clone(), now)?;
-            let snapshot = DocumentSnapshot {
-                id: SnapshotId::new(Uuid::now_v7()),
-                document_type_id: instance.document_type_id.clone(),
-                document_id: instance.id,
-                revision: rev,
-                fields: instance.fields().clone(),
-                relations: instance.relations.clone(),
-                created_at: now,
-                created_by: caller.actor.clone(),
-                reason: SnapshotReason::Publish,
-            };
             self.instance_repo
-                .publish(&instance, rev, &display_values, &display_title, &snapshot)
+                .publish(&instance, rev, &display_values, &display_title, None)
                 .await?;
         }
 
@@ -416,15 +405,39 @@ where
             Some(&instance),
         )?;
 
+        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
+        })?;
+
+        let prev_published_snapshot = if !doc_type.options.draft_and_publish {
+            let prev_rev = match instance.content.publication_state {
+                PublicationState::Published { revision, .. } => revision,
+                _ => 0,
+            };
+            if prev_rev > 0 {
+                Some(DocumentSnapshot {
+                    id: SnapshotId::new(Uuid::now_v7()),
+                    document_type_id: instance.document_type_id.clone(),
+                    document_id: instance.id,
+                    revision: prev_rev,
+                    fields: instance.fields().clone(),
+                    relations: instance.relations.clone(),
+                    created_at: Utc::now(),
+                    created_by: caller.actor.clone(),
+                    reason: SnapshotReason::Publish,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Apply updated fields (supports partial PATCH: omitted fields are retained,
         // while explicit ContentValue::Null clears/resets optional field values).
         for (attr, val) in cmd.fields {
             instance.set_field(attr, val);
         }
-
-        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
 
         // Revalidate against schema constraints
         if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
@@ -450,19 +463,14 @@ where
         } else {
             let now = Utc::now();
             let rev = instance.publish(caller.actor.clone(), now)?;
-            let snapshot = DocumentSnapshot {
-                id: SnapshotId::new(Uuid::now_v7()),
-                document_type_id: instance.document_type_id.clone(),
-                document_id: instance.id,
-                revision: rev,
-                fields: instance.fields().clone(),
-                relations: instance.relations.clone(),
-                created_at: now,
-                created_by: caller.actor.clone(),
-                reason: SnapshotReason::Publish,
-            };
             self.instance_repo
-                .publish(&instance, rev, &display_values, &display_title, &snapshot)
+                .publish(
+                    &instance,
+                    rev,
+                    &display_values,
+                    &display_title,
+                    prev_published_snapshot.as_ref(),
+                )
                 .await?;
         }
 
@@ -551,6 +559,33 @@ where
         }
 
         let now = Utc::now();
+        let prev_published = self
+            .instance_repo
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Published)
+            .await?;
+
+        let archived_snapshot = prev_published.and_then(|prev_live| {
+            let prev_rev = match prev_live.content.publication_state {
+                PublicationState::Published { revision, .. } => revision,
+                _ => 0,
+            };
+            if prev_rev > 0 {
+                Some(DocumentSnapshot {
+                    id: SnapshotId::new(Uuid::now_v7()),
+                    document_type_id: prev_live.document_type_id.clone(),
+                    document_id: prev_live.id,
+                    revision: prev_rev,
+                    fields: prev_live.fields().clone(),
+                    relations: prev_live.relations.clone(),
+                    created_at: now,
+                    created_by: caller.actor.clone(),
+                    reason: SnapshotReason::Publish,
+                })
+            } else {
+                None
+            }
+        });
+
         let rev = instance.publish(caller.actor.clone(), now)?;
 
         let (display_values, display_title) = extract_display_identity(
@@ -560,20 +595,14 @@ where
             &self.context.config.default_locale,
         );
 
-        let snapshot = DocumentSnapshot {
-            id: SnapshotId::new(Uuid::now_v7()),
-            document_type_id: instance.document_type_id.clone(),
-            document_id: instance.id,
-            revision: rev,
-            fields: instance.fields().clone(),
-            relations: instance.relations.clone(),
-            created_at: now,
-            created_by: caller.actor.clone(),
-            reason: SnapshotReason::Publish,
-        };
-
         self.instance_repo
-            .publish(&instance, rev, &display_values, &display_title, &snapshot)
+            .publish(
+                &instance,
+                rev,
+                &display_values,
+                &display_title,
+                archived_snapshot.as_ref(),
+            )
             .await?;
 
         Ok(instance)
@@ -609,7 +638,56 @@ where
             )));
         }
 
+        let live_published = self
+            .instance_repo
+            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Published)
+            .await?;
+
         let now = Utc::now();
+
+        let snapshot = if let Some(ref live_inst) = live_published {
+            let live_rev = match live_inst.content.publication_state {
+                PublicationState::Published { revision, .. } => revision,
+                PublicationState::Modified { live_revision, .. } => live_revision,
+                _ => 0,
+            };
+            DocumentSnapshot {
+                id: SnapshotId::new(Uuid::now_v7()),
+                document_type_id: live_inst.document_type_id.clone(),
+                document_id: live_inst.id,
+                revision: live_rev,
+                fields: live_inst.fields().clone(),
+                relations: live_inst.relations.clone(),
+                created_at: now,
+                created_by: caller.actor.clone(),
+                reason: SnapshotReason::Unpublish,
+            }
+        } else {
+            let rev = match instance.content.publication_state {
+                PublicationState::Published { revision, .. } => revision,
+                PublicationState::Modified { live_revision, .. } => live_revision,
+                _ => 0,
+            };
+            DocumentSnapshot {
+                id: SnapshotId::new(Uuid::now_v7()),
+                document_type_id: instance.document_type_id.clone(),
+                document_id: instance.id,
+                revision: rev,
+                fields: instance.fields().clone(),
+                relations: instance.relations.clone(),
+                created_at: now,
+                created_by: caller.actor.clone(),
+                reason: SnapshotReason::Unpublish,
+            }
+        };
+
+        if cmd.draft_resolution == UnpublishDraftResolution::ReplaceWithPublished
+            && let Some(ref live_inst) = live_published
+        {
+            instance.replace_fields(live_inst.fields().clone());
+            instance.relations = live_inst.relations.clone();
+        }
+
         instance.unpublish(caller.actor.clone(), now)?;
 
         let (display_values, display_title) = extract_display_identity(
@@ -618,26 +696,6 @@ where
             instance.fields(),
             &self.context.config.default_locale,
         );
-
-        let revision = match instance.content.publication_state {
-            PublicationState::Unpublished {
-                last_published_revision,
-                ..
-            } => last_published_revision,
-            _ => 0,
-        };
-
-        let snapshot = DocumentSnapshot {
-            id: SnapshotId::new(Uuid::now_v7()),
-            document_type_id: instance.document_type_id.clone(),
-            document_id: instance.id,
-            revision,
-            fields: instance.fields().clone(),
-            relations: instance.relations.clone(),
-            created_at: now,
-            created_by: caller.actor.clone(),
-            reason: SnapshotReason::Unpublish,
-        };
 
         self.instance_repo
             .unpublish(&instance, &display_values, &display_title, &snapshot)
@@ -710,6 +768,23 @@ where
             })?;
 
         let now = Utc::now();
+
+        // If in Modified state, save a Checkpoint snapshot of current uncommitted draft edits
+        if let PublicationState::Modified { draft_version, .. } = instance.content.publication_state {
+            let checkpoint = DocumentSnapshot {
+                id: SnapshotId::new(Uuid::now_v7()),
+                document_type_id: instance.document_type_id.clone(),
+                document_id: instance.id,
+                revision: draft_version,
+                fields: instance.fields().clone(),
+                relations: instance.relations.clone(),
+                created_at: now,
+                created_by: caller.actor.clone(),
+                reason: SnapshotReason::Checkpoint,
+            };
+            self.snapshot_repo.save_snapshot(&checkpoint).await?;
+        }
+
         instance.restore_snapshot(&snapshot, caller.actor.clone(), now)?;
 
         let (display_values, display_title) = extract_display_identity(
@@ -724,20 +799,40 @@ where
                 .save_draft(&instance, &display_values, &display_title)
                 .await?;
         } else {
+            let prev_published = self
+                .instance_repo
+                .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Published)
+                .await?;
+            let prev_snapshot = prev_published.and_then(|prev_live| {
+                let prev_rev = match prev_live.content.publication_state {
+                    PublicationState::Published { revision, .. } => revision,
+                    _ => 0,
+                };
+                if prev_rev > 0 {
+                    Some(DocumentSnapshot {
+                        id: SnapshotId::new(Uuid::now_v7()),
+                        document_type_id: prev_live.document_type_id.clone(),
+                        document_id: prev_live.id,
+                        revision: prev_rev,
+                        fields: prev_live.fields().clone(),
+                        relations: prev_live.relations.clone(),
+                        created_at: now,
+                        created_by: caller.actor.clone(),
+                        reason: SnapshotReason::Publish,
+                    })
+                } else {
+                    None
+                }
+            });
             let rev = instance.publish(caller.actor.clone(), now)?;
-            let new_snapshot = DocumentSnapshot {
-                id: SnapshotId::new(Uuid::now_v7()),
-                document_type_id: instance.document_type_id.clone(),
-                document_id: instance.id,
-                revision: rev,
-                fields: instance.fields().clone(),
-                relations: instance.relations.clone(),
-                created_at: now,
-                created_by: caller.actor.clone(),
-                reason: SnapshotReason::Publish,
-            };
             self.instance_repo
-                .publish(&instance, rev, &display_values, &display_title, &new_snapshot)
+                .publish(
+                    &instance,
+                    rev,
+                    &display_values,
+                    &display_title,
+                    prev_snapshot.as_ref(),
+                )
                 .await?;
         }
 

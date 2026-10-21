@@ -11,7 +11,7 @@ use domain::auth::{
 use domain::content::{
     ContentValue, DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
     DocumentSnapshot, DocumentSnapshotRepository, DocumentStatus, FieldFilter, Page, Pagination,
-    PublicationState, RelationMap, SnapshotHeader, VersionView,
+    PublicationState, RelationMap, SnapshotHeader, SnapshotReason, VersionView,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentTypeId};
@@ -403,7 +403,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         _revision: u32,
         display_values: &IndexMap<AttributeId, String>,
         display_title: &str,
-        snapshot: &DocumentSnapshot,
+        archived_snapshot: Option<&DocumentSnapshot>,
     ) -> Result<(), DomainError> {
         self.save_internal(instance)?;
         let mut pub_map = self.published.write().map_err(lock_error)?;
@@ -413,8 +413,10 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
             instance.id,
             (display_values.clone(), display_title.to_string()),
         );
-        let mut snaps = self.snapshots.write().map_err(lock_error)?;
-        snaps.push(snapshot.clone());
+        if let Some(snap) = archived_snapshot {
+            let mut snaps = self.snapshots.write().map_err(lock_error)?;
+            snaps.push(snap.clone());
+        }
         Ok(())
     }
 
@@ -500,7 +502,11 @@ impl DocumentSnapshotRepository for FakeDocumentInstanceRepository {
             .filter(|s| s.document_type_id == *type_id && s.document_id == doc_id)
             .map(SnapshotHeader::from)
             .collect();
-        list.sort_by_key(|a| std::cmp::Reverse(a.revision));
+        list.sort_by(|a, b| {
+            b.revision
+                .cmp(&a.revision)
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
         Ok(list)
     }
 
@@ -511,14 +517,28 @@ impl DocumentSnapshotRepository for FakeDocumentInstanceRepository {
         revision: u32,
     ) -> Result<Option<DocumentSnapshot>, DomainError> {
         let store = self.snapshots.read().map_err(lock_error)?;
-        Ok(store
+        let mut matching: Vec<&DocumentSnapshot> = store
             .iter()
-            .find(|s| {
+            .filter(|s| {
                 s.document_type_id == *type_id
                     && s.document_id == doc_id
                     && s.revision == revision
             })
-            .cloned())
+            .collect();
+        matching.sort_by(|a, b| {
+            let a_priority = match a.reason {
+                SnapshotReason::Publish | SnapshotReason::Unpublish => 0,
+                SnapshotReason::Checkpoint => 1,
+            };
+            let b_priority = match b.reason {
+                SnapshotReason::Publish | SnapshotReason::Unpublish => 0,
+                SnapshotReason::Checkpoint => 1,
+            };
+            a_priority
+                .cmp(&b_priority)
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
+        Ok(matching.first().copied().cloned())
     }
 }
 

@@ -109,14 +109,14 @@ pub trait DocumentInstanceRepository: Send + Sync {
     ) -> impl Future<Output = Result<(), DomainError>> + Send;
 
     /// Publishes the document instance to the wide table, clears any pending draft row,
-    /// and records the publication snapshot atomically.
+    /// and atomically archives the superseded live revision (if any) to `document_snapshots`.
     fn publish(
         &self,
         instance: &DocumentInstance,
         revision: u32,
         display_values: &IndexMap<AttributeId, String>,
         display_title: &str,
-        snapshot: &DocumentSnapshot,
+        archived_snapshot: Option<&DocumentSnapshot>,
     ) -> impl Future<Output = Result<(), DomainError>> + Send;
 
     /// Unpublishes the document instance from the wide table, preserves it in `document_drafts`

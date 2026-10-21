@@ -7,7 +7,7 @@ use application::services::{DocumentsService, DocumentsServiceImpl};
 use application::test_support::FakeDocumentInstanceRepository;
 use domain::content::{
     ContentValue, DocumentStatus, DomainValue, FieldFilter, Pagination, PrimitiveValue,
-    PublicationState, VersionView,
+    PublicationState, SnapshotReason, UnpublishDraftResolution, VersionView,
 };
 use domain::errors::DomainError;
 use domain::schema::{DocumentType, RelationDefinition, RelationType, SchemaRegistry};
@@ -591,15 +591,41 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     ));
 
     // 3. Verify snapshot history via list_snapshots (newest first)
+    // Under archive-on-replace, publishing revision 2 archives revision 1, leaving 1 snapshot.
     let snapshots = service
         .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
         .await
         .expect("list snapshots ok");
-    assert_eq!(snapshots.len(), 2);
-    assert_eq!(snapshots[0].revision, 2);
-    assert_eq!(snapshots[1].revision, 1);
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].revision, 1);
+    assert_eq!(snapshots[0].reason, SnapshotReason::Publish);
+
+    // Edit working draft to create in-progress changes (Modified state)
+    let mut fields_v3 = HashMap::new();
+    fields_v3.insert(
+        test_attr_id("title"),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "V3 In-Progress Draft".into(),
+        ))),
+    );
+    let modified = service
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst.id, &doc_type.id, fields_v3),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        modified.content.publication_state,
+        PublicationState::Modified {
+            live_revision: 2,
+            ..
+        }
+    ));
 
     // 4. Restore Snapshot Revision 1
+    // Because the document was in Modified state, restore_snapshot automatically saves a Checkpoint snapshot
+    // of the uncommitted draft edits before restoring revision 1!
     let restored = service
         .restore_snapshot(
             &caller,
@@ -621,6 +647,19 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
             PrimitiveValue::Text("V1 Title".into())
         )))
     );
+
+    // Verify snapshot list now contains both the Checkpoint and the superseded Publish snapshot
+    let snapshots_after = service
+        .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
+        .await
+        .expect("list snapshots ok");
+    assert_eq!(snapshots_after.len(), 2);
+    assert!(snapshots_after
+        .iter()
+        .any(|s| s.reason == SnapshotReason::Checkpoint));
+    assert!(snapshots_after
+        .iter()
+        .any(|s| s.reason == SnapshotReason::Publish && s.revision == 1));
 
     // Verify default view (Published) returns live revision 2
     let published_view = service
@@ -659,6 +698,160 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         working_view.get_field(&test_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("V1 Title".into())
+        )))
+    );
+}
+
+#[tokio::test]
+async fn ds_16_unpublish_draft_resolution_on_modified_document() {
+    let (service, doc_type, caller) = setup_service_fixture(true, false);
+    let title_attr = test_attr_id("title");
+
+    // --- Case A: Unpublish with KeepDraft (default) ---
+    let mut fields_a1 = HashMap::new();
+    fields_a1.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Live V1 A".into()))),
+    );
+    let inst_a = service
+        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_a1))
+        .await
+        .unwrap();
+
+    service
+        .publish(&caller, PublishDocumentCommand::new(inst_a.id, &doc_type.id))
+        .await
+        .unwrap();
+
+    let mut fields_a2 = HashMap::new();
+    fields_a2.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft V2 A".into()))),
+    );
+    service
+        .update(&caller, UpdateDocumentCommand::new(inst_a.id, &doc_type.id, fields_a2))
+        .await
+        .unwrap();
+
+    let unpub_a = service
+        .unpublish(
+            &caller,
+            UnpublishDocumentCommand::new(inst_a.id, &doc_type.id)
+                .with_draft_resolution(UnpublishDraftResolution::KeepDraft),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        unpub_a.content.publication_state,
+        PublicationState::Unpublished {
+            last_published_revision: 1,
+            ..
+        }
+    ));
+    // Kept draft edits
+    assert_eq!(
+        unpub_a.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Draft V2 A".into())
+        )))
+    );
+
+    // Published view is None
+    let pub_view_a = service
+        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst_a.id))
+        .await
+        .unwrap();
+    assert!(pub_view_a.is_none());
+
+    // Working view is Unpublished with draft edits
+    let work_view_a = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst_a.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("found working");
+    assert_eq!(
+        work_view_a.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Draft V2 A".into())
+        )))
+    );
+
+    // Snapshots has the unpublish snapshot for Live V1
+    let snaps_a = service
+        .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst_a.id))
+        .await
+        .unwrap();
+    assert_eq!(snaps_a.len(), 1);
+    assert_eq!(snaps_a[0].revision, 1);
+    assert_eq!(snaps_a[0].reason, SnapshotReason::Unpublish);
+
+    // --- Case B: Unpublish with ReplaceWithPublished ---
+    let mut fields_b1 = HashMap::new();
+    fields_b1.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Live V1 B".into()))),
+    );
+    let inst_b = service
+        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_b1))
+        .await
+        .unwrap();
+
+    service
+        .publish(&caller, PublishDocumentCommand::new(inst_b.id, &doc_type.id))
+        .await
+        .unwrap();
+
+    let mut fields_b2 = HashMap::new();
+    fields_b2.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft V2 B".into()))),
+    );
+    service
+        .update(&caller, UpdateDocumentCommand::new(inst_b.id, &doc_type.id, fields_b2))
+        .await
+        .unwrap();
+
+    let unpub_b = service
+        .unpublish(
+            &caller,
+            UnpublishDocumentCommand::new(inst_b.id, &doc_type.id)
+                .with_draft_resolution(UnpublishDraftResolution::ReplaceWithPublished),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        unpub_b.content.publication_state,
+        PublicationState::Unpublished {
+            last_published_revision: 1,
+            ..
+        }
+    ));
+    // Replaced with published live content ("Live V1 B")
+    assert_eq!(
+        unpub_b.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Live V1 B".into())
+        )))
+    );
+
+    // Working view is Unpublished with live content
+    let work_view_b = service
+        .find_by_id(
+            &caller,
+            FindByIdCommand::new(&doc_type.id, inst_b.id).with_view(VersionView::Working),
+        )
+        .await
+        .unwrap()
+        .expect("found working");
+    assert_eq!(
+        work_view_b.get_field(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Live V1 B".into())
         )))
     );
 }

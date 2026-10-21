@@ -2,7 +2,7 @@
 
 - **Target Crates**: `domain`, `application`
 - **Governing Architecture**: [`ADR-004`](./adr/ADR-004-draft-and-publish-table-pattern.md), [`docs/design-infrastructure-persistence.md`](./design-infrastructure-persistence.md)
-- **Execution Mode**: Ready to dispatch to a **Gemini Flash** subagent (`Model: "flash"`)
+- **Status**: Implemented
 - **Date**: 2026-10-21
 
 ---

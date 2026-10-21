@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-pub use domain::content::VersionView;
+pub use domain::content::{UnpublishDraftResolution, VersionView};
 use domain::content::{ContentValue, DocumentInstanceId, FieldFilter, Pagination};
 use domain::schema::{AttributeId, DocumentTypeId};
 
@@ -225,6 +225,8 @@ pub struct UnpublishDocumentCommand {
     pub document_instance_id: DocumentInstanceId,
     /// Document type of the target document.
     pub document_type: &'static DocumentTypeId,
+    /// Strategy for resolving pending working draft edits when unpublishing a modified document.
+    pub draft_resolution: UnpublishDraftResolution,
 }
 
 impl UnpublishDocumentCommand {
@@ -235,7 +237,13 @@ impl UnpublishDocumentCommand {
         Self {
             document_instance_id,
             document_type,
+            draft_resolution: UnpublishDraftResolution::default(),
         }
+    }
+
+    pub fn with_draft_resolution(mut self, resolution: UnpublishDraftResolution) -> Self {
+        self.draft_resolution = resolution;
+        self
     }
 }
 
@@ -383,6 +391,17 @@ mod tests {
 
         let unpub_cmd = UnpublishDocumentCommand::new(id, type_id);
         assert_eq!(unpub_cmd.document_instance_id, id);
+        assert_eq!(
+            unpub_cmd.draft_resolution,
+            UnpublishDraftResolution::KeepDraft
+        );
+
+        let unpub_replace = UnpublishDocumentCommand::new(id, type_id)
+            .with_draft_resolution(UnpublishDraftResolution::ReplaceWithPublished);
+        assert_eq!(
+            unpub_replace.draft_resolution,
+            UnpublishDraftResolution::ReplaceWithPublished
+        );
 
         let discard = DiscardDraftCommand::new(id, type_id);
         assert_eq!(discard.document_instance_id, id);

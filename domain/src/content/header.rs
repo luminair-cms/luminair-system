@@ -24,6 +24,17 @@ pub enum VersionView {
     Working,
 }
 
+/// Specifies how pending draft changes should be handled when unpublishing a `Modified` document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnpublishDraftResolution {
+    /// Keep the in-progress draft content in `document_drafts` (default).
+    #[default]
+    KeepDraft,
+    /// Replace the draft content in `document_drafts` with the previously published live content.
+    ReplaceWithPublished,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentStatus {
@@ -281,5 +292,29 @@ mod tests {
         assert_eq!(json_work, "\"working\"");
         let deserialized_work: VersionView = serde_json::from_str(&json_work).unwrap();
         assert_eq!(deserialized_work, VersionView::Working);
+    }
+
+    #[test]
+    fn test_unpublish_draft_resolution_default_and_serde() {
+        assert_eq!(
+            UnpublishDraftResolution::default(),
+            UnpublishDraftResolution::KeepDraft
+        );
+
+        let json_keep = serde_json::to_string(&UnpublishDraftResolution::KeepDraft).unwrap();
+        assert_eq!(json_keep, "\"keep_draft\"");
+        let deserialized_keep: UnpublishDraftResolution =
+            serde_json::from_str(&json_keep).unwrap();
+        assert_eq!(deserialized_keep, UnpublishDraftResolution::KeepDraft);
+
+        let json_replace =
+            serde_json::to_string(&UnpublishDraftResolution::ReplaceWithPublished).unwrap();
+        assert_eq!(json_replace, "\"replace_with_published\"");
+        let deserialized_replace: UnpublishDraftResolution =
+            serde_json::from_str(&json_replace).unwrap();
+        assert_eq!(
+            deserialized_replace,
+            UnpublishDraftResolution::ReplaceWithPublished
+        );
     }
 }

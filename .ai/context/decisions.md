@@ -56,5 +56,17 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   5. **Schema Graph Cross-Validation**: `SchemaRegistry::try_new` and `SchemaRegistry::validate` validate the full schema graph on registration, enforcing `display_fields` rules, field constraint applicability, and relation target existence across all declared types.
   6. **Identity Formatting & Reconstitution**: Added `format_display_title` for canonical composite title generation, `DocumentHeader::enrich_relational_display` for in-memory read-time Phase 2 relation enrichment, and `DocumentInstance::reconstitute` for pure repository entity reconstruction without triggering mutation events.
 
+---
+
+### 2026-10-21 — Archive-on-Replace Snapshots, Unpublish Draft Resolution & Checkpoint on Restore
+
+- **Context**: Resolving snapshot redundancy and aligning single-document editorial workflows with Strapi v5 parity.
+- **Decisions**:
+  1. **Archive-on-Replace Snapshots (`SnapshotReason::Publish`)**: On initial publication (`revision = 1`), no snapshot is created because the content is actively live in `[type]`. When publishing revision `N` to replace a live revision `N - 1`, the superseded live version is archived to `document_snapshots` atomically via `publish(..., archived_snapshot: Option<&DocumentSnapshot>)`.
+  2. **Strapi-Aligned Unpublish Resolution (`UnpublishDraftResolution`)**: Unpublishing takes the document completely offline (`[type]` row deleted, live version archived to `document_snapshots` with `SnapshotReason::Unpublish`). For `Modified` documents, callers choose via `UnpublishDraftResolution`: `KeepDraft` (default, preserves draft edits in `document_drafts`) or `ReplaceWithPublished` (replaces draft content with the live published content).
+  3. **Automatic Checkpoint on Restore (`SnapshotReason::Checkpoint`)**: Restoring a historical snapshot (`restore_snapshot`) when the document is in `Modified` state automatically saves the uncommitted draft edits to `document_snapshots` as a checkpoint (`reason: SnapshotReason::Checkpoint`, `revision: draft_version`) before overwriting `document_drafts`.
+  4. **Unified Symmetric `find_by_id(type_id, id, view: VersionView)`**: Removed asymmetric `find_draft_by_id` / `find_published_by_id` methods in favor of a single repository method accepting `VersionView::Published` (default for visitors and the read-only published tab) and `VersionView::Working` (for the editable draft tab).
+  5. **See**: [`docs/refactoring-publish-unpublish-snapshots.md`](../docs/refactoring-publish-unpublish-snapshots.md).
+
 
 
