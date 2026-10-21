@@ -93,7 +93,10 @@ Adopt the **Asymmetric Hybrid Persistence Pattern**:
 - Materialized administrative columns for instant table rendering:
   - `display_values JSONB`: Key-value map (`{"attribute_id": "value"}`) resolved from `display_fields`.
   - `display_title VARCHAR(255)`: Flattened string for alphabetical sorting and autocomplete text search.
-  - `status VARCHAR(32)`: `'draft'`, `'modified'`, or `'unpublished'`.
+  - `status VARCHAR(32)`:
+    - `'draft'`: Newly created document that has never been published (`last_published_revision IS NULL`; exists only in `document_drafts`).
+    - `'modified'`: Document that is currently live in `[type]` (`has_pending_draft = TRUE`) and has pending, unpublished edits in `document_drafts`.
+    - `'unpublished'`: Document that was previously published (`last_published_revision IS NOT NULL`) and later taken offline via `unpublish` (removed from `[type]`, preserved in `document_drafts`).
   - `version INT`: Incremented on every draft touch.
 
 ### 3. Composite Identity (`display_fields` & Key-Value `display_values`)
@@ -127,7 +130,10 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 ### 4. Global Snapshot Store (`document_snapshots`)
 - Single static table recording immutable revision history across all content types.
 - Append-only inserts with UUIDv7 primary keys eliminate OCC serialization conflicts in DSQL.
-- Stores frozen JSONB representation of content and relations at the exact moment of publication or unpublishing.
+- Stores frozen JSONB representation of content and relations along with `reason VARCHAR(32)` (`SnapshotReason`):
+  - `'publish'` (`SnapshotReason::Publish`): Created atomically during `publish` (or auto-publish when `draft_and_publish: false`) to record the newly published revision.
+  - `'checkpoint'` (`SnapshotReason::Checkpoint`): Manual or automatic editorial savepoint created without publishing to the wide table (e.g., saving a draft milestone or taking a pre-restore / pre-migration safety backup via `DocumentSnapshotRepository::save_snapshot`).
+  - `'unpublish'` (`SnapshotReason::Unpublish`): Created atomically during `unpublish` to record an audit trail of the document state at the moment it was taken offline.
 
 ---
 

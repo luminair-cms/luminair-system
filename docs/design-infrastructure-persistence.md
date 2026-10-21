@@ -54,6 +54,16 @@ CREATE INDEX IF NOT EXISTS idx_document_drafts_author
     ON document_drafts (updated_by, updated_at DESC);
 ```
 
+#### Semantics of `document_drafts.status` (`DocumentStatus`)
+
+Note that `'published'` is **never** stored in `document_drafts` — a clean published document lives exclusively in its wide table `[type]` (where `has_pending_draft = FALSE`). Rows in `document_drafts` always have one of three statuses:
+
+| `status` Value | Domain State (`PublicationState`) | Presence in Wide Table `[type]` | Meaning |
+|---|---|---|---|
+| `'draft'` | `PublicationState::Draft { last_published_revision: None }` | No row in `[type]` | A newly created document that has never been published (`last_published_revision IS NULL`). Exists only in `document_drafts`. |
+| `'modified'` | `PublicationState::Modified { live_revision, draft_version, .. }` | Live row exists in `[type]` (`has_pending_draft = TRUE`) | A currently published document that has newer, unpublished working edits in `document_drafts`. Visitors still read the live revision from `[type]`, while editors work on the row in `document_drafts` (or revert it via `discard_draft`). |
+| `'unpublished'` | `PublicationState::Unpublished { last_published_revision, .. }` | Removed from `[type]` | A document that was previously published (`last_published_revision IS NOT NULL`) and subsequently taken offline via `unpublish`. Its row is deleted from `[type]` so public queries cannot see it, while its full state is preserved in `document_drafts` for future editing or re-publishing. |
+
 ### Migration 2: `20261010000002_create_document_snapshots.sql`
 ```sql
 -- no-transaction
@@ -73,6 +83,16 @@ CREATE TABLE IF NOT EXISTS document_snapshots (
 CREATE INDEX IF NOT EXISTS idx_document_snapshots_lookup
     ON document_snapshots (document_type_id, document_id, revision DESC);
 ```
+
+#### Semantics of `document_snapshots.reason` (`SnapshotReason`)
+
+`document_snapshots` is an append-only audit and revision history log. Every snapshot records the `reason` why that point-in-time state was captured:
+
+| `reason` Value | Domain Variant (`SnapshotReason`) | Trigger / Workflow | Meaning |
+|---|---|---|---|
+| `'publish'` | `SnapshotReason::Publish` | `publish` (or auto-publish on `create`/`update`/`restore_snapshot` when `draft_and_publish: false`) | Recorded atomically inside `publish_transaction` whenever a document is published. Captures the exact fields and relations of the newly published `revision`. |
+| `'checkpoint'` | `SnapshotReason::Checkpoint` | `DocumentSnapshotRepository::save_snapshot` (manual savepoint or pre-destructive backup) | An editorial or system savepoint created **without** publishing to the live wide table — e.g., when an editor saves a named milestone of a work-in-progress draft, or when the system automatically records a safety backup before a destructive action (such as overwriting draft edits during `restore_snapshot` or running a bulk schema migration). |
+| `'unpublish'` | `SnapshotReason::Unpublish` | `unpublish` | Recorded atomically inside `unpublish_transaction` when a live document is taken offline. Captures an immutable audit record of the state (`revision = last_published_revision`) at the exact moment it was unpublished. |
 
 ---
 
