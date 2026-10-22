@@ -1261,3 +1261,139 @@ async fn test_version_views_across_all_four_document_states() {
         )))
     );
 }
+
+#[tokio::test]
+async fn ds_18_get_snapshot_returns_historical_revision() {
+    let (service, doc_type, caller) = setup_service_fixture(true, false);
+    let title_attr = test_attr_id("title");
+
+    // 1. Create and publish revision 1
+    let mut f1 = HashMap::new();
+    f1.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Revision 1".into()))),
+    );
+    let inst = service
+        .create(&caller, CreateDocumentCommand::new(&doc_type.id, f1))
+        .await
+        .unwrap();
+    service
+        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .await
+        .unwrap();
+
+    // 2. Update to draft and publish revision 2 (archives revision 1)
+    let mut f2 = HashMap::new();
+    f2.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Revision 2".into()))),
+    );
+    service
+        .update(&caller, UpdateDocumentCommand::new(inst.id, &doc_type.id, f2))
+        .await
+        .unwrap();
+    service
+        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .await
+        .unwrap();
+
+    // 3. Inspect historical revision 1 snapshot via get_snapshot
+    let snap = service
+        .get_snapshot(&caller, GetSnapshotCommand::new(&doc_type.id, inst.id, 1))
+        .await
+        .unwrap();
+    assert_eq!(snap.revision, 1);
+    assert_eq!(snap.document_id, inst.id);
+    assert_eq!(
+        snap.fields.get(&title_attr),
+        Some(&ContentValue::Scalar(DomainValue::Primitive(
+            PrimitiveValue::Text("Revision 1".into())
+        )))
+    );
+
+    // 4. Non-existent revision returns NotFound
+    let res = service
+        .get_snapshot(&caller, GetSnapshotCommand::new(&doc_type.id, inst.id, 99))
+        .await;
+    assert!(matches!(res, Err(ApplicationError::NotFound { entity: "DocumentSnapshot", .. })));
+}
+
+#[tokio::test]
+async fn test_update_occ_version_mismatch_conflict() {
+    let (service, doc_type, caller) = setup_service_fixture(true, false);
+    let title_attr = test_attr_id("title");
+
+    let mut fields = HashMap::new();
+    fields.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Original".into()))),
+    );
+    let inst = service
+        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .await
+        .unwrap();
+    assert_eq!(inst.audit.version, 1);
+
+    // Update with correct expected_version succeeds
+    let mut u1 = HashMap::new();
+    u1.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Updated".into()))),
+    );
+    let updated = service
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst.id, &doc_type.id, u1).with_expected_version(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.audit.version, 2);
+
+    // Update with stale expected_version fails with ConflictCode::VersionMismatch
+    let mut u2 = HashMap::new();
+    u2.insert(
+        title_attr.clone(),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Stale".into()))),
+    );
+    let res = service
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst.id, &doc_type.id, u2).with_expected_version(1),
+        )
+        .await;
+    assert!(matches!(
+        res,
+        Err(ApplicationError::Conflict {
+            code: ConflictCode::VersionMismatch,
+            ..
+        })
+    ));
+}
+
+#[tokio::test]
+async fn test_restore_snapshot_on_draft_fails_immediately_with_invalid_state_transition() {
+    let (service, doc_type, caller) = setup_service_fixture(true, false);
+    let title_attr = test_attr_id("title");
+
+    let mut fields = HashMap::new();
+    fields.insert(
+        title_attr,
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft".into()))),
+    );
+    let inst = service
+        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .await
+        .unwrap();
+
+    // Restoring snapshot on a fresh draft fails with InvalidStateTransition (not NotFound)
+    let res = service
+        .restore_snapshot(
+            &caller,
+            RestoreSnapshotCommand::new(inst.id, &doc_type.id, 1),
+        )
+        .await;
+    assert!(matches!(
+        res,
+        Err(ApplicationError::Domain(DomainError::InvalidStateTransition { .. }))
+    ));
+}

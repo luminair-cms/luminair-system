@@ -150,6 +150,13 @@
 - **Then**: Returns `Err(ApplicationError::Conflict { code: ConflictCode::AlreadyPublished, .. })` containing `"already published"`; the live revision stays `1`, the audit version is unchanged, and no snapshot is created.
 - **Notes**: "Force re-publish" is intentionally not supported. Publishing is only meaningful from `Draft`, `Modified`, or `Unpublished`. The domain method `DocumentInstance::publish` still accepts `Published` because single-lifecycle types (`draft_and_publish: false`) use it for live updates (`DS-07`); the guard is a workflow policy of the draft-and-publish use case.
 
+### DS-18 — Get Snapshot Returns Historical Revision
+- **Status**: `Approved`
+- **Origin**: `doc:docs/api.md`
+- **Given**: An existing document instance with a historical revision snapshot recorded in `document_snapshots`.
+- **When**: Authorized caller invokes `service.get_snapshot(&caller, GetSnapshotCommand::new(type_id, instance_id, revision)).await`.
+- **Then**: Returns `Ok(snapshot)` containing the exact historical content and relations for `revision`, or returns `Err(ApplicationError::NotFound { entity: "DocumentSnapshot", .. })` if the revision does not exist.
+
 ---
 
 ## Open Questions

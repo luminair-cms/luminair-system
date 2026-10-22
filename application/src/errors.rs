@@ -1,6 +1,7 @@
 //! Application-level error types and RFC 9457 Problem Details mapping.
 
-use domain::auth::{ActorId, Permission};
+use chrono::{DateTime, Utc};
+use domain::auth::{ActorId, Permission, UserId};
 use domain::content::DocumentInstanceId;
 use domain::errors::DomainError;
 use serde::{Deserialize, Serialize};
@@ -55,6 +56,92 @@ pub struct InvalidParam {
     pub code: String,
 }
 
+impl InvalidParam {
+    pub fn new(
+        name: impl Into<String>,
+        reason: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            reason: reason.into(),
+            code: code.into(),
+        }
+    }
+
+    /// Converts a DomainError into a structured InvalidParam if applicable.
+    pub fn from_domain_error(err: &DomainError) -> Self {
+        match err {
+            DomainError::InvalidFieldValue {
+                attribute_id,
+                reason,
+                ..
+            } => Self::new(
+                attribute_id.to_string(),
+                reason.clone(),
+                "invalid_field_value",
+            ),
+            DomainError::UnknownAttribute(attr_id) => Self::new(
+                attr_id.to_string(),
+                format!("attribute '{attr_id}' is not declared in schema"),
+                "unknown_attribute",
+            ),
+            DomainError::UnknownLocale(locale) => Self::new(
+                "locale",
+                format!("locale '{locale}' is not configured in system locales"),
+                "unknown_locale",
+            ),
+            DomainError::Validation(msg) => {
+                if msg.contains("required") {
+                    Self::new("field", msg.clone(), "required_field_missing")
+                } else {
+                    Self::new("field", msg.clone(), "validation_error")
+                }
+            }
+            other => Self::new("field", other.to_string(), "validation_error"),
+        }
+    }
+}
+
+impl std::fmt::Display for InvalidParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.name, self.reason)
+    }
+}
+
+impl std::ops::Deref for InvalidParam {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.reason
+    }
+}
+
+fn format_invalid_params(params: &[InvalidParam]) -> String {
+    params
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Status of an authenticated user's onboarding access request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnboardingStatus {
+    /// User has not yet submitted an access request.
+    AccessNotRequested { user_id: UserId },
+    /// User has submitted an access request that is currently pending review.
+    AccessPending {
+        user_id: UserId,
+        submitted_at: DateTime<Utc>,
+    },
+    /// User's access request was rejected.
+    AccessRejected {
+        user_id: UserId,
+        reason: Option<String>,
+    },
+}
+
 /// RFC 9457 compliant Problem Details representation for HTTP API error responses.
 ///
 /// NOTE: In accordance with Hexagonal Architecture (Ports & Adapters), this HTTP transport
@@ -97,6 +184,10 @@ pub enum ApplicationError {
         action: Permission,
     },
 
+    /// Authenticated user cannot access studio resources due to onboarding status.
+    #[error("onboarding access denied: {0:?}")]
+    Onboarding(OnboardingStatus),
+
     /// A requested resource was not found.
     #[error("resource not found: {entity} with id '{id}'")]
     NotFound {
@@ -107,9 +198,9 @@ pub enum ApplicationError {
     },
 
     /// An input command or query failed application-level validation.
-    /// Contains all validation messages — never truncated to the first error.
-    #[error("validation error: {}", .0.join("; "))]
-    Validation(Vec<String>),
+    /// Contains field-level validation errors — never truncated to the first error.
+    #[error("validation error: {}", format_invalid_params(.0))]
+    Validation(Vec<InvalidParam>),
 
     /// The requested operation conflicts with existing system state.
     #[error("conflict [{code}]: {message}")]
@@ -201,6 +292,33 @@ impl ApplicationError {
         }
     }
 
+    /// Convenience constructor for user who has not requested access.
+    pub fn access_not_requested(user_id: UserId) -> Self {
+        Self::Onboarding(OnboardingStatus::AccessNotRequested { user_id })
+    }
+
+    /// Convenience constructor for user whose access request is pending review.
+    pub fn access_pending(user_id: UserId, submitted_at: DateTime<Utc>) -> Self {
+        Self::Onboarding(OnboardingStatus::AccessPending {
+            user_id,
+            submitted_at,
+        })
+    }
+
+    /// Convenience constructor for user whose access request was rejected.
+    pub fn access_rejected(user_id: UserId, reason: Option<String>) -> Self {
+        Self::Onboarding(OnboardingStatus::AccessRejected { user_id, reason })
+    }
+
+    /// Convenience constructor for single validation failure.
+    pub fn validation_single(
+        name: impl Into<String>,
+        reason: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Self {
+        Self::Validation(vec![InvalidParam::new(name, reason, code)])
+    }
+
     /// Returns the canonical machine-readable snake_case error code.
     pub fn code(&self) -> &'static str {
         match self {
@@ -221,6 +339,11 @@ impl ApplicationError {
                 DomainError::Storage(_) => "storage_error",
             },
             Self::Unauthorized { .. } => "unauthorized",
+            Self::Onboarding(status) => match status {
+                OnboardingStatus::AccessNotRequested { .. } => "access_not_requested",
+                OnboardingStatus::AccessPending { .. } => "access_pending",
+                OnboardingStatus::AccessRejected { .. } => "access_rejected",
+            },
             Self::NotFound { .. } => "resource_not_found",
             Self::Validation(_) => "validation_failed",
             Self::Conflict { code, .. } => code.as_str(),
@@ -248,6 +371,7 @@ impl ApplicationError {
                 | DomainError::Validation(_) => 422,
             },
             Self::Unauthorized { .. } => 403,
+            Self::Onboarding(_) => 403,
             Self::NotFound { .. } => 404,
             Self::Validation(_) => 422,
             Self::Conflict { .. } => 409,
@@ -274,24 +398,33 @@ impl ApplicationError {
                 DomainError::InvalidFieldValue {
                     attribute_id,
                     reason,
+                    ..
                 } => (
                     d.to_string(),
                     Some(serde_json::json!({ "attribute_id": attribute_id.to_string() })),
                     Some(vec![InvalidParam {
                         name: attribute_id.to_string(),
                         reason: reason.clone(),
-                        code: "invalid_value".to_string(),
+                        code: "invalid_field_value".to_string(),
                     }]),
                 ),
                 DomainError::UnknownAttribute(attr_id) => (
                     d.to_string(),
                     Some(serde_json::json!({ "attribute_id": attr_id.to_string() })),
-                    None,
+                    Some(vec![InvalidParam {
+                        name: attr_id.to_string(),
+                        reason: format!("attribute '{attr_id}' is not declared in schema"),
+                        code: "unknown_attribute".to_string(),
+                    }]),
                 ),
                 DomainError::UnknownLocale(locale) => (
                     d.to_string(),
                     Some(serde_json::json!({ "locale": locale.to_string() })),
-                    None,
+                    Some(vec![InvalidParam {
+                        name: "locale".to_string(),
+                        reason: format!("locale '{locale}' is not configured in system locales"),
+                        code: "unknown_locale".to_string(),
+                    }]),
                 ),
                 _ => (d.to_string(), None, None),
             },
@@ -303,6 +436,35 @@ impl ApplicationError {
                 })),
                 None,
             ),
+            Self::Onboarding(status) => match status {
+                OnboardingStatus::AccessNotRequested { user_id } => (
+                    format!("user '{user_id}' has not submitted an access request"),
+                    Some(serde_json::json!({ "user_id": user_id.to_string() })),
+                    None,
+                ),
+                OnboardingStatus::AccessPending {
+                    user_id,
+                    submitted_at,
+                } => (
+                    format!("user '{user_id}' access request is pending review"),
+                    Some(serde_json::json!({
+                        "user_id": user_id.to_string(),
+                        "submitted_at": submitted_at.to_rfc3339(),
+                    })),
+                    None,
+                ),
+                OnboardingStatus::AccessRejected { user_id, reason } => (
+                    format!(
+                        "user '{user_id}' access request was rejected: {}",
+                        reason.as_deref().unwrap_or("no reason provided")
+                    ),
+                    Some(serde_json::json!({
+                        "user_id": user_id.to_string(),
+                        "reason": reason,
+                    })),
+                    None,
+                ),
+            },
             Self::NotFound { entity, id } => (
                 format!("resource not found: {entity} with id '{id}'"),
                 Some(serde_json::json!({
@@ -311,19 +473,10 @@ impl ApplicationError {
                 })),
                 None,
             ),
-            Self::Validation(errors) => (
-                errors.join("; "),
+            Self::Validation(params) => (
+                format_invalid_params(params),
                 None,
-                Some(
-                    errors
-                        .iter()
-                        .map(|e| InvalidParam {
-                            name: "field".to_string(),
-                            reason: e.clone(),
-                            code: "validation_error".to_string(),
-                        })
-                        .collect(),
-                ),
+                Some(params.clone()),
             ),
             Self::Conflict {
                 message, details, ..
@@ -396,23 +549,58 @@ mod tests {
 
     #[test]
     fn test_validation_error_display_single() {
-        let err = ApplicationError::Validation(vec!["title must not be empty".to_string()]);
-        assert_eq!(err.to_string(), "validation error: title must not be empty");
+        let err = ApplicationError::validation_single(
+            "title",
+            "title must not be empty",
+            "required_field_missing",
+        );
+        assert_eq!(err.to_string(), "validation error: title: title must not be empty");
         assert_eq!(err.code(), "validation_failed");
         assert_eq!(err.status_code(), 422);
+
+        let problem = err.to_problem_details();
+        assert_eq!(problem.invalid_params.as_ref().unwrap().len(), 1);
+        assert_eq!(problem.invalid_params.as_ref().unwrap()[0].code, "required_field_missing");
     }
 
     #[test]
     fn test_validation_error_display_multiple() {
         let err = ApplicationError::Validation(vec![
-            "title must not be empty".to_string(),
-            "body locale 'fr' unknown".to_string(),
+            InvalidParam::new("title", "title must not be empty", "required_field_missing"),
+            InvalidParam::new("body", "body locale 'fr' unknown", "unknown_locale"),
         ]);
         let msg = err.to_string();
-        assert!(msg.contains("title must not be empty"));
-        assert!(msg.contains("body locale 'fr' unknown"));
+        assert!(msg.contains("title: title must not be empty"));
+        assert!(msg.contains("body: body locale 'fr' unknown"));
         assert_eq!(err.code(), "validation_failed");
         assert_eq!(err.status_code(), 422);
+
+        let problem = err.to_problem_details();
+        let params = problem.invalid_params.unwrap();
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "title");
+        assert_eq!(params[1].name, "body");
+    }
+
+    #[test]
+    fn test_onboarding_errors() {
+        let user = UserId::try_new("alice").unwrap();
+        let err_not_requested = ApplicationError::access_not_requested(user.clone());
+        assert_eq!(err_not_requested.code(), "access_not_requested");
+        assert_eq!(err_not_requested.status_code(), 403);
+        let p1 = err_not_requested.to_problem_details();
+        assert_eq!(p1.details.unwrap()["user_id"], "alice");
+
+        let err_pending = ApplicationError::access_pending(user.clone(), Utc::now());
+        assert_eq!(err_pending.code(), "access_pending");
+        assert_eq!(err_pending.status_code(), 403);
+
+        let err_rejected =
+            ApplicationError::access_rejected(user, Some("Incomplete application".into()));
+        assert_eq!(err_rejected.code(), "access_rejected");
+        assert_eq!(err_rejected.status_code(), 403);
+        let p3 = err_rejected.to_problem_details();
+        assert_eq!(p3.details.unwrap()["reason"], "Incomplete application");
     }
 
     #[test]

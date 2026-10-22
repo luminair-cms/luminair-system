@@ -98,6 +98,13 @@ pub trait DocumentsService: Send + Sync + 'static {
         caller: &CallerContext,
         cmd: ListSnapshotsCommand,
     ) -> impl Future<Output = Result<Vec<SnapshotHeader>, ApplicationError>> + Send;
+
+    /// Fetches a specific historical revision snapshot by revision number.
+    fn get_snapshot(
+        &self,
+        caller: &CallerContext,
+        cmd: GetSnapshotCommand,
+    ) -> impl Future<Output = Result<DocumentSnapshot, ApplicationError>> + Send;
 }
 
 /// Generic implementation of `DocumentsService` monomorphized over repository adapters.
@@ -187,17 +194,25 @@ where
     ) -> Result<(), ApplicationError> {
         for (attr, action) in relations {
             let rel = doc_type.relations.get(&attr).ok_or_else(|| {
-                ApplicationError::Validation(vec![format!(
-                    "relation attribute '{attr}' is not defined for document type '{}'",
-                    doc_type.id
-                )])
+                ApplicationError::validation_single(
+                    attr.to_string(),
+                    format!(
+                        "relation attribute '{attr}' is not defined for document type '{}'",
+                        doc_type.id
+                    ),
+                    "unknown_attribute",
+                )
             })?;
 
             if !rel.relation_type.is_owning() {
-                return Err(ApplicationError::Validation(vec![format!(
-                    "relation attribute '{attr}' is an inverse-side relation; mutate from owner type '{:?}'",
-                    rel.relation_type
-                )]));
+                return Err(ApplicationError::validation_single(
+                    attr.to_string(),
+                    format!(
+                        "relation attribute '{attr}' is an inverse-side relation; mutate from owner type '{:?}'",
+                        rel.relation_type
+                    ),
+                    "invalid_relation",
+                ));
             }
 
             let is_has_one = rel.relation_type == RelationType::HasOne;
@@ -206,10 +221,14 @@ where
                 RelationAction::Set(target_ids) => {
                     let unique: HashSet<_> = target_ids.iter().collect();
                     if is_has_one && unique.len() > 1 {
-                        return Err(ApplicationError::Validation(vec![format!(
-                            "relation '{attr}' is HasOne but received {} target IDs",
-                            unique.len()
-                        )]));
+                        return Err(ApplicationError::validation_single(
+                            attr.to_string(),
+                            format!(
+                                "relation '{attr}' is HasOne but received {} target IDs",
+                                unique.len()
+                            ),
+                            "cardinality_violation",
+                        ));
                     }
                     instance.set_relations(attr, target_ids);
                 }
@@ -222,9 +241,13 @@ where
                             }
                         }
                         if unique.len() > 1 {
-                            return Err(ApplicationError::Validation(vec![format!(
-                                "relation '{attr}' is HasOne and cannot have multiple targets connected"
-                            )]));
+                            return Err(ApplicationError::validation_single(
+                                attr.to_string(),
+                                format!(
+                                    "relation '{attr}' is HasOne and cannot have multiple targets connected"
+                                ),
+                                "cardinality_violation",
+                            ));
                         }
                     }
                     instance.connect_relations(attr, target_ids);
@@ -261,15 +284,20 @@ where
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
         })?;
 
-        // Sequential fetch for MVP
-        let page = self
-            .instance_repo
-            .find_by_type(cmd.document_type, cmd.pagination, cmd.filters.clone())
-            .await?;
-        let count = self
-            .instance_repo
-            .count(cmd.document_type, cmd.filters)
-            .await?;
+        // Sequential fetch for MVP (routes to published wide table for visitors, or drafts store for working copies)
+        let page = match cmd.view {
+            VersionView::Published => {
+                self.instance_repo
+                    .find_published(cmd.document_type, cmd.pagination, cmd.filters.clone())
+                    .await?
+            }
+            VersionView::Working => {
+                self.instance_repo
+                    .find_by_type(cmd.document_type, cmd.pagination, cmd.filters.clone())
+                    .await?
+            }
+        };
+        let count = page.total;
 
         // Two-phase batch relation enrichment
         let enriched = self
@@ -347,8 +375,11 @@ where
 
         // Schema constraint and required field validation
         if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
-            let messages: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-            return Err(ApplicationError::Validation(messages));
+            let params = errs
+                .iter()
+                .map(crate::errors::InvalidParam::from_domain_error)
+                .collect();
+            return Err(ApplicationError::Validation(params));
         }
 
         // Apply and validate relational mutations
@@ -409,6 +440,15 @@ where
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
         })?;
 
+        if let Some(expected) = cmd.expected_version
+            && instance.audit.version != expected
+        {
+            return Err(ApplicationError::version_mismatch_conflict(
+                expected,
+                instance.audit.version,
+            ));
+        }
+
         let prev_published_snapshot = if !doc_type.options.draft_and_publish {
             let prev_rev = match instance.content.publication_state {
                 PublicationState::Published { revision, .. } => revision,
@@ -441,8 +481,11 @@ where
 
         // Revalidate against schema constraints
         if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
-            let messages: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-            return Err(ApplicationError::Validation(messages));
+            let params = errs
+                .iter()
+                .map(crate::errors::InvalidParam::from_domain_error)
+                .collect();
+            return Err(ApplicationError::Validation(params));
         }
 
         // Apply and validate relational mutations
@@ -562,8 +605,11 @@ where
         if let Err(errs) =
             validate_publish_content(doc_type, &instance.content, &self.context.config)
         {
-            let messages: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-            return Err(ApplicationError::Validation(messages));
+            let params = errs
+                .iter()
+                .map(crate::errors::InvalidParam::from_domain_error)
+                .collect();
+            return Err(ApplicationError::Validation(params));
         }
 
         let now = Utc::now();
@@ -642,6 +688,18 @@ where
         if !doc_type.options.draft_and_publish {
             return Err(ApplicationError::draft_publish_disabled_conflict(
                 &doc_type.info.title,
+            ));
+        }
+
+        // Aggregate state guard: only published or modified documents can be unpublished
+        if matches!(
+            instance.content.publication_state,
+            PublicationState::Draft | PublicationState::Unpublished { .. }
+        ) {
+            return Err(ApplicationError::Domain(
+                DomainError::InvalidStateTransition {
+                    reason: "cannot unpublish a document that is not currently published".to_string(),
+                }
             ));
         }
 
@@ -764,6 +822,15 @@ where
         let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
         })?;
+
+        // Draft guard: fresh drafts that have never been published cannot restore snapshots (LC-13)
+        if matches!(instance.content.publication_state, PublicationState::Draft) {
+            return Err(ApplicationError::Domain(
+                DomainError::InvalidStateTransition {
+                    reason: "cannot restore snapshot on a document in Draft state that has never been published".to_string(),
+                }
+            ));
+        }
 
         let snapshot = self
             .snapshot_repo
@@ -926,6 +993,29 @@ where
 
         Ok(snapshots)
     }
+
+    async fn get_snapshot(
+        &self,
+        caller: &CallerContext,
+        cmd: GetSnapshotCommand,
+    ) -> Result<DocumentSnapshot, ApplicationError> {
+        caller.check_permission(
+            &Permission::ReadDocument(Some(cmd.document_type.clone())),
+            None,
+        )?;
+
+        self.context.find_type(cmd.document_type).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
+        })?;
+
+        self.snapshot_repo
+            .get_snapshot(cmd.document_type, cmd.document_instance_id, cmd.revision)
+            .await?
+            .ok_or_else(|| ApplicationError::NotFound {
+                entity: "DocumentSnapshot",
+                id: format!("{}:v{}", cmd.document_instance_id, cmd.revision),
+            })
+    }
 }
 
 #[cfg(test)]
@@ -1076,6 +1166,7 @@ mod tests {
 
         // Query with populate
         let cmd = FindDocumentsCommand::new(&doc_type.id, Pagination::default())
+            .with_view(VersionView::Working)
             .with_populate(vec![rel_attr.clone()]);
 
         let (items, count) = service.find(&caller, cmd).await.expect("find ok");

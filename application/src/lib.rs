@@ -9,13 +9,15 @@ pub mod services;
 pub mod test_support;
 
 pub use commands::{
-    ApproveAccessRequestCommand, CreateDocumentCommand, DeleteDocumentCommand, FindByIdCommand,
-    FindDocumentsCommand, PublishDocumentCommand, RejectAccessRequestCommand, RelationAction,
-    SubmitAccessRequestCommand, UnpublishDocumentCommand, UpdateDocumentCommand, VersionView,
+    ApproveAccessRequestCommand, CreateDocumentCommand, DeleteDocumentCommand, DiscardDraftCommand,
+    FindByIdCommand, FindDocumentsCommand, GetSnapshotCommand, ListAdminHeadersCommand,
+    ListSnapshotsCommand, PublishDocumentCommand, RejectAccessRequestCommand, RelationAction,
+    RestoreSnapshotCommand, SubmitAccessRequestCommand, UnpublishDocumentCommand,
+    UpdateDocumentCommand, VersionView,
 };
 pub use context::*;
 pub use errors::*;
 pub use services::{
     AccessRequestsService, AccessRequestsServiceImpl, DocumentsService, DocumentsServiceImpl,
-    SystemConfigService, SystemConfigServiceImpl,
+    SchemaService, SchemaServiceImpl, SystemConfigService, SystemConfigServiceImpl,
 };

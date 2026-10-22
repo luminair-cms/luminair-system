@@ -13,6 +13,8 @@ pub struct FindDocumentsCommand {
     pub document_type: &'static DocumentTypeId,
     /// Pagination parameters (page number and page size).
     pub pagination: Pagination,
+    /// Lifecycle representation to retrieve (`Published` by default for visitors, `Working` for admin drafts).
+    pub view: VersionView,
     /// Field filters to apply.
     pub filters: Vec<FieldFilter>,
     /// Optional list of relation attribute IDs to populate in the returned documents.
@@ -24,9 +26,15 @@ impl FindDocumentsCommand {
         Self {
             document_type,
             pagination,
+            view: VersionView::Working,
             filters: Vec::new(),
             populate: None,
         }
+    }
+
+    pub fn with_view(mut self, view: VersionView) -> Self {
+        self.view = view;
+        self
     }
 
     pub fn with_filters(mut self, filters: Vec<FieldFilter>) -> Self {
@@ -140,6 +148,8 @@ pub struct UpdateDocumentCommand {
     pub relations: HashMap<AttributeId, RelationAction>,
     /// Optional list of relation attribute IDs to populate in the returned document.
     pub populate: Option<Vec<AttributeId>>,
+    /// Expected version for optimistic concurrency control (OCC).
+    pub expected_version: Option<u32>,
 }
 
 impl UpdateDocumentCommand {
@@ -154,7 +164,13 @@ impl UpdateDocumentCommand {
             fields,
             relations: HashMap::new(),
             populate: None,
+            expected_version: None,
         }
+    }
+
+    pub fn with_expected_version(mut self, version: u32) -> Self {
+        self.expected_version = Some(version);
+        self
     }
 
     pub fn with_relations(mut self, relations: HashMap<AttributeId, RelationAction>) -> Self {
@@ -338,6 +354,28 @@ impl ListSnapshotsCommand {
     }
 }
 
+/// Query command to inspect a specific historical revision snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GetSnapshotCommand {
+    pub document_type: &'static DocumentTypeId,
+    pub document_instance_id: DocumentInstanceId,
+    pub revision: u32,
+}
+
+impl GetSnapshotCommand {
+    pub fn new(
+        document_type: &'static DocumentTypeId,
+        document_instance_id: DocumentInstanceId,
+        revision: u32,
+    ) -> Self {
+        Self {
+            document_type,
+            document_instance_id,
+            revision,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,8 +392,13 @@ mod tests {
 
         assert_eq!(cmd.document_type, type_id);
         assert_eq!(cmd.pagination, Pagination::default());
+        assert_eq!(cmd.view, VersionView::Working);
         assert_eq!(cmd.populate, Some(vec![attr]));
         assert!(cmd.filters.is_empty());
+
+        let pub_cmd = FindDocumentsCommand::new(type_id, Pagination::default())
+            .with_view(VersionView::Published);
+        assert_eq!(pub_cmd.view, VersionView::Published);
     }
 
     #[test]
@@ -385,13 +428,20 @@ mod tests {
         assert_eq!(create.document_type, type_id);
         assert!(create.fields.is_empty());
 
-        let update = UpdateDocumentCommand::new(id, type_id, HashMap::new());
+        let update = UpdateDocumentCommand::new(id, type_id, HashMap::new())
+            .with_expected_version(2);
         assert_eq!(update.document_instance_id, id);
         assert_eq!(update.document_type, type_id);
+        assert_eq!(update.expected_version, Some(2));
 
         let delete = DeleteDocumentCommand::new(id, type_id);
         assert_eq!(delete.document_instance_id, id);
         assert_eq!(delete.document_type, type_id);
+
+        let get_snap = GetSnapshotCommand::new(type_id, id, 1);
+        assert_eq!(get_snap.document_type, type_id);
+        assert_eq!(get_snap.document_instance_id, id);
+        assert_eq!(get_snap.revision, 1);
 
         let pub_cmd = PublishDocumentCommand::new(id, type_id).with_expected_version(3);
         assert_eq!(pub_cmd.document_instance_id, id);

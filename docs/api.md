@@ -270,6 +270,7 @@ All endpoints accept and return JSON. Authenticate requests using `Authorization
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/v1/auth/access-requests` | Submit an access request for onboarding. |
+| `GET` | `/api/v1/auth/access-requests` | List pending access requests awaiting review (admin only). |
 | `GET` | `/api/v1/auth/access-requests/:id` | Get access request status (owner or admin). |
 | `POST` | `/api/v1/auth/access-requests/:id/approve` | Approve access request and assign roles (admin only). |
 | `POST` | `/api/v1/auth/access-requests/:id/reject` | Reject access request with reason (admin only). |
@@ -279,3 +280,10 @@ All endpoints accept and return JSON. Authenticate requests using `Authorization
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/v1/system/config` | Get system configuration (default locale, active locales). |
+
+### 6.4 Schema & Content Types
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/schema/document-types` | List all registered document types and schemas. |
+| `GET` | `/api/v1/schema/document-types/:id` | Get schema definition for a specific document type. |
