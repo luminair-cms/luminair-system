@@ -5,7 +5,7 @@
 
 ## 0. Division of responsibilities
 
-Main code is written by hand with help of AI (review, analysis, code snippets etc).
+Main code is written with help of AI (review, analysis, code snippets etc).
 
 Documentation and Tests are written mostly by AI.
 
