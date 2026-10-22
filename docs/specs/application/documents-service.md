@@ -31,7 +31,7 @@
 - **Origin**: `adr:002`
 - **Given**: A valid collection document type in schema registry, and a caller with `CreateDocument` permission.
 - **When**: Caller invokes `service.create(&caller, CreateDocumentCommand::new(type_id, valid_fields)).await`.
-- **Then**: Returns `Ok(instance)` with `instance.audit.version == 1`, `instance.audit.created_by == caller.actor`, `instance.content.publication_state` as `Draft { last_published_revision: None }`, and instance is retrievable from repository.
+- **Then**: Returns `Ok(instance)` with `instance.audit.version == 1`, `instance.audit.created_by == caller.actor`, `instance.content.publication_state` as `Draft`, and instance is retrievable from repository.
 
 ### DS-02 — Create Blocked for Second SingleType Instance
 - **Status**: `Approved`

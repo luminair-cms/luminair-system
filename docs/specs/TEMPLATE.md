@@ -14,7 +14,7 @@ Map domain/system terms to concrete public API items, types, and values used in 
 
 | Term | Meaning / API symbol | Concrete representation |
 |---|---|---|
-| `Draft` | `PublicationState::Draft` | `last_published_revision: Option<u32>` |
+| `Draft` | `PublicationState::Draft` | Unit variant (never published, no snapshots) |
 | `Published` | `PublicationState::Published` | `revision: u32, published_at: DateTime<Utc>` |
 
 ---

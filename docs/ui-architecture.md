@@ -87,10 +87,10 @@ frontend/
     │   ├── client.ts                    # Axios instance with Bearer interceptors
     │   ├── errors.ts                    # RFC 9457 ProblemDetails error types
     │   ├── query-keys.ts                # Centralized TanStack Query cache keys
-    │   ├── schema.api.ts                # /api/schema/document-types hooks
-    │   ├── documents.api.ts             # /api/{type} CRUD & publish hooks
-    │   ├── access-requests.api.ts       # /api/access-requests hooks
-    │   └── system.api.ts                # /api/system/config and health hooks
+    │   ├── schema.api.ts                # /api/v1/schema/document-types hooks
+    │   ├── documents.api.ts             # /api/v1/content/{type} CRUD & publish hooks
+    │   ├── access-requests.api.ts       # /api/v1/auth/access-requests hooks
+    │   └── system.api.ts                # /api/v1/system/config and health hooks
     ├── auth/                            # OIDC PKCE and session handling
     │   ├── oidc-config.ts               # UserManager configuration (Dex / Cognito)
     │   ├── auth-service.ts              # Login, logout, token refresh actions
@@ -200,7 +200,7 @@ interface UiState {
 
 ## 5. Dynamic Schema-Driven Form Engine
 
-The core innovation of the Luminair UI is its ability to render rich, interactive forms dynamically from the metadata returned by `GET /api/schema/document-types/{id}` without requiring code generation or hardcoded templates.
+The core innovation of the Luminair UI is its ability to render rich, interactive forms dynamically from the metadata returned by `GET /api/v1/schema/document-types/{id}` without requiring code generation or hardcoded templates.
 
 ### Field Type Mapping
 
@@ -238,8 +238,8 @@ stateDiagram-v2
     CheckingEnrollment --> OnboardingRejected: 403 (ACCESS_REJECTED)
     CheckingEnrollment --> DashboardReady: 200 OK (Roles Approved)
 
-    OnboardingNotRequested --> OnboardingPending: POST /api/access-requests
-    OnboardingRejected --> OnboardingPending: POST /api/access-requests (Re-request)
+    OnboardingNotRequested --> OnboardingPending: POST /api/v1/auth/access-requests
+    OnboardingRejected --> OnboardingPending: POST /api/v1/auth/access-requests (Re-request)
     OnboardingPending --> DashboardReady: Admin approves request
 
     DashboardReady --> [*]
@@ -247,10 +247,10 @@ stateDiagram-v2
 
 ### Route Guard Behavior (`AuthGuard.tsx`)
 1. If `!isAuthenticated` $\rightarrow$ redirects to `/login`.
-2. Calls `GET /api/schema/document-types`.
-3. If error is `403` with Problem Details `https://luminair.dev/errors/access-not-requested` $\rightarrow$ renders Onboarding Submission screen.
-4. If error is `403` with `access-pending` $\rightarrow$ renders Pending Approval notification with an auto-poll timer.
-5. If error is `403` with `access-rejected` $\rightarrow$ displays rejection notice with re-submit button.
+2. Calls `GET /api/v1/schema/document-types`.
+3. If error is `403` with Problem Details `urn:luminair:error:access_not_requested` $\rightarrow$ renders Onboarding Submission screen.
+4. If error is `403` with `urn:luminair:error:access_pending` $\rightarrow$ renders Pending Approval notification with an auto-poll timer.
+5. If error is `403` with `urn:luminair:error:access_rejected` $\rightarrow$ displays rejection notice with re-submit button.
 6. If `200 OK` $\rightarrow$ renders the requested dashboard route.
 
 ---

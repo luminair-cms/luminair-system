@@ -29,7 +29,7 @@ We need an architectural storage pattern in PostgreSQL and AWS Aurora DSQL that 
 Adopt the **Asymmetric Hybrid Persistence Pattern**:
 1. **Per-Type Wide Relational Table (`[type]`)**: Dedicated strictly to **live published instances** (and single-lifecycle document types where `draft_and_publish: false`). Includes a `has_pending_draft` flag to eliminate distributed outer joins.
 2. **Unified Draft Store (`document_drafts`)**: A **single static system table** holding working drafts as **JSONB** across all document types, augmented with materialized identity maps (`display_values JSONB` as key-value pairs) and workflow metadata.
-3. **Global Snapshot Store (`document_snapshots`)**: A **single static system table** recording immutable **JSONB** snapshots for publication history, manual checkpoints, and rollbacks.
+3. **Global Snapshot Store (`document_snapshots`)**: A **single static system table** recording immutable **JSONB** snapshots of superseded live revisions for historical auditing and rollbacks. Unique constraint `UNIQUE (document_type_id, document_id, revision)` guarantees an unambiguous, collision-free history.
 4. **Relational Junction Tables (`[type]_[attr]_links`)**: Maintained strictly for published associations with foreign keys (`ON DELETE CASCADE`).
 
 ---
@@ -138,78 +138,19 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 
 ---
 
-## Lifecycle Workflows
+## Lifecycle Workflows & Storage Operations
 
 > [!TIP]
-> For the complete state diagram, the full transition matrix (every state × action, including errors, snapshot writes, and what each Admin tab shows), and worked scenarios (rollback vs. take-offline), see [`docs/content-lifecycle.md`](../content-lifecycle.md).
+> For the complete normative state diagram, 19-row transition matrix, scenario walkthroughs, and error guards, see [`docs/content-lifecycle.md`](../content-lifecycle.md).
 
-```
-                     create()
-                        │
-                        ▼
-                 ┌──────────────┐
-                 │    DRAFT     │
-                 │(drafts table)│
-                 └──────┬───────┘
-                        │
-                        │ publish() [atomic transaction]
-                        ▼
-                 ┌──────────────┐
-                 │  PUBLISHED   │
-                 │ (wide table) │
-                 └──────┬───────┘
-                        │
-             edit()     │       unpublish()
-        ┌───────────────┴────────────────┐
-        ▼                                ▼
-┌────────────────┐               ┌──────────────┐
-│    MODIFIED    │               │ UNPUBLISHED  │
-│(in both tables)│               │(drafts table)│
-└───────┬────────┘               └──────────────┘
-        │
-        ├── publish() ───────▶ updates wide table & snapshots; sets has_pending_draft = false
-        └── discard_draft() ─▶ removes draft; sets has_pending_draft = false
-```
+The storage layer coordinates multi-table mutations across the wide table, draft store, and snapshot archive:
 
-### 1. Draft Creation (`create`)
-- Validates syntax and field types (lenient draft validation).
-- Inserts into `document_drafts` with `status = 'draft'`. The wide table is not touched.
-
-### 2. Publication (`publish`)
-- Allowed only from `Draft`, `Modified`, or `Unpublished`. Publishing a clean `Published` document (no pending draft) is rejected with `Conflict` because there is nothing to publish (`DS-17`). There is no "force re-publish".
-- Verifies optimistic concurrency token (`expected_version` matches `draft.version`).
-- Validates draft against strict schema constraints (required fields, regex patterns, number ranges, target existence).
-- `DocumentInstanceRepository::publish` accepts `archived_snapshot: Option<&DocumentSnapshot>` (along with `instance`, `revision`, `display_values`, and `display_title`) so the wide table, `document_drafts`, and `document_snapshots` are mutated within a single atomic database transaction:
-  1. If a previous live revision already existed in `[type]` (`archived_snapshot = Some(..)`), archives that superseded live version to `document_snapshots` (`reason = 'publish'`).
-  2. Upserts the new live row into the wide table `[type]` and sets `has_pending_draft = FALSE`.
-  3. Synchronizes relational junction rows in `[type]_[attr]_links`.
-  4. Deletes the draft row from `document_drafts`.
-- If an OCC serialization conflict (`40001`) occurs in DSQL, the transaction runner retries automatically with exponential backoff and randomized jitter.
-
-### 3. Editing a Published Document (`update`)
-- The wide table continues serving public visitors without disruption.
-- Mutates or creates a row in `document_drafts` with `status = 'modified'` and increments `version`.
-- Updates `[type].has_pending_draft = TRUE` in the wide table.
-
-### 4. Unpublishing (`unpublish` — Take Offline)
-- Removes the live published state from `[type]` so public visitors no longer see the document.
-- When unpublishing a `'modified'` document (which has both a live row in `[type]` and pending edits in `document_drafts`), `UnpublishDocumentCommand` specifies `UnpublishDraftResolution`:
-  - `KeepDraft` (default): Keeps the working draft in `document_drafts` (`status = 'unpublished'`).
-  - `ReplaceWithPublished`: Replaces `document_drafts` with the live published content & relations (`status = 'unpublished'`).
-- `DocumentInstanceRepository::unpublish` accepts `snapshot: &DocumentSnapshot` (capturing the live revision leaving `[type]`) within a single atomic database transaction:
-  1. Archives the live published row from `[type]` to `document_snapshots` (`reason = 'unpublish'`).
-  2. Deletes the live row from the wide table `[type]` (foreign keys cascade to `[type]_[attr]_links`).
-  3. Upserts the resolved draft into `document_drafts` with `status = 'unpublished'`.
-
-### 5. Discarding Drafts (`discard_draft`)
-- Deletes the row from `document_drafts`.
-- Updates `[type].has_pending_draft = FALSE`.
-- The document remains cleanly published in the wide table.
-
-### 6. Restoring Snapshots (`restore_snapshot` — Rollback)
-- Loads the historical snapshot from `document_snapshots`.
-- If the document is currently in `Modified` state (uncommitted draft edits exist in `document_drafts`), automatically saves the current working draft to `document_snapshots` with `reason = 'checkpoint'` so in-progress work is never lost.
-- Writes the restored snapshot content into `document_drafts` (`status = 'modified'` if live, or `'unpublished'` / `'draft'`) for editorial review and subsequent republishing.
+1. **Draft Creation (`create`)**: Inserts working copy into `document_drafts` (`status = 'draft'`); wide table `[type]` is untouched.
+2. **Publication (`publish`)**: Publishing clean `Published` state is rejected with `Conflict` (`DS-17`). In a single atomic database transaction: upserts new live row into wide table `[type]`, archives superseded live revision (if $N > 1$) to `document_snapshots` (`reason = 'publish'`), sets `has_pending_draft = FALSE`, synchronizes junction tables, and clears the draft row.
+3. **Editing a Published Document (`update`)**: Inserts or updates row in `document_drafts` (`status = 'modified'`) and sets `[type].has_pending_draft = TRUE`. Public visitors continue reading from the wide table without disruption.
+4. **Unpublishing (`unpublish`)**: Takes live document offline. In a single atomic transaction: archives live revision from `[type]` to `document_snapshots` (`reason = 'unpublish'`), deletes row from `[type]` (visitors get 404), and upserts working copy into `document_drafts` (`status = 'unpublished'`) per `UnpublishDraftResolution` (`KeepDraft` or `ReplaceWithPublished`).
+5. **Discarding Drafts (`discard_draft`)**: Deletes working copy from `document_drafts` and resets `[type].has_pending_draft = FALSE`, cleanly reverting to the live published version.
+6. **Restoring Snapshots (`restore_snapshot`)**: Restores historical revision into `document_drafts` (`status = 'modified'` if live, or `'unpublished'` if offline). If in `Modified` state with uncommitted draft edits, requires explicit confirmation via `discard_pending_edits = true` or returns `Conflict` (`draft_has_pending_edits`). No synthetic checkpoints are written to `document_snapshots`.
 
 ---
 

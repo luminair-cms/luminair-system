@@ -18,7 +18,7 @@ This document demonstrates the three specification formats described in [`GUIDEL
 - **Test target**: `domain/tests/lc_document_lifecycle.rs`
 
 ## Vocabulary
-- `Draft(None)`: Draft with no previous publication (`last_published_revision: None`).
+- `Draft`: Draft with no previous publication (`PublicationState::Draft`).
 - `Published(N)`: Published at revision `N`.
 - `Unpublished(N)`: Unpublished with historical revision `N`.
 - `Publish`: calling `instance.publish(actor, now)`.
@@ -27,11 +27,11 @@ This document demonstrates the three specification formats described in [`GUIDEL
 ## Rules
 | ID | Status | Origin | Given State | Action | Expected Result | Next State |
 |---|---|---|---|---|---|---|
-| `LC-01` | `Approved` | `adr:004` | `Draft(None)` | `Publish` | `Ok(1)` | `Published(1)` |
+| `LC-01` | `Approved` | `adr:004` | `Draft` | `Publish` | `Ok(1)` | `Published(1)` |
 | `LC-02` | `Approved` | `adr:004` | `Published(1)` | `Publish` | `Ok(2)` | `Published(2)` |
 | `LC-03` | `Approved` | `adr:004` | `Published(1)` | `Unpublish` | `Ok(())` | `Unpublished(1)` |
 | `LC-04` | `Approved` | `adr:004` | `Unpublished(1)` | `Publish` | `Ok(2)` | `Published(2)` |
-| `LC-05` | `Approved` | `adr:004` | `Draft(None)` | `Unpublish` | `Err(InvalidStateTransition)` | `Draft(None)` |
+| `LC-05` | `Approved` | `adr:004` | `Draft` | `Unpublish` | `Err(InvalidStateTransition)` | `Draft` |
 | `LC-06` | `Approved` | `adr:004` | `Unpublished(1)` | `Unpublish` | `Err(InvalidStateTransition)` | `Unpublished(1)` |
 ```
 
@@ -93,9 +93,7 @@ fn test_document_lifecycle_cases() {
 
         match case.start {
             StartState::DraftNone => {
-                inst.content.publication_state = PublicationState::Draft {
-                    last_published_revision: None,
-                };
+                inst.content.publication_state = PublicationState::Draft;
             }
             StartState::Published(rev) => {
                 inst.content.publication_state = PublicationState::Published {

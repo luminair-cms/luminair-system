@@ -1,8 +1,11 @@
-# Refactoring Plan: Archive-on-Replace Snapshots, Strapi Unpublish Resolution, & Checkpoint on Restore
+# Refactoring Plan: Archive-on-Replace Snapshots, Strapi Unpublish Resolution, & Snapshot Restores
+
+> [!NOTE]
+> **Historical Implementation Plan**: This document records the executed plan for archive-on-replace snapshots and unpublish draft resolution. Note: The proposal in Section 1.3 for automatic checkpoints on restore was superseded by the `discard_pending_edits` explicit confirmation guard (preventing silent draft overwrites without creating spurious checkpoints). For current normative specifications, refer to [`docs/content-lifecycle.md`](../content-lifecycle.md), [`docs/design-infrastructure-persistence.md`](../design-infrastructure-persistence.md), and [`docs/api.md`](../api.md).
 
 - **Target Crates**: `domain`, `application`
-- **Governing Architecture**: [`ADR-004`](./adr/ADR-004-draft-and-publish-table-pattern.md), [`docs/design-infrastructure-persistence.md`](./design-infrastructure-persistence.md)
-- **Status**: Implemented
+- **Governing Architecture**: [`ADR-004`](../adr/ADR-004-draft-and-publish-table-pattern.md), [`docs/design-infrastructure-persistence.md`](../design-infrastructure-persistence.md)
+- **Status**: Implemented (Checkpoint proposal superseded by `discard_pending_edits` guard)
 - **Date**: 2026-10-21
 
 ---

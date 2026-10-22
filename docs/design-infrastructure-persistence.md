@@ -60,7 +60,7 @@ Note that `'published'` is **never** stored in `document_drafts` — a clean pub
 
 | `status` Value | Domain State (`PublicationState`) | Presence in Wide Table `[type]` | Meaning |
 |---|---|---|---|
-| `'draft'` | `PublicationState::Draft { last_published_revision: None }` | No row in `[type]` | A newly created document that has never been published (`last_published_revision IS NULL`). Exists only in `document_drafts`. |
+| `'draft'` | `PublicationState::Draft` | No row in `[type]` | A newly created document that has never been published (`last_published_revision IS NULL`). Exists only in `document_drafts`. |
 | `'modified'` | `PublicationState::Modified { live_revision, draft_version, .. }` | Live row exists in `[type]` (`has_pending_draft = TRUE`) | A currently published document that has newer, unpublished working edits in `document_drafts`. Visitors still read the live revision from `[type]`, while editors work on the row in `document_drafts` (or revert it via `discard_draft`). |
 | `'unpublished'` | `PublicationState::Unpublished { last_published_revision, .. }` | Removed from `[type]` | A document that was previously published (`last_published_revision IS NOT NULL`) and subsequently taken offline via `unpublish`. Its row is deleted from `[type]` so public queries cannot see it, while its full state is preserved in `document_drafts` for future editing or re-publishing. |
 
@@ -473,9 +473,9 @@ async fn discard_draft_transaction(
 
 #### 4.5.2 Restore Snapshot (`restore_snapshot` — Rollback to Historical Revision)
 When rolling back to a previous revision from `document_snapshots`:
-1. If the document is currently in `Modified` state (meaning an editor has uncommitted draft changes in `document_drafts`), `DocumentsService::restore_snapshot` first saves the current working draft to `document_snapshots` with **`reason = 'checkpoint'`** (`snapshot_repo.save_snapshot(&checkpoint)`), ensuring in-progress draft work is never lost.
-2. The target historical snapshot's `fields` and `relations` are loaded into the working draft (`status = 'modified'` if a live version exists in `[type]`, or `'unpublished'` / `'draft'` otherwise) and persisted via `save_draft` (and `[type].has_pending_draft = TRUE`).
-3. The editor can then review the restored content in the Draft tab and click **Publish** to make it live.
+1. If the document is in `Modified` state (holding uncommitted draft changes), `DocumentsService::restore_snapshot` requires explicit confirmation via `discard_pending_edits = true`. If omitted, it returns `ApplicationError::Conflict` (`code = "draft_has_pending_edits"`). No synthetic checkpoints are written to `document_snapshots`, preserving strict `(document_type_id, document_id, revision)` uniqueness.
+2. The target historical snapshot's `fields` and `relations` are loaded into the working draft (`status = 'modified'` if live, or `'unpublished'` if offline) and persisted via `save_draft` (and `[type].has_pending_draft = TRUE`). (Note: `Draft` documents cannot restore snapshots per `LC-13`).
+3. The editor reviews the restored content in the Draft tab and publishes it when ready, advancing to a new revision `N + 1`.
 
 ---
 

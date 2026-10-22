@@ -1,9 +1,12 @@
 # Refactoring Plan: Domain and Application Crates (ADR-004 & Domain Review Merge)
 
+> [!NOTE]
+> **Historical Implementation Plan**: This document records the executed refactoring plan for transitioning the `domain` and `application` crates to the Asymmetric Hybrid Persistence Pattern. For current normative documentation, refer to [`docs/architecture.md`](../architecture.md), [`docs/content-lifecycle.md`](../content-lifecycle.md), [`docs/design-infrastructure-persistence.md`](../design-infrastructure-persistence.md), and [`docs/api.md`](../api.md).
+
 - **Target Crates**: `domain`, `application`
-- **Governing Architecture**: [`ADR-004`](./adr/ADR-004-draft-and-publish-table-pattern.md) (Asymmetric Hybrid Draft-and-Publish Persistence Pattern) & Findings from Domain/Application Review
+- **Governing Architecture**: [`ADR-004`](../adr/ADR-004-draft-and-publish-table-pattern.md) (Asymmetric Hybrid Draft-and-Publish Persistence Pattern) & Findings from Domain/Application Review
 - **Execution Mode**: Orchestrated step-by-step via **Gemini Flash** subagents (`Model: "flash"`), reviewed and verified by the orchestrator after each step.
-- **Status**: Approved — Ready for Step-by-Step Execution
+- **Status**: Completed
 - **Date**: 2026-10-20
 
 ---
