@@ -104,7 +104,7 @@ In alignment with Hexagonal Architecture and DDD boundaries:
 
 *(Note: During early milestones, `ProblemDetails` and HTTP status mapping temporarily reside in `application::errors` as a transitional bridge; they will be moved to `infrastructure::http::errors` when the Axum routing adapter is implemented).*
 
-## UI Layer (Admin Dashboard)
+## UI Layer (Admin Studio)
 
 The UI layer is an independent **Decoupled Single-Page Application (SPA)** adhering strictly to Hexagonal Architecture boundaries:
 - **Location**: Isolated `/frontend` directory in the repository (independent package management, zero impact on Cargo workspace).
