@@ -27,7 +27,7 @@ All non-2xx responses from Luminair HTTP endpoints return `Content-Type: applica
   "status": 409,
   "code": "draft_has_pending_edits",
   "detail": "Restoring snapshot would overwrite pending working draft edits; confirm with discard_pending_edits: true",
-  "instance": "/api/v1/content/articles/01946890-7812-789a-bcde-000000000001/restore-snapshot",
+  "instance": "/api/v1/content/articles/01946890-7812-789a-bcde-000000000001/snapshots/1/restore",
   "details": {
     "document_id": "01946890-7812-789a-bcde-000000000001",
     "target_revision": 1,
@@ -262,7 +262,8 @@ All endpoints accept and return JSON. Authenticate requests using `Authorization
 | `POST` | `/api/v1/content/:type_id/:id/unpublish` | Take published document offline (body accepts `draft_resolution: "keep_draft" \| "replace_with_published"`). | `Unpublished` |
 | `POST` | `/api/v1/content/:type_id/:id/discard-draft` | Discard pending working draft edits and revert to clean live published state. | `Published` |
 | `GET` | `/api/v1/content/:type_id/:id/snapshots` | List revision snapshot history headers. | Archive (`SnapshotHeader`) |
-| `POST` | `/api/v1/content/:type_id/:id/restore-snapshot` | Restore historical revision into working draft (body: `{"revision": N, "discard_pending_edits": bool}`). | `Modified` |
+| `GET` | `/api/v1/content/:type_id/:id/snapshots/:revision` | Inspect full historical revision content and relations. | Archive (`DocumentSnapshot`) |
+| `POST` | `/api/v1/content/:type_id/:id/snapshots/:revision/restore` | Restore historical revision into working draft (body: `{"discard_pending_edits": bool}`). | `Modified` |
 
 ### 6.2 Authentication & Access Requests
 
