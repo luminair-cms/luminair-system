@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS document_snapshots (
     relations        JSONB NOT NULL,
     created_at       TIMESTAMPTZ NOT NULL,
     created_by       VARCHAR(255) NOT NULL,
-    reason           VARCHAR(32) NOT NULL CHECK (reason IN ('publish', 'checkpoint', 'unpublish'))
+    reason           VARCHAR(32) NOT NULL CHECK (reason IN ('publish', 'unpublish')),
+    CONSTRAINT uq_document_snapshots_revision UNIQUE (document_type_id, document_id, revision)
 );
 
 CREATE INDEX IF NOT EXISTS idx_document_snapshots_lookup
@@ -86,13 +87,14 @@ CREATE INDEX IF NOT EXISTS idx_document_snapshots_lookup
 
 #### Semantics of `document_snapshots.reason` (`SnapshotReason`)
 
-`document_snapshots` is an append-only archive of **historical revisions** that are no longer the active live row in `[type]` (or draft checkpoints). Every snapshot records the `reason` why that point-in-time state was captured:
+`document_snapshots` is an append-only archive of **historical revisions** that are no longer the active live row in `[type]`. Every snapshot records the `reason` why that point-in-time state was captured:
 
 | `reason` Value | Domain Variant (`SnapshotReason`) | Trigger / Workflow | Meaning |
 |---|---|---|---|
 | `'publish'` | `SnapshotReason::Publish` | `publish` (when overwriting an existing live row in `[type]`) | Recorded atomically inside `publish_transaction` when a **previous** live revision (`N - 1`) in `[type]` is superseded by a newly published revision (`N`). (On the first publish `revision = 1`, no previous row exists in `[type]`, so no `'publish'` snapshot is created yet). |
-| `'checkpoint'` | `SnapshotReason::Checkpoint` | `restore_snapshot` (when in `Modified` state) or manual savepoint via `save_snapshot` | An editorial or system savepoint of a **working draft** created without publishing to the wide table — automatically recorded before `restore_snapshot` overwrites in-progress `Modified` draft changes, or triggered manually before risky edits/migrations. |
 | `'unpublish'` | `SnapshotReason::Unpublish` | `unpublish` | Recorded atomically inside `unpublish_transaction` when a live document (`revision = N`) is taken offline from `[type]`. Archives the unpublished live version into `document_snapshots` before deleting the row from `[type]`. |
+
+*(Note: checkpoints of uncommitted working drafts do not exist in `document_snapshots`. Restoring a snapshot on a document with pending edits in `Modified` state requires explicit confirmation via `RestoreSnapshotCommand::with_discard_pending_edits()`, otherwise returning `ApplicationError::Conflict`).*
 
 ---
 

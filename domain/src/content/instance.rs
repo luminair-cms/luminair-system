@@ -77,9 +77,7 @@ impl DocumentContent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublicationState {
-    Draft {
-        last_published_revision: Option<u32>,
-    },
+    Draft,
     Published {
         revision: u32,
         published_at: DateTime<Utc>,
@@ -121,9 +119,7 @@ impl DocumentInstance {
             document_type_id: type_id,
             content: DocumentContent::new(
                 HashMap::new(),
-                PublicationState::Draft {
-                    last_published_revision: None,
-                },
+                PublicationState::Draft,
             ),
             relations: HashMap::new(),
             populated_relations: HashMap::new(),
@@ -230,9 +226,7 @@ impl DocumentInstance {
     pub fn publish(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) -> Result<u32, DomainError> {
         let by = by.into();
         let new_revision = match self.content.publication_state {
-            PublicationState::Draft {
-                last_published_revision,
-            } => last_published_revision.unwrap_or(0) + 1,
+            PublicationState::Draft => 1,
             PublicationState::Published { revision, .. } => revision + 1,
             PublicationState::Modified { live_revision, .. } => live_revision + 1,
             PublicationState::Unpublished {
@@ -269,7 +263,7 @@ impl DocumentInstance {
                 self.touch(by, now);
                 Ok(())
             }
-            PublicationState::Draft { .. } | PublicationState::Unpublished { .. } => {
+            PublicationState::Draft | PublicationState::Unpublished { .. } => {
                 Err(DomainError::InvalidStateTransition {
                     reason: "cannot unpublish a document that is not currently published".to_string(),
                 })
@@ -308,7 +302,7 @@ impl DocumentInstance {
                     draft_version: self.audit.version,
                 };
             }
-            PublicationState::Draft { .. } | PublicationState::Unpublished { .. } => {
+            PublicationState::Draft | PublicationState::Unpublished { .. } => {
                 self.touch(by, now);
             }
         }
@@ -343,6 +337,11 @@ impl DocumentInstance {
         by: impl Into<ActorId>,
         now: DateTime<Utc>,
     ) -> Result<(), DomainError> {
+        if matches!(self.content.publication_state, PublicationState::Draft) {
+            return Err(DomainError::InvalidStateTransition {
+                reason: "cannot restore snapshot on a document in Draft state that has never been published".to_string(),
+            });
+        }
         if snapshot.document_id != self.id || snapshot.document_type_id != self.document_type_id {
             return Err(DomainError::Validation(format!(
                 "snapshot {}:{} does not belong to document {}:{}",
@@ -519,9 +518,6 @@ mod tests {
         let t1 = t0 + Duration::seconds(10);
         let t2 = t0 + Duration::seconds(20);
 
-        instance.publish(user.clone(), t1).unwrap();
-        assert_eq!(instance.audit.version, 2);
-
         let title_attr = test_attr_id("title");
         let mut snap_fields = HashMap::new();
         snap_fields.insert(
@@ -540,6 +536,14 @@ mod tests {
             created_by: ActorId::User(user.clone()),
             reason: SnapshotReason::Publish,
         };
+
+        // Draft snapshot rejection (LC-13)
+        let draft_instance = make_test_instance().0;
+        let draft_err = draft_instance.clone().restore_snapshot(&snapshot, user.clone(), t2);
+        assert!(matches!(draft_err, Err(DomainError::InvalidStateTransition { .. })));
+
+        instance.publish(user.clone(), t1).unwrap();
+        assert_eq!(instance.audit.version, 2);
 
         instance.restore_snapshot(&snapshot, user.clone(), t2).unwrap();
         assert_eq!(instance.audit.version, 3);
@@ -701,9 +705,7 @@ mod tests {
         };
         let content = DocumentContent::new(
             HashMap::new(),
-            PublicationState::Draft {
-                last_published_revision: Some(2),
-            },
+            PublicationState::Draft,
         );
         let instance = DocumentInstance::reconstitute(
             doc_id,

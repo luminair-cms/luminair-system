@@ -11,7 +11,7 @@ use domain::auth::{
 use domain::content::{
     ContentValue, DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
     DocumentSnapshot, DocumentSnapshotRepository, DocumentStatus, FieldFilter, Page, Pagination,
-    PublicationState, RelationMap, SnapshotHeader, SnapshotReason, VersionView,
+    PublicationState, RelationMap, SnapshotHeader, VersionView,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentTypeId};
@@ -250,9 +250,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
 
             let (revision, draft_version, published_at, published_by) =
                 match &inst.content.publication_state {
-                    PublicationState::Draft {
-                        last_published_revision,
-                    } => (*last_published_revision, Some(inst.audit.version), None, None),
+                    PublicationState::Draft => (None, Some(inst.audit.version), None, None),
                     PublicationState::Published {
                         revision,
                         published_at,
@@ -525,19 +523,7 @@ impl DocumentSnapshotRepository for FakeDocumentInstanceRepository {
                     && s.revision == revision
             })
             .collect();
-        matching.sort_by(|a, b| {
-            let a_priority = match a.reason {
-                SnapshotReason::Publish | SnapshotReason::Unpublish => 0,
-                SnapshotReason::Checkpoint => 1,
-            };
-            let b_priority = match b.reason {
-                SnapshotReason::Publish | SnapshotReason::Unpublish => 0,
-                SnapshotReason::Checkpoint => 1,
-            };
-            a_priority
-                .cmp(&b_priority)
-                .then_with(|| b.created_at.cmp(&a.created_at))
-        });
+        matching.sort_by_key(|a| std::cmp::Reverse(a.created_at));
         Ok(matching.first().copied().cloned())
     }
 }

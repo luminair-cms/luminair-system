@@ -68,5 +68,19 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   4. **Unified Symmetric `find_by_id(type_id, id, view: VersionView)`**: Removed asymmetric `find_draft_by_id` / `find_published_by_id` methods in favor of a single repository method accepting `VersionView::Published` (default for visitors and the read-only published tab) and `VersionView::Working` (for the editable draft tab).
   5. **See**: [`docs/refactoring-publish-unpublish-snapshots.md`](../docs/refactoring-publish-unpublish-snapshots.md).
 
+---
+
+### 2026-10-22 — Checkpoint Removal, Draft Unit Variant & Overwrite Confirmation on Restore
+
+- **Context**: Resolving snapshot identity collisions, simplifying the `Draft` state representation, and protecting uncommitted draft edits without synthetic checkpoints.
+- **Decisions**:
+  1. **Removal of Checkpoints**: Removed `SnapshotReason::Checkpoint`. `document_snapshots` is an immutable, strictly unique archive of live revisions that have left the wide table (`reason IN ('publish', 'unpublish')`). The schema enforces `UNIQUE (document_type_id, document_id, revision)`, eliminating any collision between working draft versions and published revisions.
+  2. **Overwrite Confirmation on Restore (`RestoreSnapshotCommand::with_discard_pending_edits`)**: When `restore_snapshot` is called on a document in `Modified` state (which has uncommitted working draft edits in `document_drafts`), it returns `ApplicationError::Conflict("restoring snapshot would overwrite pending working draft edits; confirm with discard_pending_edits: true")` unless explicitly confirmed via `with_discard_pending_edits()`.
+  3. **`PublicationState::Draft` Unit Variant**: A draft document has never been published and carries no snapshots. Simplified `PublicationState::Draft { last_published_revision: Option<u32> }` to unit variant `PublicationState::Draft`. Calling `restore_snapshot` on `Draft` returns `DomainError::InvalidStateTransition` (`LC-13`).
+  4. **Trash, Undelete & Retention Architecture (`ADR-005`)**: Proposed deletion rollback via `document_tombstones` table, preserving revision snapshots in `document_snapshots` until asynchronous vacuum retention purge, with an atomic hard erasure path for GDPR compliance.
+  5. **Standardized Error Codes & Canonical RFC 9457 Problem Details Schema**: Replaced unstructured string conflicts with typed `ConflictCode` and structured metadata payload on `ApplicationError::Conflict`. Implemented RFC 9457 `ProblemDetails` (`type`, `title`, `status`, `code`, `detail`, `details`, `invalid_params`) and published `docs/api.md` with complete error code catalog, third-party developer guide, and Admin Studio UI bilingual localization mapping.
+  6. **Hexagonal Boundary for HTTP Error Machinery**: Documented in `docs/architecture.md` and `application/src/errors.rs` that `ProblemDetails` and HTTP status mapping are transport concerns temporarily located in `application::errors` as a bridge; they will be moved to `infrastructure` (the HTTP driving adapter) when the Axum REST endpoints are implemented, leaving `application` completely transport-agnostic.
+
+
 
 

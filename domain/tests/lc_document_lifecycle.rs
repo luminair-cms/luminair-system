@@ -87,9 +87,7 @@ fn test_document_lifecycle_cases() {
 
         match case.start {
             StartState::DraftNone => {
-                inst.content.publication_state = PublicationState::Draft {
-                    last_published_revision: None,
-                };
+                inst.content.publication_state = PublicationState::Draft;
             }
             StartState::Published(rev) => {
                 inst.content.publication_state = PublicationState::Published {
@@ -140,17 +138,37 @@ fn lc_07_new_instance_defaults() {
         now,
     );
 
-    assert_eq!(
-        inst.content.publication_state,
-        PublicationState::Draft {
-            last_published_revision: None
-        }
-    );
+    assert_eq!(inst.content.publication_state, PublicationState::Draft);
     assert_eq!(inst.audit.version, 1);
     assert_eq!(inst.audit.created_by, ActorId::User(alice.clone()));
     assert_eq!(inst.audit.updated_by, ActorId::User(alice));
     assert_eq!(inst.audit.created_at, now);
     assert_eq!(inst.audit.updated_at, now);
+}
+
+#[test]
+fn lc_13_restore_snapshot_on_draft_fails() {
+    let now = Utc::now();
+    let alice = test_user_id("alice");
+    let mut inst = fixture_document_instance("article", Some("alice"));
+    assert_eq!(inst.audit.version, 1);
+
+    let snap = DocumentSnapshot {
+        id: SnapshotId::new(Uuid::now_v7()),
+        document_type_id: inst.document_type_id.clone(),
+        document_id: inst.id,
+        revision: 1,
+        fields: HashMap::new(),
+        relations: HashMap::new(),
+        created_at: now,
+        created_by: ActorId::User(alice.clone()),
+        reason: SnapshotReason::Publish,
+    };
+
+    let res = inst.restore_snapshot(&snap, alice, now);
+    assert!(matches!(res, Err(DomainError::InvalidStateTransition { .. })));
+    assert_eq!(inst.audit.version, 1);
+    assert_eq!(inst.content.publication_state, PublicationState::Draft);
 }
 
 #[test]

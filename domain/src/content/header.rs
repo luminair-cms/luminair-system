@@ -47,7 +47,7 @@ pub enum DocumentStatus {
 impl From<&PublicationState> for DocumentStatus {
     fn from(state: &PublicationState) -> Self {
         match state {
-            PublicationState::Draft { .. } => DocumentStatus::Draft,
+            PublicationState::Draft => DocumentStatus::Draft,
             PublicationState::Published { .. } => DocumentStatus::Published,
             PublicationState::Modified { .. } => DocumentStatus::Modified,
             PublicationState::Unpublished { .. } => DocumentStatus::Unpublished,
@@ -116,7 +116,6 @@ pub struct SnapshotId(Uuid);
 #[serde(rename_all = "snake_case")]
 pub enum SnapshotReason {
     Publish,
-    Checkpoint,
     Unpublish,
 }
 
@@ -168,15 +167,8 @@ mod tests {
         let now = Utc::now();
         let actor = ActorId::User(test_user_id("alice"));
 
-        let draft = PublicationState::Draft {
-            last_published_revision: None,
-        };
+        let draft = PublicationState::Draft;
         assert_eq!(DocumentStatus::from(&draft), DocumentStatus::Draft);
-
-        let draft_prev = PublicationState::Draft {
-            last_published_revision: Some(1),
-        };
-        assert_eq!(DocumentStatus::from(&draft_prev), DocumentStatus::Draft);
 
         let published = PublicationState::Published {
             revision: 2,

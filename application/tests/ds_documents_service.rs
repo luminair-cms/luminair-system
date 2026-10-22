@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use application::commands::documents::*;
 use application::context::CallerContext;
-use application::errors::ApplicationError;
+use application::errors::{ApplicationError, ConflictCode};
 use application::services::{DocumentsService, DocumentsServiceImpl};
 use application::test_support::FakeDocumentInstanceRepository;
 use domain::content::{
@@ -68,9 +68,7 @@ async fn ds_01_create_collection_draft_success() {
     assert_eq!(inst.audit.created_by, caller.actor);
     assert!(matches!(
         inst.content.publication_state,
-        PublicationState::Draft {
-            last_published_revision: None
-        }
+        PublicationState::Draft
     ));
 }
 
@@ -201,6 +199,56 @@ async fn ds_06_publish_advances_revision_on_draftpublish_enabled_type() {
 }
 
 #[tokio::test]
+async fn ds_17_publish_rejects_already_published_document_without_pending_changes() {
+    let (service, doc_type, caller) = setup_service_fixture(true, false);
+    let mut fields = HashMap::new();
+    fields.insert(
+        test_attr_id("title"),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Clean Published".into(),
+        ))),
+    );
+    let inst = service
+        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .await
+        .unwrap();
+    let published = service
+        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .await
+        .unwrap();
+    let version_before = published.audit.version;
+
+    // DS-17: second publish without any pending draft changes is rejected
+    let res = service
+        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .await;
+    match res {
+        Err(ApplicationError::Conflict { code, message, .. }) => {
+            assert_eq!(code, ConflictCode::AlreadyPublished);
+            assert!(message.contains("already published"), "unexpected message: {message}");
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+
+    let live = service
+        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .await
+        .unwrap()
+        .expect("live document must still exist");
+    assert!(matches!(
+        live.content.publication_state,
+        PublicationState::Published { revision: 1, .. }
+    ));
+    assert_eq!(live.audit.version, version_before);
+
+    let snapshots = service
+        .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
+        .await
+        .unwrap();
+    assert!(snapshots.is_empty(), "no snapshot may be created: {snapshots:?}");
+}
+
+#[tokio::test]
 async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
     let (service, doc_type, caller) = setup_service_fixture(false, false);
     let mut fields = HashMap::new();
@@ -226,7 +274,13 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
         .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
         .await;
 
-    assert!(matches!(res, Err(ApplicationError::Conflict(_))));
+    assert!(matches!(
+        res,
+        Err(ApplicationError::Conflict {
+            code: ConflictCode::DraftAndPublishDisabled,
+            ..
+        })
+    ));
 
     let mut update_fields = HashMap::new();
     update_fields.insert(
@@ -623,16 +677,34 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         }
     ));
 
-    // 4. Restore Snapshot Revision 1
-    // Because the document was in Modified state, restore_snapshot automatically saves a Checkpoint snapshot
-    // of the uncommitted draft edits before restoring revision 1!
-    let restored = service
+    // 4. Attempt to Restore Snapshot Revision 1 without confirming discard of pending edits (must fail with Conflict)
+    let conflict_err = service
         .restore_snapshot(
             &caller,
             RestoreSnapshotCommand::new(inst.id, &doc_type.id, 1),
         )
         .await
-        .expect("restore snapshot succeeds");
+        .unwrap_err();
+    assert!(
+        matches!(
+            conflict_err,
+            ApplicationError::Conflict {
+                code: ConflictCode::DraftHasPendingEdits,
+                ..
+            }
+        ),
+        "expected Conflict error when restoring snapshot over Modified edits without discard flag: {:?}",
+        conflict_err
+    );
+
+    // 5. Restore Snapshot Revision 1 with explicit discard_pending_edits
+    let restored = service
+        .restore_snapshot(
+            &caller,
+            RestoreSnapshotCommand::new(inst.id, &doc_type.id, 1).with_discard_pending_edits(),
+        )
+        .await
+        .expect("restore snapshot succeeds with discard_pending_edits");
 
     assert!(matches!(
         restored.content.publication_state,
@@ -648,18 +720,14 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         )))
     );
 
-    // Verify snapshot list now contains both the Checkpoint and the superseded Publish snapshot
+    // Verify snapshot list contains only the superseded Publish snapshot (no checkpoint created)
     let snapshots_after = service
         .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
         .await
         .expect("list snapshots ok");
-    assert_eq!(snapshots_after.len(), 2);
-    assert!(snapshots_after
-        .iter()
-        .any(|s| s.reason == SnapshotReason::Checkpoint));
-    assert!(snapshots_after
-        .iter()
-        .any(|s| s.reason == SnapshotReason::Publish && s.revision == 1));
+    assert_eq!(snapshots_after.len(), 1);
+    assert_eq!(snapshots_after[0].reason, SnapshotReason::Publish);
+    assert_eq!(snapshots_after[0].revision, 1);
 
     // Verify default view (Published) returns live revision 2
     let published_view = service
@@ -1049,9 +1117,7 @@ async fn test_version_views_across_all_four_document_states() {
         .expect("Draft must be visible in Working tab");
     assert!(matches!(
         work_view_1.content.publication_state,
-        PublicationState::Draft {
-            last_published_revision: None
-        }
+        PublicationState::Draft
     ));
     assert_eq!(
         work_view_1.get_field(&title_attr),

@@ -56,7 +56,7 @@ No reverse dependencies. Domain traits (repository ports) are defined in `domain
 | Repository trait | `domain` (definition) / `infrastructure` (impl) |
 | Command / Query | `application` — separate structs, no mixing |
 | Domain Event | `domain` — raised by aggregates, handled in `application` |
-| Error types | Each crate has its own; `infrastructure` maps all to HTTP status codes |
+| Error types | Each crate has its own; `infrastructure` maps all to HTTP status codes (see below) |
 | Schema-driven | Content types defined via JSON schema; `domain` owns the schema entity |
 | Asymmetric Hybrid Persistence | `domain` (ports) / `infrastructure` (impl) — see [`ADR-004`](./adr/ADR-004-draft-and-publish-table-pattern.md) |
 
@@ -69,6 +69,7 @@ Luminair employs an **Asymmetric Hybrid Persistence Pattern** to balance public 
 - **Global Snapshot Store (`document_snapshots`)**: A single static append-only table recording immutable JSONB snapshots for publication history, manual checkpoints, and rollbacks with zero OCC write contention.
 - **Relational Junction Tables (`[type]_[attr]_links`)**: Maintained strictly for published associations with foreign keys (`ON DELETE CASCADE`).
 - **Composite Identity**: Schemas declare `display_fields: Vec<AttributeId>`, materialized at write-time into self-describing key-value maps (`display_values JSONB`) and a joined text fallback (`display_title`).
+- **Lifecycle semantics** (states, `publish` / `unpublish` / `restore_snapshot`, snapshot rules): see [`docs/content-lifecycle.md`](./content-lifecycle.md).
 
 ## Deployment Environments
 
@@ -92,6 +93,16 @@ crates have no knowledge of any deployment environment.
   - AWS Aurora DSQL: Dynamic connection pool with IAM authentication token rotation (15-minute token lifecycle)
 - Migrations use plain SQL and `sea-query`; avoid DSQL-incompatible DDL (see [`docs/research/dsql-vs-postgres.md`](./research/dsql-vs-postgres.md) and [`ADR-003`](./adr/ADR-003-aws-dsql-database.md)) so schemas run identically on standard PG and DSQL
 - The binary is configured entirely through environment variables — no AWS SDK calls outside `infrastructure`
+
+## Error Handling Architecture & HTTP Machinery
+
+In alignment with Hexagonal Architecture and DDD boundaries:
+
+1. **`domain`**: Defines `DomainError` capturing business rule and aggregate invariant violations. Strictly free of I/O, framework dependencies, or transport concepts.
+2. **`application`**: Defines `ApplicationError` and machine-readable enum codes (e.g. `ConflictCode`). Transport-agnostic; communicates *why* a use case failed along with contextual metadata (`details: Option<Value>`).
+3. **`infrastructure` (Driving Adapter)**: The HTTP web layer (Axum) is the sole owner of transport concerns. It maps `ApplicationError` and `DomainError` into [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) Problem Details (`application/problem+json`), assigns HTTP status codes (`StatusCode::CONFLICT`, `NOT_FOUND`, etc.), and implements `axum::response::IntoResponse`.
+
+*(Note: During early milestones, `ProblemDetails` and HTTP status mapping temporarily reside in `application::errors` as a transitional bridge; they will be moved to `infrastructure::http::errors` when the Axum routing adapter is implemented).*
 
 ## UI Layer (Admin Dashboard)
 

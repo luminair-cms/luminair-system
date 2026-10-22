@@ -65,10 +65,5 @@ pub fn admin_role() -> Role {
 
 /// Shorthand to package a map of fields into `DocumentContent` in Draft state.
 pub fn draft_content(fields: HashMap<AttributeId, ContentValue>) -> DocumentContent {
-    DocumentContent::new(
-        fields,
-        PublicationState::Draft {
-            last_published_revision: None,
-        },
-    )
+    DocumentContent::new(fields, PublicationState::Draft)
 }

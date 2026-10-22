@@ -272,6 +272,8 @@ pub struct RestoreSnapshotCommand {
     pub document_instance_id: DocumentInstanceId,
     pub document_type: &'static DocumentTypeId,
     pub revision: u32,
+    /// When true, allows restoring a snapshot even if the document currently has uncommitted working draft edits (`Modified` state).
+    pub discard_pending_edits: bool,
 }
 
 impl RestoreSnapshotCommand {
@@ -284,7 +286,13 @@ impl RestoreSnapshotCommand {
             document_instance_id,
             document_type,
             revision,
+            discard_pending_edits: false,
         }
+    }
+
+    pub fn with_discard_pending_edits(mut self) -> Self {
+        self.discard_pending_edits = true;
+        self
     }
 }
 

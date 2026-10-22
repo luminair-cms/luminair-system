@@ -130,14 +130,18 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 ### 4. Global Snapshot Store (`document_snapshots`)
 - Single static table recording immutable revision history across all content types.
 - Append-only inserts with UUIDv7 primary keys eliminate OCC serialization conflicts in DSQL.
+- Unique constraint `UNIQUE (document_type_id, document_id, revision)` guarantees an unambiguous, collision-free revision sequence.
 - Stores frozen JSONB representation of historical content and relations along with `reason VARCHAR(32)` (`SnapshotReason`):
   - `'publish'` (`SnapshotReason::Publish`): Created atomically during `publish` when a **previous** live version in `[type]` is superseded by a newly published revision (no snapshot is created on the first publish `revision = 1` because it is currently live in `[type]`).
-  - `'checkpoint'` (`SnapshotReason::Checkpoint`): Manual or automatic editorial savepoint of a working draft created without publishing to the wide table — automatically saved before `restore_snapshot` overwrites an in-progress `Modified` draft, or triggered manually via `DocumentSnapshotRepository::save_snapshot`.
   - `'unpublish'` (`SnapshotReason::Unpublish`): Created atomically during `unpublish` to archive the live published revision from `[type]` at the moment it is taken offline.
+- *(Checkpoints of working drafts are excluded; `restore_snapshot` from `Modified` requires explicit confirmation via `with_discard_pending_edits()`, otherwise returning `Conflict`)*.
 
 ---
 
 ## Lifecycle Workflows
+
+> [!TIP]
+> For the complete state diagram, the full transition matrix (every state × action, including errors, snapshot writes, and what each Admin tab shows), and worked scenarios (rollback vs. take-offline), see [`docs/content-lifecycle.md`](../content-lifecycle.md).
 
 ```
                      create()
@@ -172,6 +176,7 @@ At write time, the domain engine extracts **scalar** and **localized scalar** va
 - Inserts into `document_drafts` with `status = 'draft'`. The wide table is not touched.
 
 ### 2. Publication (`publish`)
+- Allowed only from `Draft`, `Modified`, or `Unpublished`. Publishing a clean `Published` document (no pending draft) is rejected with `Conflict` because there is nothing to publish (`DS-17`). There is no "force re-publish".
 - Verifies optimistic concurrency token (`expected_version` matches `draft.version`).
 - Validates draft against strict schema constraints (required fields, regex patterns, number ranges, target existence).
 - `DocumentInstanceRepository::publish` accepts `archived_snapshot: Option<&DocumentSnapshot>` (along with `instance`, `revision`, `display_values`, and `display_title`) so the wide table, `document_drafts`, and `document_snapshots` are mutated within a single atomic database transaction:

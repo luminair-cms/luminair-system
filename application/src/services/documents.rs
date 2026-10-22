@@ -536,19 +536,27 @@ where
 
         // Draft-and-publish guard (R7): only types that support publish/unpublish can be published
         if !doc_type.options.draft_and_publish {
-            return Err(ApplicationError::Conflict(format!(
-                "document type '{}' does not support draft-and-publish workflow",
-                doc_type.info.title
-            )));
+            return Err(ApplicationError::draft_publish_disabled_conflict(
+                &doc_type.info.title,
+            ));
+        }
+
+        // DS-17: publishing a clean `Published` document (no pending draft) is a no-op and rejected.
+        // Publishing is only meaningful from `Draft`, `Modified`, or `Unpublished`.
+        if matches!(
+            instance.content.publication_state,
+            PublicationState::Published { .. }
+        ) {
+            return Err(ApplicationError::already_published_conflict(instance.id));
         }
 
         if let Some(expected) = cmd.expected_version
             && instance.audit.version != expected
         {
-            return Err(ApplicationError::Conflict(format!(
-                "version mismatch: expected {expected}, found {}",
-                instance.audit.version
-            )));
+            return Err(ApplicationError::version_mismatch_conflict(
+                expected,
+                instance.audit.version,
+            ));
         }
 
         if let Err(errs) =
@@ -632,10 +640,9 @@ where
 
         // Draft-and-publish guard (R7): only types that support publish/unpublish can be unpublished
         if !doc_type.options.draft_and_publish {
-            return Err(ApplicationError::Conflict(format!(
-                "document type '{}' does not support draft-and-publish workflow",
-                doc_type.info.title
-            )));
+            return Err(ApplicationError::draft_publish_disabled_conflict(
+                &doc_type.info.title,
+            ));
         }
 
         let live_published = self
@@ -769,20 +776,21 @@ where
 
         let now = Utc::now();
 
-        // If in Modified state, save a Checkpoint snapshot of current uncommitted draft edits
-        if let PublicationState::Modified { draft_version, .. } = instance.content.publication_state {
-            let checkpoint = DocumentSnapshot {
-                id: SnapshotId::new(Uuid::now_v7()),
-                document_type_id: instance.document_type_id.clone(),
-                document_id: instance.id,
-                revision: draft_version,
-                fields: instance.fields().clone(),
-                relations: instance.relations.clone(),
-                created_at: now,
-                created_by: caller.actor.clone(),
-                reason: SnapshotReason::Checkpoint,
+        // If in Modified state, require explicit confirmation before overwriting pending working draft edits
+        if matches!(
+            instance.content.publication_state,
+            PublicationState::Modified { .. }
+        ) && !cmd.discard_pending_edits
+        {
+            let draft_version = match instance.content.publication_state {
+                PublicationState::Modified { draft_version, .. } => draft_version,
+                _ => instance.audit.version,
             };
-            self.snapshot_repo.save_snapshot(&checkpoint).await?;
+            return Err(ApplicationError::draft_overwrite_conflict(
+                instance.id,
+                cmd.revision,
+                draft_version,
+            ));
         }
 
         instance.restore_snapshot(&snapshot, caller.actor.clone(), now)?;
@@ -933,6 +941,7 @@ mod tests {
     use domain::test_support::{DocumentTypeBuilder, fixture_system_config, text_field};
     use uuid::Uuid;
 
+    use crate::errors::ConflictCode;
     use crate::test_support::FakeDocumentInstanceRepository;
 
     fn make_test_fixture(
@@ -1232,7 +1241,13 @@ mod tests {
             .await;
 
         assert!(
-            matches!(publish_result, Err(ApplicationError::Conflict(_))),
+            matches!(
+                publish_result,
+                Err(ApplicationError::Conflict {
+                    code: ConflictCode::DraftAndPublishDisabled,
+                    ..
+                })
+            ),
             "expected Conflict error when draft_and_publish=false, got: {:?}",
             publish_result
         );

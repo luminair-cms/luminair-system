@@ -73,7 +73,7 @@
 - **Origin**: `adr:004`
 - **Given**: A document type with `draft_and_publish: false` (`DraftPublishOff`).
 - **When**: A caller creates an instance (or updates it), or explicitly calls `publish` / `unpublish`.
-- **Then**: `create` immediately publishes at `revision: 1` and persists to the wide table, `update` immediately advances to `revision: 2`, while explicit calls to `service.publish(&caller, PublishDocumentCommand::new(instance_id, type_id))` or `service.unpublish(&caller, UnpublishDocumentCommand::new(instance_id, type_id))` return `Err(ApplicationError::Conflict(msg))` containing `"does not support draft-and-publish"`.
+- **Then**: `create` immediately publishes at `revision: 1` and persists to the wide table, `update` immediately advances to `revision: 2`, while explicit calls to `service.publish(&caller, PublishDocumentCommand::new(instance_id, type_id))` or `service.unpublish(&caller, UnpublishDocumentCommand::new(instance_id, type_id))` return `Err(ApplicationError::Conflict { code: ConflictCode::DraftAndPublishDisabled, .. })` containing `"does not support draft-and-publish"`.
 
 ### DS-08 — Unpublish Transitions to Unpublished with Last Revision
 - **Status**: `Approved`
@@ -119,10 +119,12 @@
 
 ### DS-14 — Restore Snapshot Loads Historical Revision to Draft
 - **Status**: `Approved`
-- **Origin**: `adr:004`
+- **Origin**: `adr:004` (updated decision 2026-10-22, Q1/Q2)
 - **Given**: An existing published document instance with historical revision `1` in `document_snapshots` (superseded by revision `2` under archive-on-replace) and optional in-progress edits in `document_drafts`.
-- **When**: Authorized caller invokes `service.restore_snapshot(&caller, RestoreSnapshotCommand::new(instance_id, type_id, 1)).await`.
-- **Then**: If the document was in `Modified` state with pending draft edits, automatically creates a `SnapshotReason::Checkpoint` snapshot (with `revision: draft_version`) saving in-progress draft edits to `document_snapshots` before overwriting; restores content matching revision `1` into the working draft, marks draft status as `Modified` (or `Unpublished` if offline), and touches the audit trail; subsequent `FindByIdCommand` with `VersionView::Working` returns the restored draft (`revision 1` content), while default `VersionView::Published` continues returning the live published revision (`revision 2`).
+- **When**: Authorized caller invokes `service.restore_snapshot(&caller, cmd).await`:
+  - If the document is in `Draft` state (never published): returns `Err(ApplicationError::Domain(DomainError::InvalidStateTransition { .. }))` (`LC-13`).
+  - If the document is in `Modified` state with pending draft edits, and `cmd.discard_pending_edits` is `false`: returns `Err(ApplicationError::Conflict { code: ConflictCode::DraftHasPendingEdits, .. })` containing `"overwrite pending"`.
+  - When confirmed with `cmd.discard_pending_edits == true` (or from clean `Published` state): restores content matching revision `1` into the working draft without creating checkpoints, marks draft status as `Modified` (or `Unpublished` if offline), and touches the audit trail; subsequent `FindByIdCommand` with `VersionView::Working` returns the restored draft (`revision 1` content), while default `VersionView::Published` continues returning the live published revision (`revision 2`).
 
 ### DS-15 — List Admin Headers Returns Lightweight Projections
 - **Status**: `Approved`
@@ -139,6 +141,14 @@
   - With `UnpublishDraftResolution::KeepDraft` (default): keeps the working draft fields and relations in `VersionView::Working` while transitioning state to `PublicationState::Unpublished`, and archives the live published revision to `document_snapshots` (`SnapshotReason::Unpublish`).
   - With `UnpublishDraftResolution::ReplaceWithPublished`: replaces the working draft fields and relations with the live published revision content before transitioning state to `PublicationState::Unpublished`, and archives the live published revision to `document_snapshots` (`SnapshotReason::Unpublish`).
 - **Then**: In both cases, the live published row is removed from the wide table (`VersionView::Published` returns `None`), and `VersionView::Working` returns the instance in `Unpublished` state.
+
+### DS-17 — Publish Rejects Already Published Document Without Pending Changes
+- **Status**: `Approved`
+- **Origin**: `human` (decision 2026-10-22, see [`docs/content-lifecycle.md`](../../content-lifecycle.md))
+- **Given**: An existing document of a `DraftPublishOn` type in clean `Published { revision: 1, .. }` state (no pending draft; `has_pending_draft == false`).
+- **When**: Authorized caller invokes `service.publish(&caller, PublishDocumentCommand::new(instance_id, type_id)).await`.
+- **Then**: Returns `Err(ApplicationError::Conflict { code: ConflictCode::AlreadyPublished, .. })` containing `"already published"`; the live revision stays `1`, the audit version is unchanged, and no snapshot is created.
+- **Notes**: "Force re-publish" is intentionally not supported. Publishing is only meaningful from `Draft`, `Modified`, or `Unpublished`. The domain method `DocumentInstance::publish` still accepts `Published` because single-lifecycle types (`draft_and_publish: false`) use it for live updates (`DS-07`); the guard is a workflow policy of the draft-and-publish use case.
 
 ---
 

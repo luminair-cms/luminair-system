@@ -15,9 +15,11 @@ Read in this order:
 1. [`README.md`](./README.md) — what, why, quick-start
 2. [`docs/architecture.md`](./docs/architecture.md) — crate layout, hexagonal architecture, DDD
 3. [`docs/design-infrastructure-persistence.md`](./docs/design-infrastructure-persistence.md) — persistence design and DSQL patterns
-4. [`docs/ui-architecture.md`](./docs/ui-architecture.md) — admin studio UI architecture
+4. [`docs/content-lifecycle.md`](./docs/content-lifecycle.md) — document states, publish/unpublish/restore semantics, snapshot rules (diagrams + full transition matrix)
+5. [`docs/ui-architecture.md`](./docs/ui-architecture.md) — admin studio UI architecture
+6. [`docs/api.md`](./docs/api.md) — REST API endpoints, canonical RFC 9457 error schema, and UI localization guide
 
-*(Note: `docs/roadmap.md`, `docs/data-model.md`, and `docs/api.md` are planned milestone artifacts).*
+*(Note: `docs/roadmap.md` and `docs/data-model.md` are planned milestone artifacts).*
 
 ## 2. Load Skills Before Acting
 
@@ -43,6 +45,7 @@ Read in this order:
 | [ADR-002](./docs/adr/ADR-002-hexagonal-architecture.md) | Hexagonal Architecture and DDD Crate Layout | Accepted |
 | [ADR-003](./docs/adr/ADR-003-aws-dsql-database.md) | AWS Aurora DSQL with PostgreSQL Portability | Accepted |
 | [ADR-004](./docs/adr/ADR-004-draft-and-publish-table-pattern.md) | Asymmetric Hybrid Draft-and-Publish Persistence Pattern | Accepted |
+| [ADR-005](./docs/adr/ADR-005-trash-undelete-and-retention.md) | Trash, Undelete & Retention Architecture | Proposed |
 
 ## 4. Mandatory Workflow Rules
 

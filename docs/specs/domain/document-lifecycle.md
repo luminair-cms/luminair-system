@@ -5,6 +5,10 @@
 - **Unit under test**: `domain::content::DocumentInstance`
 - **Format**: `T` (case table)
 - **Test target**: `domain/tests/lc_document_lifecycle.rs`
+- **Explainer**: [`docs/content-lifecycle.md`](../../content-lifecycle.md) (diagrams and full state × action matrix, including application-level guards)
+
+> [!NOTE]
+> These rules cover the **aggregate** only. `LC-02` (`Published → publish`) is valid at the domain level because single-lifecycle types (`draft_and_publish: false`) advance the live revision on every save. For draft-and-publish types, the application rejects it (`DS-17`).
 
 ---
 
@@ -12,7 +16,7 @@
 
 | Term | Meaning / API symbol | Concrete representation |
 |---|---|---|
-| `Draft(None)` | Fresh draft never published | `PublicationState::Draft { last_published_revision: None }` |
+| `Draft` | Fresh draft never published | `PublicationState::Draft` |
 | `Published(N)` | Published at revision `N` | `PublicationState::Published { revision: N, published_at, published_by }` |
 | `Modified(N, V)` | Published at revision `N` with pending draft version `V` | `PublicationState::Modified { live_revision: N, published_at, published_by, draft_version: V }` |
 | `Unpublished(N)` | Unpublished content with historical revision `N` | `PublicationState::Unpublished { last_published_revision: N, unpublished_at, unpublished_by }` |
@@ -31,18 +35,19 @@
 
 | ID | Status | Origin | Given State | Action / Input | Expected Result / Next State |
 |---|---|---|---|---|---|
-| `LC-01` | `Approved` | `adr:004` | `Draft(None)`, `Version(1)` | `Publish(Actor("alice"), T1)` | `Ok(1)`, `Published(1)`, `Version(2)`, `updated_by == Actor("alice")` |
+| `LC-01` | `Approved` | `adr:004` | `Draft`, `Version(1)` | `Publish(Actor("alice"), T1)` | `Ok(1)`, `Published(1)`, `Version(2)`, `updated_by == Actor("alice")` |
 | `LC-02` | `Approved` | `adr:004` | `Published(1)`, `Version(2)` | `Publish(Actor("bob"), T2)` | `Ok(2)`, `Published(2)`, `Version(3)`, `updated_by == Actor("bob")` |
 | `LC-03` | `Approved` | `adr:004` | `Published(1)`, `Version(2)` | `Unpublish(Actor("charlie"), T2)` | `Ok(())`, `Unpublished(1)`, `Version(3)`, `updated_by == Actor("charlie")` |
 | `LC-04` | `Approved` | `adr:004` | `Unpublished(1)`, `Version(3)` | `Publish(Actor("alice"), T3)` | `Ok(2)`, `Published(2)`, `Version(4)`, `updated_by == Actor("alice")` |
-| `LC-05` | `Approved` | `adr:004` | `Draft(None)`, `Version(1)` | `Unpublish(Actor("alice"), T1)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(1)` |
+| `LC-05` | `Approved` | `adr:004` | `Draft`, `Version(1)` | `Unpublish(Actor("alice"), T1)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(1)` |
 | `LC-06` | `Approved` | `adr:004` | `Unpublished(1)`, `Version(3)` | `Unpublish(Actor("bob"), T4)` | `Err(DomainError::InvalidStateTransition)`, state unchanged, `Version(3)` |
-| `LC-07` | `Approved` | `adr:004` | (none) | `new(type, Actor("alice"), T0)` | `Draft(None)`, `Version(1)`, `created_by == Actor("alice")`, `updated_by == Actor("alice")` |
+| `LC-07` | `Approved` | `adr:004` | (none) | `new(type, Actor("alice"), T0)` | `Draft`, `Version(1)`, `created_by == Actor("alice")`, `updated_by == Actor("alice")` |
 | `LC-08` | `Approved` | `adr:004` | `observed` | Any instance with `Version(V)` | `Touch(Actor("bob"), T1)` | `audit.version == V + 1`, `audit.updated_by == Actor("bob")`, `audit.updated_at == T1` |
 | `LC-09` | `Approved` | `adr:004` | `Published(1)`, `Version(2)` | `EditDraft(Actor("alice"), T3)` | `Modified(1)`, `Version(3)`, `updated_by == Actor("alice")` |
 | `LC-10` | `Approved` | `adr:004` | `Modified(1)`, `Version(3)` | `DiscardDraft()` | `Published(1)`, `Version(3)` |
-| `LC-11` | `Approved` | `adr:004` | `Draft(None)`, `Version(1)` | `DiscardDraft()` | `Err(DomainError::InvalidStateTransition)` |
+| `LC-11` | `Approved` | `adr:004` | `Draft`, `Version(1)` | `DiscardDraft()` | `Err(DomainError::InvalidStateTransition)` |
 | `LC-12` | `Approved` | `adr:004` | `Published(2)`, `Version(4)` | `RestoreSnapshot(Rev1, T5)` | `Modified(2)`, `Version(5)` |
+| `LC-13` | `Approved` | `human` | `Draft`, `Version(1)` | `RestoreSnapshot(Rev1, T1)` | `Err(DomainError::InvalidStateTransition)` |
 
 ---
 

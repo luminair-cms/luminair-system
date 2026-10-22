@@ -41,6 +41,7 @@ dependencies = [
  "domain",
  "indexmap",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "uuid",
