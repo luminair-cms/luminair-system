@@ -301,11 +301,7 @@ where
 
         // Two-phase batch relation enrichment
         let enriched = self
-            .enrich(
-                cmd.document_type,
-                cmd.populate.as_deref().unwrap_or_default(),
-                page.items,
-            )
+            .enrich(cmd.document_type, &cmd.populate, page.items)
             .await?;
 
         Ok((enriched, count))
@@ -328,11 +324,7 @@ where
                     Some(&inst),
                 )?;
                 let mut enriched = self
-                    .enrich(
-                        cmd.document_type,
-                        cmd.populate.as_deref().unwrap_or_default(),
-                        vec![inst],
-                    )
+                    .enrich(cmd.document_type, &cmd.populate, vec![inst])
                     .await?;
                 Ok(enriched.pop())
             }
@@ -404,10 +396,9 @@ where
                 .await?;
         }
 
-        let populate = cmd.populate.as_deref().unwrap_or_default();
-        if !populate.is_empty() {
+        if !cmd.populate.is_empty() {
             let mut enriched = self
-                .enrich(cmd.document_type, populate, vec![instance])
+                .enrich(cmd.document_type, &cmd.populate, vec![instance])
                 .await?;
             let doc = enriched.pop().ok_or_else(|| {
                 ApplicationError::Internal("enriched instance missing from batch result".into())
@@ -517,10 +508,9 @@ where
                 .await?;
         }
 
-        let populate = cmd.populate.as_deref().unwrap_or_default();
-        if !populate.is_empty() {
+        if !cmd.populate.is_empty() {
             let mut enriched = self
-                .enrich(cmd.document_type, populate, vec![instance])
+                .enrich(cmd.document_type, &cmd.populate, vec![instance])
                 .await?;
             let doc = enriched.pop().ok_or_else(|| {
                 ApplicationError::Internal("enriched instance missing from batch result".into())

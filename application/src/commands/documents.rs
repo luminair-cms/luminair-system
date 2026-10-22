@@ -17,8 +17,8 @@ pub struct FindDocumentsCommand {
     pub view: VersionView,
     /// Field filters to apply.
     pub filters: Vec<FieldFilter>,
-    /// Optional list of relation attribute IDs to populate in the returned documents.
-    pub populate: Option<Vec<AttributeId>>,
+    /// List of relation attribute IDs to populate in the returned documents.
+    pub populate: Vec<AttributeId>,
 }
 
 impl FindDocumentsCommand {
@@ -28,7 +28,7 @@ impl FindDocumentsCommand {
             pagination,
             view: VersionView::Working,
             filters: Vec::new(),
-            populate: None,
+            populate: Vec::new(),
         }
     }
 
@@ -43,7 +43,7 @@ impl FindDocumentsCommand {
     }
 
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
-        self.populate = Some(populate);
+        self.populate = populate;
         self
     }
 }
@@ -57,8 +57,8 @@ pub struct FindByIdCommand {
     pub document_instance_id: DocumentInstanceId,
     /// Lifecycle representation to retrieve (`Published` by default, or `Working` for the Admin draft tab).
     pub view: VersionView,
-    /// Optional list of relation attribute IDs to populate in the returned document.
-    pub populate: Option<Vec<AttributeId>>,
+    /// List of relation attribute IDs to populate in the returned document.
+    pub populate: Vec<AttributeId>,
 }
 
 impl FindByIdCommand {
@@ -70,7 +70,7 @@ impl FindByIdCommand {
             document_type,
             document_instance_id,
             view: VersionView::default(),
-            populate: None,
+            populate: Vec::new(),
         }
     }
 
@@ -80,7 +80,7 @@ impl FindByIdCommand {
     }
 
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
-        self.populate = Some(populate);
+        self.populate = populate;
         self
     }
 }
@@ -107,8 +107,8 @@ pub struct CreateDocumentCommand {
     pub fields: HashMap<AttributeId, ContentValue>,
     /// Relational mutations keyed by attribute ID.
     pub relations: HashMap<AttributeId, RelationAction>,
-    /// Optional list of relation attribute IDs to populate in the returned document.
-    pub populate: Option<Vec<AttributeId>>,
+    /// List of relation attribute IDs to populate in the returned document.
+    pub populate: Vec<AttributeId>,
 }
 
 impl CreateDocumentCommand {
@@ -120,7 +120,7 @@ impl CreateDocumentCommand {
             document_type,
             fields,
             relations: HashMap::new(),
-            populate: None,
+            populate: Vec::new(),
         }
     }
 
@@ -130,7 +130,7 @@ impl CreateDocumentCommand {
     }
 
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
-        self.populate = Some(populate);
+        self.populate = populate;
         self
     }
 }
@@ -146,8 +146,8 @@ pub struct UpdateDocumentCommand {
     pub fields: HashMap<AttributeId, ContentValue>,
     /// Relational mutations keyed by attribute ID.
     pub relations: HashMap<AttributeId, RelationAction>,
-    /// Optional list of relation attribute IDs to populate in the returned document.
-    pub populate: Option<Vec<AttributeId>>,
+    /// List of relation attribute IDs to populate in the returned document.
+    pub populate: Vec<AttributeId>,
     /// Expected version for optimistic concurrency control (OCC).
     pub expected_version: Option<u32>,
 }
@@ -163,7 +163,7 @@ impl UpdateDocumentCommand {
             document_type,
             fields,
             relations: HashMap::new(),
-            populate: None,
+            populate: Vec::new(),
             expected_version: None,
         }
     }
@@ -179,7 +179,7 @@ impl UpdateDocumentCommand {
     }
 
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
-        self.populate = Some(populate);
+        self.populate = populate;
         self
     }
 }
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(cmd.document_type, type_id);
         assert_eq!(cmd.pagination, Pagination::default());
         assert_eq!(cmd.view, VersionView::Working);
-        assert_eq!(cmd.populate, Some(vec![attr]));
+        assert_eq!(cmd.populate, vec![attr]);
         assert!(cmd.filters.is_empty());
 
         let pub_cmd = FindDocumentsCommand::new(type_id, Pagination::default())
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(cmd.document_type, type_id);
         assert_eq!(cmd.document_instance_id, id);
         assert_eq!(cmd.view, VersionView::Published);
-        assert_eq!(cmd.populate, Some(vec![attr]));
+        assert_eq!(cmd.populate, vec![attr]);
 
         let working_cmd = FindByIdCommand::new(type_id, id).with_view(VersionView::Working);
         assert_eq!(working_cmd.view, VersionView::Working);
