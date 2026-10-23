@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::auth::ActorId;
 use crate::content::instance::{DocumentInstanceId, PublicationState, ResolvedRelation};
-use crate::content::values::{format_display_title, ContentValue};
+use crate::content::values::{ContentValue, format_display_title};
 use crate::schema::{AttributeId, DocumentTypeId};
 
 /// Specifies which lifecycle representation of a single document instance to retrieve.
@@ -81,12 +81,12 @@ impl DocumentHeader {
         &mut self,
         effective_fields: &[AttributeId],
         rel_attr: &AttributeId,
-        target_title: String,
+        target_title: &str,
     ) {
         let mut rebuilt = IndexMap::with_capacity(effective_fields.len());
         for field_id in effective_fields {
             if field_id == rel_attr {
-                rebuilt.insert(field_id.clone(), target_title.clone());
+                rebuilt.insert(field_id.clone(), target_title.to_string());
             } else if let Some(val) = self.display_values.swap_remove(field_id) {
                 rebuilt.insert(field_id.clone(), val);
             }
@@ -190,7 +190,10 @@ mod tests {
             unpublished_at: now,
             unpublished_by: actor,
         };
-        assert_eq!(DocumentStatus::from(&unpublished), DocumentStatus::Unpublished);
+        assert_eq!(
+            DocumentStatus::from(&unpublished),
+            DocumentStatus::Unpublished
+        );
     }
 
     #[test]
@@ -258,7 +261,7 @@ mod tests {
         };
 
         let effective_fields = vec![title_attr.clone(), author_attr.clone()];
-        header.enrich_relational_display(&effective_fields, &author_attr, "Jane Doe".to_string());
+        header.enrich_relational_display(&effective_fields, &author_attr, "Jane Doe");
 
         assert_eq!(
             header.display_values.get(&title_attr),
@@ -295,8 +298,7 @@ mod tests {
 
         let json_keep = serde_json::to_string(&UnpublishDraftResolution::KeepDraft).unwrap();
         assert_eq!(json_keep, "\"keep_draft\"");
-        let deserialized_keep: UnpublishDraftResolution =
-            serde_json::from_str(&json_keep).unwrap();
+        let deserialized_keep: UnpublishDraftResolution = serde_json::from_str(&json_keep).unwrap();
         assert_eq!(deserialized_keep, UnpublishDraftResolution::KeepDraft);
 
         let json_replace =

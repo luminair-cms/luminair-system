@@ -5,17 +5,20 @@
 //! - B-Tree indexes for lifecycle ordering and unique constraints.
 //! - Relational junction link tables for relations with cascading foreign keys.
 
-use domain::schema::{DocumentKind, DocumentType, FieldType, IntegerSize, PrimitiveType, RelationDefinition, SchemaRegistry};
+use domain::schema::{
+    DocumentKind, DocumentType, FieldType, IntegerSize, PrimitiveType, RelationDefinition,
+    SchemaRegistry,
+};
 
 use super::model::{
     ColumnDefinition, DatabaseSchema, ForeignKeyAction, ForeignKeyDefinition, IndexDefinition,
     SqlColumnType, TableDefinition, TableKind,
 };
 use crate::persistence::naming::{
-    column_name, junction_table_name, kebab_to_snake, table_name_for_document_type,
     COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES, COL_HAS_PENDING_DRAFT,
     COL_ID, COL_ORDER_INDEX, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_REVISION, COL_SOURCE_ID,
-    COL_TARGET_ID, COL_UPDATED_AT, COL_UPDATED_BY,
+    COL_TARGET_ID, COL_UPDATED_AT, COL_UPDATED_BY, column_name, junction_table_name,
+    kebab_to_snake, table_name_for_document_type,
 };
 
 // ---------------------------------------------------------------------------
@@ -23,6 +26,7 @@ use crate::persistence::naming::{
 // ---------------------------------------------------------------------------
 
 /// Builds the desired `DatabaseSchema` AST projection from the domain `SchemaRegistry`.
+#[must_use]
 pub fn build_desired_schema(registry: &SchemaRegistry) -> DatabaseSchema {
     let mut schema = DatabaseSchema::new();
     let mut link_tables = Vec::new();
@@ -44,6 +48,7 @@ pub fn build_desired_schema(registry: &SchemaRegistry) -> DatabaseSchema {
 }
 
 /// Builds the desired table definitions for a single `DocumentType`.
+#[must_use]
 pub fn build_document_type_tables(
     doc_type: &DocumentType,
     registry: &SchemaRegistry,
@@ -111,7 +116,7 @@ fn append_standard_lifecycle_columns(table: &mut TableDefinition) {
 fn append_user_field_columns(table: &mut TableDefinition, doc_type: &DocumentType) {
     for field in &doc_type.fields {
         let col_name = column_name(&field.id);
-        let data_type = field_type_to_sql_column_type(&field.field_type);
+        let data_type = field_type_to_sql_column_type(field.field_type);
         table.columns.insert(ColumnDefinition {
             name: col_name,
             data_type,
@@ -188,11 +193,7 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
     });
 }
 
-fn append_standard_indexes(
-    table: &mut TableDefinition,
-    table_name: &str,
-    doc_type: &DocumentType,
-) {
+fn append_standard_indexes(table: &mut TableDefinition, table_name: &str, doc_type: &DocumentType) {
     table.indexes.insert(IndexDefinition::new(
         format!("idx_{table_name}_{COL_PUBLISHED_AT}"),
         table_name,
@@ -220,10 +221,7 @@ fn append_standard_indexes(
     }
 }
 
-fn build_link_tables(
-    doc_type: &DocumentType,
-    registry: &SchemaRegistry,
-) -> Vec<TableDefinition> {
+fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<TableDefinition> {
     let source_table = table_name_for_document_type(doc_type);
     let mut link_tables = Vec::new();
 
@@ -291,13 +289,13 @@ fn build_link_tables(
 }
 
 fn resolve_target_table(relation: &RelationDefinition, registry: &SchemaRegistry) -> String {
-    registry
-        .get(&relation.target)
-        .map(table_name_for_document_type)
-        .unwrap_or_else(|| kebab_to_snake(relation.target.as_ref()))
+    registry.get(&relation.target).map_or_else(
+        || kebab_to_snake(relation.target.as_ref()),
+        table_name_for_document_type,
+    )
 }
 
-fn field_type_to_sql_column_type(field_type: &FieldType) -> SqlColumnType {
+fn field_type_to_sql_column_type(field_type: FieldType) -> SqlColumnType {
     match field_type {
         FieldType::Primitive(prim) => match prim {
             PrimitiveType::Uid => SqlColumnType::Varchar(Some(255)),
@@ -308,17 +306,14 @@ fn field_type_to_sql_column_type(field_type: &FieldType) -> SqlColumnType {
                 IntegerSize::I32 => SqlColumnType::Integer,
                 IntegerSize::I64 => SqlColumnType::BigInt,
             },
-            PrimitiveType::Decimal { precision, scale } => {
-                SqlColumnType::Decimal(*precision, *scale)
-            }
+            PrimitiveType::Decimal { precision, scale } => SqlColumnType::Decimal(precision, scale),
             PrimitiveType::Date => SqlColumnType::Date,
             PrimitiveType::DateTime => SqlColumnType::Timestamptz,
             PrimitiveType::Boolean => SqlColumnType::Boolean,
         },
         FieldType::Email => SqlColumnType::Varchar(Some(320)),
         FieldType::Url => SqlColumnType::Text,
-        FieldType::Json => SqlColumnType::Jsonb,
-        FieldType::LocalizedText => SqlColumnType::Jsonb,
+        FieldType::Json | FieldType::LocalizedText => SqlColumnType::Jsonb,
     }
 }
 
@@ -329,12 +324,12 @@ fn field_type_to_sql_column_type(field_type: &FieldType) -> SqlColumnType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use domain::common::DisplayName;
     use domain::schema::{
         AttributeId, DocumentKind, DocumentTypeId, DocumentTypeInfo, DocumentTypeOptions,
         FieldDefinition, RelationType,
     };
+    use std::collections::HashSet;
 
     fn make_test_doc_type(
         id: &str,
@@ -406,8 +401,17 @@ mod tests {
         assert!(link.find_column("source_id").is_some());
         assert!(link.find_column("target_id").is_some());
         assert!(link.find_column("order_index").is_some());
-        assert!(link.find_foreign_key("fk_articles_tags_links_source").is_some());
-        assert!(link.find_foreign_key("fk_articles_tags_links_target").is_some());
-        assert!(link.find_index("idx_articles_tags_links_target_id").is_some());
+        assert!(
+            link.find_foreign_key("fk_articles_tags_links_source")
+                .is_some()
+        );
+        assert!(
+            link.find_foreign_key("fk_articles_tags_links_target")
+                .is_some()
+        );
+        assert!(
+            link.find_index("idx_articles_tags_links_target_id")
+                .is_some()
+        );
     }
 }

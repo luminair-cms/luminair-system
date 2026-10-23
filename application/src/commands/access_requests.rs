@@ -15,6 +15,7 @@ pub struct SubmitAccessRequestCommand {
 }
 
 impl SubmitAccessRequestCommand {
+    #[must_use]
     pub fn new(user_id: UserId, email: Option<Email>, name: Option<DisplayName>) -> Self {
         Self {
             user_id,
@@ -34,6 +35,7 @@ pub struct ApproveAccessRequestCommand {
 }
 
 impl ApproveAccessRequestCommand {
+    #[must_use]
     pub fn new(request_id: AccessRequestId, role_ids: Vec<RoleId>) -> Self {
         Self {
             request_id,
@@ -52,6 +54,7 @@ pub struct RejectAccessRequestCommand {
 }
 
 impl RejectAccessRequestCommand {
+    #[must_use]
     pub fn new(request_id: AccessRequestId, reason: Option<String>) -> Self {
         Self { request_id, reason }
     }

@@ -11,6 +11,7 @@ impl AuthorizationService {
     ///    where authors cannot self-publish.
     /// 2. RBAC (evaluation across all assigned roles).
     /// 3. Default DENY.
+    #[must_use]
     pub fn can(
         user_id: &UserId,
         action: &Permission,
@@ -39,6 +40,7 @@ impl AuthorizationService {
     /// - If `actor.is_system()`, returns `true`.
     /// - If `actor.as_user()`, delegates to `Self::can(user_id, action, instance, roles)`.
     /// - If `ActorId::Service(_)`, evaluates RBAC across `roles`.
+    #[must_use]
     pub fn can_actor(
         actor: &ActorId,
         action: &Permission,

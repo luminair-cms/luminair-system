@@ -1,10 +1,12 @@
-use std::collections::HashSet;
 use indexmap::IndexSet;
 use rust_decimal::Decimal;
+use std::collections::HashSet;
 
 use super::ids::{test_attr_id, test_doc_type_id};
 use crate::common::DisplayName;
-use crate::schema::attributes::{AttributeId, FieldConstraint, FieldDefinition, RelationDefinition};
+use crate::schema::attributes::{
+    AttributeId, FieldConstraint, FieldDefinition, RelationDefinition,
+};
 use crate::schema::documents::{
     DocumentKind, DocumentType, DocumentTypeId, DocumentTypeInfo, DocumentTypeOptions,
 };
@@ -158,7 +160,8 @@ impl FieldDefinitionBuilder {
     }
 
     pub fn pattern(mut self, regex_pattern: RegexPattern) -> Self {
-        self.constraints.insert(FieldConstraint::Pattern(regex_pattern));
+        self.constraints
+            .insert(FieldConstraint::Pattern(regex_pattern));
         self
     }
 

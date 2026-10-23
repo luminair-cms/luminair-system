@@ -121,11 +121,18 @@ fn test_document_lifecycle_cases() {
         };
 
         if !passed {
-            failures.push(format!("{}: expected matching outcome, got {:?}", case.id, res));
+            failures.push(format!(
+                "{}: expected matching outcome, got {:?}",
+                case.id, res
+            ));
         }
     }
 
-    assert!(failures.is_empty(), "Failed cases:\n- {}", failures.join("\n- "));
+    assert!(
+        failures.is_empty(),
+        "Failed cases:\n- {}",
+        failures.join("\n- ")
+    );
 }
 
 #[test]
@@ -166,7 +173,10 @@ fn lc_13_restore_snapshot_on_draft_fails() {
     };
 
     let res = inst.restore_snapshot(&snap, alice, now);
-    assert!(matches!(res, Err(DomainError::InvalidStateTransition { .. })));
+    assert!(matches!(
+        res,
+        Err(DomainError::InvalidStateTransition { .. })
+    ));
     assert_eq!(inst.audit.version, 1);
     assert_eq!(inst.content.publication_state, PublicationState::Draft);
 }
@@ -238,7 +248,10 @@ fn lc_11_discard_draft_on_draft_fails() {
     assert_eq!(inst.audit.version, 1);
 
     let res = inst.discard_draft();
-    assert!(matches!(res, Err(DomainError::InvalidStateTransition { .. })));
+    assert!(matches!(
+        res,
+        Err(DomainError::InvalidStateTransition { .. })
+    ));
     assert_eq!(inst.audit.version, 1);
 }
 

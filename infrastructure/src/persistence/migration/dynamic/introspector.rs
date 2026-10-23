@@ -35,9 +35,10 @@ pub const SYSTEM_TABLES: &[&str] = &[
 // ---------------------------------------------------------------------------
 
 /// Introspects the live database and returns the current actual `DatabaseSchema` AST.
-pub async fn introspect_database_schema(
-    pool: &PgPool,
-) -> Result<DatabaseSchema, PersistenceError> {
+///
+/// # Errors
+/// Returns [`PersistenceError`] if database queries fail.
+pub async fn introspect_database_schema(pool: &PgPool) -> Result<DatabaseSchema, PersistenceError> {
     let candidate_tables = fetch_candidate_tables(pool).await?;
     if candidate_tables.is_empty() {
         return Ok(DatabaseSchema::new());
@@ -48,12 +49,12 @@ pub async fn introspect_database_schema(
     let indexes_by_table = fetch_indexes(pool).await?;
     let fks_by_table = fetch_foreign_keys(pool).await?;
 
-    assemble_schema(
+    Ok(assemble_schema(
         candidate_tables,
         columns_by_table,
         indexes_by_table,
         fks_by_table,
-    )
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -62,13 +63,13 @@ pub async fn introspect_database_schema(
 
 async fn fetch_candidate_tables(pool: &PgPool) -> Result<Vec<String>, PersistenceError> {
     let rows: Vec<(String,)> = sqlx::query_as(
-        r#"
+        r"
         SELECT table_name::TEXT
         FROM information_schema.tables
         WHERE table_schema = 'public'
           AND table_type = 'BASE TABLE'
         ORDER BY table_name;
-        "#,
+        ",
     )
     .fetch_all(pool)
     .await?;
@@ -86,7 +87,7 @@ async fn fetch_primary_keys(
     pool: &PgPool,
 ) -> Result<HashMap<String, HashSet<String>>, PersistenceError> {
     let rows: Vec<(String, String)> = sqlx::query_as(
-        r#"
+        r"
         SELECT
             tc.table_name::TEXT,
             kcu.column_name::TEXT
@@ -96,7 +97,7 @@ async fn fetch_primary_keys(
          AND tc.table_schema = kcu.table_schema
         WHERE tc.constraint_type = 'PRIMARY KEY'
           AND tc.table_schema = 'public';
-        "#,
+        ",
     )
     .fetch_all(pool)
     .await?;
@@ -124,7 +125,7 @@ async fn fetch_columns(
     pk_map: &HashMap<String, HashSet<String>>,
 ) -> Result<HashMap<String, IndexSet<ColumnDefinition>>, PersistenceError> {
     let rows: Vec<RawColumnRow> = sqlx::query_as(
-        r#"
+        r"
         SELECT
             table_name::TEXT,
             column_name::TEXT,
@@ -137,7 +138,7 @@ async fn fetch_columns(
         FROM information_schema.columns
         WHERE table_schema = 'public'
         ORDER BY table_name, ordinal_position;
-        "#,
+        ",
     )
     .fetch_all(pool)
     .await?;
@@ -148,13 +149,9 @@ async fn fetch_columns(
             continue;
         }
 
-        let sql_type = SqlColumnType::from_information_schema(
-            &data_type,
-            char_len,
-            num_prec,
-            num_scale,
-        )
-        .unwrap_or(SqlColumnType::Text);
+        let sql_type =
+            SqlColumnType::from_information_schema(&data_type, char_len, num_prec, num_scale)
+                .unwrap_or(SqlColumnType::Text);
 
         let is_pk = pk_map.get(&tbl).is_some_and(|set| set.contains(&col_name));
         let nullable = is_nullable.eq_ignore_ascii_case("YES");
@@ -178,7 +175,7 @@ async fn fetch_indexes(
     pool: &PgPool,
 ) -> Result<HashMap<String, IndexSet<IndexDefinition>>, PersistenceError> {
     let rows: Vec<(String, String, String)> = sqlx::query_as(
-        r#"
+        r"
         SELECT
             tablename::TEXT,
             indexname::TEXT,
@@ -186,7 +183,7 @@ async fn fetch_indexes(
         FROM pg_indexes
         WHERE schemaname = 'public'
         ORDER BY tablename, indexname;
-        "#,
+        ",
     )
     .fetch_all(pool)
     .await?;
@@ -234,7 +231,7 @@ async fn fetch_foreign_keys(
     pool: &PgPool,
 ) -> Result<HashMap<String, IndexSet<ForeignKeyDefinition>>, PersistenceError> {
     let rows: Vec<RawFkRow> = sqlx::query_as(
-        r#"
+        r"
         SELECT
             tc.table_name::TEXT,
             tc.constraint_name::TEXT,
@@ -254,7 +251,7 @@ async fn fetch_foreign_keys(
          AND rc.unique_constraint_schema = ccu.table_schema
         WHERE tc.constraint_type = 'FOREIGN KEY'
           AND tc.table_schema = 'public';
-        "#,
+        ",
     )
     .fetch_all(pool)
     .await?;
@@ -292,7 +289,7 @@ fn assemble_schema(
     mut columns_by_table: HashMap<String, IndexSet<ColumnDefinition>>,
     mut indexes_by_table: HashMap<String, IndexSet<IndexDefinition>>,
     mut fks_by_table: HashMap<String, IndexSet<ForeignKeyDefinition>>,
-) -> Result<DatabaseSchema, PersistenceError> {
+) -> DatabaseSchema {
     let mut schema = DatabaseSchema::new();
 
     for table_name in candidate_tables {
@@ -317,7 +314,7 @@ fn assemble_schema(
         schema.insert_table(table);
     }
 
-    Ok(schema)
+    schema
 }
 
 // ---------------------------------------------------------------------------

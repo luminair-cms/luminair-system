@@ -21,6 +21,10 @@ pub const DEFAULT_MAX_DELAY_MS: u64 = 500;
 // ---------------------------------------------------------------------------
 
 /// Wraps an asynchronous operation in an OCC retry loop using default retry settings.
+///
+/// # Errors
+/// Returns [`PersistenceError::OccConflictExhausted`] if retry budget is depleted,
+/// or bubbles up non-retryable errors immediately.
 pub async fn with_occ_retry<F, Fut, T>(op: F) -> Result<T, PersistenceError>
 where
     F: FnMut() -> Fut,
@@ -36,6 +40,10 @@ where
 }
 
 /// Wraps an asynchronous operation in an OCC retry loop with customizable backoff bounds.
+///
+/// # Errors
+/// Returns [`PersistenceError::OccConflictExhausted`] if retry budget is depleted,
+/// or bubbles up non-retryable errors immediately.
 pub async fn with_occ_retry_opts<F, Fut, T>(
     max_retries: usize,
     base_delay_ms: u64,
@@ -70,10 +78,12 @@ where
 
 /// Computes the exponential backoff duration with randomized entropy jitter.
 fn compute_backoff(attempt: usize, base_delay_ms: u64, max_delay_ms: u64) -> Duration {
-    let factor = 2_u64.saturating_pow(attempt as u32);
+    let exp = u32::try_from(attempt).unwrap_or(u32::MAX);
+    let factor = 2_u64.saturating_pow(exp);
     let delay = std::cmp::min(max_delay_ms, base_delay_ms.saturating_mul(factor));
     let jitter = if delay > 1 {
-        (uuid::Uuid::new_v4().as_u128() as u64) % (delay / 2 + 1)
+        let span = u128::from(delay / 2 + 1);
+        u64::try_from(uuid::Uuid::new_v4().as_u128() % span).unwrap_or(0)
     } else {
         0
     };
@@ -97,8 +107,8 @@ fn is_serialization_failure(err: &PersistenceError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
     struct MockDbError {
@@ -114,7 +124,7 @@ mod tests {
     impl std::error::Error for MockDbError {}
 
     impl sqlx::error::DatabaseError for MockDbError {
-        fn message(&self) -> &str {
+        fn message(&self) -> &'static str {
             "mock db error"
         }
         fn code(&self) -> Option<std::borrow::Cow<'_, str>> {

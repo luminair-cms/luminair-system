@@ -167,8 +167,14 @@ async fn ar_05_approve_creates_role_assignments_and_sets_status() {
         .expect("AR-05: approve should succeed");
 
     assert_eq!(assignments.len(), 2);
-    assert_eq!(assignments[0].granted_by, Some(ActorId::User(admin_user.clone())));
-    assert_eq!(assignments[1].granted_by, Some(ActorId::User(admin_user.clone())));
+    assert_eq!(
+        assignments[0].granted_by,
+        Some(ActorId::User(admin_user.clone()))
+    );
+    assert_eq!(
+        assignments[1].granted_by,
+        Some(ActorId::User(admin_user.clone()))
+    );
 
     let updated_req = service
         .access_request_repo
@@ -196,7 +202,11 @@ async fn ar_06_approve_rejects_self_approval() {
     service.role_repo.save(&role).await.unwrap();
 
     let req = service
-        .submit(SubmitAccessRequestCommand::new(admin_user.clone(), None, None))
+        .submit(SubmitAccessRequestCommand::new(
+            admin_user.clone(),
+            None,
+            None,
+        ))
         .await
         .expect("AR-06: submit should succeed");
 
@@ -271,7 +281,10 @@ async fn ar_08_reject_records_reason_and_reviewer() {
         rejected.status,
         AccessRequestStatus::Rejected { ref reason } if reason.as_deref() == Some("Incomplete info")
     ));
-    assert_eq!(rejected.reviewed_by, Some(ActorId::User(admin_user.clone())));
+    assert_eq!(
+        rejected.reviewed_by,
+        Some(ActorId::User(admin_user.clone()))
+    );
 
     let stored = service
         .access_request_repo
@@ -320,8 +333,5 @@ async fn ar_10_non_requester_denied_get_without_manage_users_permission() {
 
     let result = service.get_by_id(&caller_b, req.id).await;
 
-    assert!(matches!(
-        result,
-        Err(ApplicationError::Unauthorized { .. })
-    ));
+    assert!(matches!(result, Err(ApplicationError::Unauthorized { .. })));
 }

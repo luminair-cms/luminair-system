@@ -15,6 +15,7 @@ use crate::persistence::naming::{COL_ORDER_INDEX, COL_SOURCE_ID, COL_TARGET_ID};
 // ---------------------------------------------------------------------------
 
 /// Builds a Sea-Query insert statement for a single junction link with upsert on order index.
+#[must_use]
 pub fn insert_link_query(
     junction_table: &str,
     source_id: Uuid,
@@ -38,6 +39,7 @@ pub fn insert_link_query(
 }
 
 /// Builds a parameterized SQL string for inserting a junction link with order upsert.
+#[must_use]
 pub fn insert_link_sql(junction_table: &str) -> String {
     format!(
         "INSERT INTO {junction_table} ({COL_SOURCE_ID}, {COL_TARGET_ID}, {COL_ORDER_INDEX})\nVALUES ($1, $2, $3)\nON CONFLICT ({COL_SOURCE_ID}, {COL_TARGET_ID}) DO UPDATE SET\n    {COL_ORDER_INDEX} = EXCLUDED.{COL_ORDER_INDEX};"
@@ -45,16 +47,19 @@ pub fn insert_link_sql(junction_table: &str) -> String {
 }
 
 /// Builds a parameterized SQL string for deleting all junction links belonging to a source instance.
+#[must_use]
 pub fn delete_links_by_source_sql(junction_table: &str) -> String {
     format!("DELETE FROM {junction_table} WHERE {COL_SOURCE_ID} = $1;")
 }
 
 /// Builds a parameterized SQL string for deleting a specific link between source and target.
+#[must_use]
 pub fn delete_link_sql(junction_table: &str) -> String {
     format!("DELETE FROM {junction_table} WHERE {COL_SOURCE_ID} = $1 AND {COL_TARGET_ID} = $2;")
 }
 
 /// Builds a parameterized SQL string for selecting all ordered targets for a single source.
+#[must_use]
 pub fn select_targets_by_source_sql(junction_table: &str) -> String {
     format!(
         "SELECT {COL_TARGET_ID}, {COL_ORDER_INDEX} FROM {junction_table} WHERE {COL_SOURCE_ID} = $1 ORDER BY {COL_ORDER_INDEX} ASC;"
@@ -62,10 +67,8 @@ pub fn select_targets_by_source_sql(junction_table: &str) -> String {
 }
 
 /// Builds a batch lookup query retrieving all links for a list of parent source instance IDs.
-pub fn select_links_by_sources_query(
-    junction_table: &str,
-    source_ids: &[Uuid],
-) -> SelectStatement {
+#[must_use]
+pub fn select_links_by_sources_query(junction_table: &str, source_ids: &[Uuid]) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(Alias::new(junction_table))
         .columns([
@@ -104,7 +107,9 @@ mod tests {
     #[test]
     fn test_insert_link_sql() {
         let sql = insert_link_sql("articles_tags_links");
-        assert!(sql.starts_with("INSERT INTO articles_tags_links (source_id, target_id, order_index)"));
+        assert!(
+            sql.starts_with("INSERT INTO articles_tags_links (source_id, target_id, order_index)")
+        );
         assert!(sql.contains("VALUES ($1, $2, $3)"));
         assert!(sql.contains("ON CONFLICT (source_id, target_id) DO UPDATE SET"));
     }
@@ -139,7 +144,9 @@ mod tests {
         let stmt = select_links_by_sources_query("articles_tags_links", &ids);
         let sql = stmt.to_string(PostgresQueryBuilder);
 
-        assert!(sql.contains("SELECT \"source_id\", \"target_id\", \"order_index\" FROM \"articles_tags_links\""));
+        assert!(sql.contains(
+            "SELECT \"source_id\", \"target_id\", \"order_index\" FROM \"articles_tags_links\""
+        ));
         assert!(sql.contains("\"source_id\" IN"));
         assert!(sql.contains("ORDER BY \"source_id\" ASC, \"order_index\" ASC"));
     }

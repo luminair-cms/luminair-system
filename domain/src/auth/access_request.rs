@@ -61,6 +61,12 @@ impl AccessRequest {
         }
     }
 
+    /// Approves the pending access request and produces the corresponding role assignments.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::InvalidStateTransition`] if not pending,
+    /// [`DomainError::Unauthorized`] if the reviewer is the requester, or
+    /// [`DomainError::Validation`] if role count bounds are violated.
     pub fn approve(
         &mut self,
         by: impl Into<ActorId>,
@@ -97,7 +103,7 @@ impl AccessRequest {
         self.status = AccessRequestStatus::Approved;
         self.reviewed_by = Some(by.clone());
         self.reviewed_at = Some(now);
-        self.assigned_roles = roles.clone();
+        self.assigned_roles.clone_from(&roles);
 
         let assignments = roles
             .into_iter()
@@ -113,6 +119,11 @@ impl AccessRequest {
         Ok(assignments)
     }
 
+    /// Rejects the pending access request with an optional reason.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::InvalidStateTransition`] if not pending or
+    /// [`DomainError::Unauthorized`] if the reviewer is the requester.
     pub fn reject(
         &mut self,
         by: impl Into<ActorId>,
@@ -138,6 +149,7 @@ impl AccessRequest {
         Ok(())
     }
 
+    #[must_use]
     pub fn is_active(&self) -> bool {
         matches!(
             self.status,
@@ -197,7 +209,10 @@ mod tests {
         assert_eq!(assignments.len(), 2);
         assert_eq!(assignments[0].user_id, user);
         assert_eq!(assignments[0].role_id, role1);
-        assert_eq!(assignments[0].granted_by, Some(ActorId::User(admin.clone())));
+        assert_eq!(
+            assignments[0].granted_by,
+            Some(ActorId::User(admin.clone()))
+        );
         assert_eq!(assignments[1].role_id, role2);
     }
 
@@ -273,7 +288,7 @@ mod tests {
     fn test_approve_exceeds_max_roles_fails() {
         let (mut req, _, now) = make_test_request();
         let admin = test_user_id("admin");
-        let roles: Vec<RoleId> = (0..AccessRequest::MAX_ROLES + 1)
+        let roles: Vec<RoleId> = (0..=AccessRequest::MAX_ROLES)
             .map(|_| RoleId::new(Uuid::now_v7()))
             .collect();
         let res = req.approve(admin, roles, now);

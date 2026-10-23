@@ -31,6 +31,7 @@ pub struct SystemConfigServiceImpl {
 
 impl SystemConfigServiceImpl {
     /// Creates a new `SystemConfigServiceImpl` wrapping the loaded configuration.
+    #[must_use]
     pub fn new(context: &'static SystemContext) -> Self {
         Self { context }
     }

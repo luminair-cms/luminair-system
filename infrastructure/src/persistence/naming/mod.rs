@@ -4,4 +4,4 @@ pub mod identifiers;
 pub mod sanitize;
 
 pub use identifiers::*;
-pub use sanitize::{is_reserved_sql_keyword, kebab_to_snake, RESERVED_SQL_KEYWORDS};
+pub use sanitize::{RESERVED_SQL_KEYWORDS, is_reserved_sql_keyword, kebab_to_snake};

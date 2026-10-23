@@ -1,6 +1,8 @@
 //! SQL database identifier generation, table naming conventions, and column mapping.
 
-use domain::schema::{AttributeId, DocumentKind, DocumentType, DocumentTypeId, FieldType, PrimitiveType};
+use domain::schema::{
+    AttributeId, DocumentKind, DocumentType, DocumentTypeId, FieldType, PrimitiveType,
+};
 
 use super::sanitize::kebab_to_snake;
 
@@ -52,8 +54,9 @@ pub const TABLE_DOCUMENT_SNAPSHOTS: &str = "document_snapshots";
 // ---------------------------------------------------------------------------
 
 /// Computes the SQL wide table name for a given `DocumentType`.
-/// - Singletons use their singular name in snake_case.
-/// - Collections use their plural name in snake_case.
+/// - Singletons use their singular name in `snake_case`.
+/// - Collections use their plural name in `snake_case`.
+#[must_use]
 pub fn table_name_for_document_type(doc_type: &DocumentType) -> String {
     match doc_type.kind {
         DocumentKind::Singleton => kebab_to_snake(doc_type.info.singular_name.as_ref()),
@@ -62,6 +65,7 @@ pub fn table_name_for_document_type(doc_type: &DocumentType) -> String {
 }
 
 /// Computes the SQL wide table name from identifier components.
+#[must_use]
 pub fn table_name_from_id(
     type_id: &DocumentTypeId,
     kind: DocumentKind,
@@ -74,16 +78,23 @@ pub fn table_name_from_id(
 }
 
 /// Computes the relational junction link table name: `[source_table]_[rel_attr]_links`.
+#[must_use]
 pub fn junction_table_name(source_table: &str, rel_attr: &AttributeId) -> String {
-    format!("{}_{}_links", source_table, kebab_to_snake(rel_attr.as_ref()))
+    format!(
+        "{}_{}_links",
+        source_table,
+        kebab_to_snake(rel_attr.as_ref())
+    )
 }
 
-/// Maps an `AttributeId` to its SQL column identifier (kebab-case to snake_case).
+/// Maps an `AttributeId` to its SQL column identifier (kebab-case to `snake_case`).
+#[must_use]
 pub fn column_name(attr_id: &AttributeId) -> String {
     kebab_to_snake(attr_id.as_ref())
 }
 
 /// Maps a domain `FieldType` to its physical SQL DDL type definition.
+#[must_use]
 pub fn sql_type_for_field(field_type: &FieldType) -> String {
     match field_type {
         FieldType::Primitive(prim) => match prim {
@@ -104,8 +115,7 @@ pub fn sql_type_for_field(field_type: &FieldType) -> String {
         },
         FieldType::Email => "VARCHAR(320)".to_string(),
         FieldType::Url => "TEXT".to_string(),
-        FieldType::Json => "JSONB".to_string(),
-        FieldType::LocalizedText => "JSONB".to_string(),
+        FieldType::Json | FieldType::LocalizedText => "JSONB".to_string(),
     }
 }
 
@@ -152,7 +162,11 @@ mod tests {
 
     #[test]
     fn test_table_name_singleton_uses_singular() {
-        let doc_type = make_test_doc_type("site-settings", "site-settings-plural", DocumentKind::Singleton);
+        let doc_type = make_test_doc_type(
+            "site-settings",
+            "site-settings-plural",
+            DocumentKind::Singleton,
+        );
         assert_eq!(table_name_for_document_type(&doc_type), "site_settings");
     }
 
@@ -173,16 +187,55 @@ mod tests {
 
     #[test]
     fn test_sql_type_for_field() {
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Uid)), "VARCHAR(255)");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Uuid)), "UUID");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Text)), "TEXT");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I16))), "SMALLINT");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32))), "INTEGER");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I64))), "BIGINT");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Decimal { precision: 10, scale: 2 })), "NUMERIC(10, 2)");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Date)), "DATE");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::DateTime)), "TIMESTAMPTZ");
-        assert_eq!(sql_type_for_field(&FieldType::Primitive(PrimitiveType::Boolean)), "BOOLEAN");
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Uid)),
+            "VARCHAR(255)"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Uuid)),
+            "UUID"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Text)),
+            "TEXT"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Integer(
+                IntegerSize::I16
+            ))),
+            "SMALLINT"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Integer(
+                IntegerSize::I32
+            ))),
+            "INTEGER"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Integer(
+                IntegerSize::I64
+            ))),
+            "BIGINT"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Decimal {
+                precision: 10,
+                scale: 2
+            })),
+            "NUMERIC(10, 2)"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Date)),
+            "DATE"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::DateTime)),
+            "TIMESTAMPTZ"
+        );
+        assert_eq!(
+            sql_type_for_field(&FieldType::Primitive(PrimitiveType::Boolean)),
+            "BOOLEAN"
+        );
         assert_eq!(sql_type_for_field(&FieldType::Email), "VARCHAR(320)");
         assert_eq!(sql_type_for_field(&FieldType::Url), "TEXT");
         assert_eq!(sql_type_for_field(&FieldType::Json), "JSONB");

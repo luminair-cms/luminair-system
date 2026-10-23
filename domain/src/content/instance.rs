@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::{ActorId, UserId};
-use crate::content::header::DocumentSnapshot;
 use crate::content::ContentValue;
+use crate::content::header::DocumentSnapshot;
 use crate::errors::DomainError;
 use crate::schema::{AttributeId, DocumentTypeId};
 
@@ -44,6 +44,7 @@ pub struct DocumentContent {
 }
 
 impl DocumentContent {
+    #[must_use]
     pub fn new(
         fields: HashMap<AttributeId, ContentValue>,
         publication_state: PublicationState,
@@ -54,10 +55,12 @@ impl DocumentContent {
         }
     }
 
+    #[must_use]
     pub fn fields(&self) -> &HashMap<AttributeId, ContentValue> {
         &self.fields
     }
 
+    #[must_use]
     pub fn get_field(&self, attr_id: &AttributeId) -> Option<&ContentValue> {
         self.fields.get(attr_id)
     }
@@ -117,10 +120,7 @@ impl DocumentInstance {
         Self {
             id: DocumentInstanceId::new(Uuid::now_v7()),
             document_type_id: type_id,
-            content: DocumentContent::new(
-                HashMap::new(),
-                PublicationState::Draft,
-            ),
+            content: DocumentContent::new(HashMap::new(), PublicationState::Draft),
             relations: HashMap::new(),
             populated_relations: HashMap::new(),
             audit: AuditTrail {
@@ -134,6 +134,7 @@ impl DocumentInstance {
     }
 
     /// Reconstitutes a `DocumentInstance` from persistence state without incrementing version or generating new IDs.
+    #[must_use]
     pub fn reconstitute(
         id: DocumentInstanceId,
         document_type_id: DocumentTypeId,
@@ -151,10 +152,12 @@ impl DocumentInstance {
         }
     }
 
+    #[must_use]
     pub fn fields(&self) -> &HashMap<AttributeId, ContentValue> {
         self.content.fields()
     }
 
+    #[must_use]
     pub fn get_field(&self, attr_id: &AttributeId) -> Option<&ContentValue> {
         self.content.get_field(attr_id)
     }
@@ -172,6 +175,7 @@ impl DocumentInstance {
     }
 
     /// Returns a new instance with populated related document instances attached.
+    #[must_use]
     pub fn with_populated_relations(
         mut self,
         populated: HashMap<AttributeId, Vec<DocumentInstance>>,
@@ -196,7 +200,7 @@ impl DocumentInstance {
     }
 
     /// Appends the specified target IDs to the existing relations for the given attribute, ignoring duplicates.
-    pub fn connect_relations(&mut self, attr: AttributeId, target_ids: Vec<DocumentInstanceId>) {
+    pub fn connect_relations(&mut self, attr: &AttributeId, target_ids: Vec<DocumentInstanceId>) {
         let list = self.relations.entry(attr.clone()).or_default();
         let mut seen: HashSet<_> = list.iter().map(|r| r.target_instance_id).collect();
         for target_id in target_ids {
@@ -223,7 +227,14 @@ impl DocumentInstance {
     }
 
     /// Publishes the document instance, advancing its revision and returning the new revision number.
-    pub fn publish(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) -> Result<u32, DomainError> {
+    ///
+    /// # Errors
+    /// Returns [`DomainError`] if publishing fails.
+    pub fn publish(
+        &mut self,
+        by: impl Into<ActorId>,
+        now: DateTime<Utc>,
+    ) -> Result<u32, DomainError> {
         let by = by.into();
         let new_revision = match self.content.publication_state {
             PublicationState::Draft => 1,
@@ -247,7 +258,14 @@ impl DocumentInstance {
     }
 
     /// Transitions a published or modified document into unpublished state, recording the last revision.
-    pub fn unpublish(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) -> Result<(), DomainError> {
+    ///
+    /// # Errors
+    /// Returns [`DomainError::InvalidStateTransition`] if the document is not currently published.
+    pub fn unpublish(
+        &mut self,
+        by: impl Into<ActorId>,
+        now: DateTime<Utc>,
+    ) -> Result<(), DomainError> {
         let by = by.into();
         match self.content.publication_state {
             PublicationState::Published { revision, .. }
@@ -265,13 +283,14 @@ impl DocumentInstance {
             }
             PublicationState::Draft | PublicationState::Unpublished { .. } => {
                 Err(DomainError::InvalidStateTransition {
-                    reason: "cannot unpublish a document that is not currently published".to_string(),
+                    reason: "cannot unpublish a document that is not currently published"
+                        .to_string(),
                 })
             }
         }
     }
 
-    /// Transitions a published document into modified state, updating draft_version and touching audit.
+    /// Transitions a published document into modified state, updating `draft_version` and touching audit.
     pub fn edit_draft(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) {
         let by = by.into();
         match self.content.publication_state.clone() {
@@ -309,6 +328,9 @@ impl DocumentInstance {
     }
 
     /// Discards a modified draft, restoring clean Published state without incrementing audit version.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::InvalidStateTransition`] if the document is not in `Modified` state.
     pub fn discard_draft(&mut self) -> Result<(), DomainError> {
         match self.content.publication_state.clone() {
             PublicationState::Modified {
@@ -331,6 +353,10 @@ impl DocumentInstance {
     }
 
     /// Restores content and relations from a snapshot and marks the document as a modified draft.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::InvalidStateTransition`] if the document was never published, or
+    /// [`DomainError::Validation`] if the snapshot does not belong to this document.
     pub fn restore_snapshot(
         &mut self,
         snapshot: &DocumentSnapshot,
@@ -349,22 +375,24 @@ impl DocumentInstance {
             )));
         }
         self.replace_fields(snapshot.fields.clone());
-        self.relations = snapshot.relations.clone();
+        self.relations.clone_from(&snapshot.relations);
         self.edit_draft(by, now);
         Ok(())
     }
 
-    /// Records an edit/touch on the instance, updating updated_at and incrementing version.
+    /// Records an edit/touch on the instance, updating `updated_at` and incrementing version.
     pub fn touch(&mut self, by: impl Into<ActorId>, now: DateTime<Utc>) {
         self.audit.updated_at = now;
         self.audit.updated_by = by.into();
         self.audit.version += 1;
     }
 
+    #[must_use]
     pub fn is_owned_by(&self, user_id: &UserId) -> bool {
         self.audit.created_by.as_user() == Some(user_id)
     }
 
+    #[must_use]
     pub fn is_owned_by_actor(&self, actor: &ActorId) -> bool {
         &self.audit.created_by == actor
     }
@@ -373,10 +401,10 @@ impl DocumentInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration;
     use crate::content::header::{SnapshotId, SnapshotReason};
     use crate::content::values::{DomainValue, PrimitiveValue};
     use crate::test_support::{test_attr_id, test_doc_type_id, test_user_id};
+    use chrono::Duration;
 
     fn make_test_instance() -> (DocumentInstance, UserId, DateTime<Utc>) {
         let user = test_user_id("author-1");
@@ -522,7 +550,9 @@ mod tests {
         let mut snap_fields = HashMap::new();
         snap_fields.insert(
             title_attr.clone(),
-            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Snapshot Title".into()))),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+                "Snapshot Title".into(),
+            ))),
         );
 
         let snapshot = DocumentSnapshot {
@@ -539,18 +569,27 @@ mod tests {
 
         // Draft snapshot rejection (LC-13)
         let draft_instance = make_test_instance().0;
-        let draft_err = draft_instance.clone().restore_snapshot(&snapshot, user.clone(), t2);
-        assert!(matches!(draft_err, Err(DomainError::InvalidStateTransition { .. })));
+        let draft_err = draft_instance
+            .clone()
+            .restore_snapshot(&snapshot, user.clone(), t2);
+        assert!(matches!(
+            draft_err,
+            Err(DomainError::InvalidStateTransition { .. })
+        ));
 
         instance.publish(user.clone(), t1).unwrap();
         assert_eq!(instance.audit.version, 2);
 
-        instance.restore_snapshot(&snapshot, user.clone(), t2).unwrap();
+        instance
+            .restore_snapshot(&snapshot, user.clone(), t2)
+            .unwrap();
         assert_eq!(instance.audit.version, 3);
         assert_eq!(instance.audit.updated_at, t2);
         assert_eq!(
             instance.get_field(&title_attr),
-            Some(&ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Snapshot Title".into()))))
+            Some(&ContentValue::Scalar(DomainValue::Primitive(
+                PrimitiveValue::Text("Snapshot Title".into())
+            )))
         );
         assert!(matches!(
             instance.content.publication_state,
@@ -581,7 +620,8 @@ mod tests {
     fn test_encapsulated_field_accessors() {
         let (mut instance, _, _) = make_test_instance();
         let title_attr = test_attr_id("title");
-        let title_val = ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Rust".into())));
+        let title_val =
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Rust".into())));
 
         assert!(instance.fields().is_empty());
         assert_eq!(instance.get_field(&title_attr), None);
@@ -596,7 +636,8 @@ mod tests {
 
         let mut new_fields = HashMap::new();
         let desc_attr = test_attr_id("desc");
-        let desc_val = ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Desc".into())));
+        let desc_val =
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Desc".into())));
         new_fields.insert(desc_attr.clone(), desc_val.clone());
         instance.replace_fields(new_fields);
 
@@ -629,7 +670,7 @@ mod tests {
 
         instance.set_relations(attr.clone(), vec![id1, id2]);
         // Connect id2 (already present) and id3 (new)
-        instance.connect_relations(attr.clone(), vec![id2, id3]);
+        instance.connect_relations(&attr, vec![id2, id3]);
 
         let relations = instance.relations.get(&attr).unwrap();
         assert_eq!(relations.len(), 3);
@@ -703,10 +744,7 @@ mod tests {
             updated_by: actor,
             version: 7,
         };
-        let content = DocumentContent::new(
-            HashMap::new(),
-            PublicationState::Draft,
-        );
+        let content = DocumentContent::new(HashMap::new(), PublicationState::Draft);
         let instance = DocumentInstance::reconstitute(
             doc_id,
             doc_type.clone(),

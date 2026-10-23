@@ -60,7 +60,10 @@ fn parse_spec(path: &Path, errors: &mut Vec<String>) -> Vec<(String, Rule)> {
 
     let flush = |pending: &mut Option<String>, errors: &mut Vec<String>| {
         if let Some(id) = pending.take() {
-            errors.push(format!("{}: rule {id} has no `- **Status**:` line", path.display()));
+            errors.push(format!(
+                "{}: rule {id} has no `- **Status**:` line",
+                path.display()
+            ));
         }
     };
 
@@ -175,7 +178,9 @@ fn specs_and_tests_are_consistent() {
     }
     for id in &referenced {
         if !rules.contains_key(id) {
-            errors.push(format!("tests reference rule {id}, which does not exist in any spec"));
+            errors.push(format!(
+                "tests reference rule {id}, which does not exist in any spec"
+            ));
         }
     }
 

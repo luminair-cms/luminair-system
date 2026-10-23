@@ -4,9 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use domain::auth::{
-    AccessRequest, AccessRequestId, AccessRequestRepository, AccessRequestStatus, Role,
-    RoleId, RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentId,
-    UserRoleAssignmentRepository,
+    AccessRequest, AccessRequestId, AccessRequestRepository, AccessRequestStatus, Role, RoleId,
+    RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentId, UserRoleAssignmentRepository,
 };
 use domain::content::{
     ContentValue, DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
@@ -149,8 +148,8 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
 
         let total = filtered.len() as u64;
-        let start = (u64::from(pagination.page.saturating_sub(1))
-            * u64::from(pagination.page_size)) as usize;
+        let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
+            as usize;
         let items: Vec<DocumentInstance> = filtered
             .into_iter()
             .skip(start)
@@ -177,9 +176,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         let mut filtered: Vec<DocumentInstance> = if !pub_store.is_empty() {
             pub_store
                 .values()
-                .filter(|inst| {
-                    inst.document_type_id == *type_id && matches_filters(inst, &filters)
-                })
+                .filter(|inst| inst.document_type_id == *type_id && matches_filters(inst, &filters))
                 .cloned()
                 .collect()
         } else {
@@ -199,8 +196,8 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
 
         let total = filtered.len() as u64;
-        let start = (u64::from(pagination.page.saturating_sub(1))
-            * u64::from(pagination.page_size)) as usize;
+        let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
+            as usize;
         let items: Vec<DocumentInstance> = filtered
             .into_iter()
             .skip(start)
@@ -306,8 +303,8 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         headers.sort_by_key(|h| (h.created_at, *h.id.as_ref()));
 
         let total = headers.len() as u64;
-        let start = (u64::from(pagination.page.saturating_sub(1))
-            * u64::from(pagination.page_size)) as usize;
+        let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
+            as usize;
         let items: Vec<DocumentHeader> = headers
             .into_iter()
             .skip(start)
@@ -518,9 +515,7 @@ impl DocumentSnapshotRepository for FakeDocumentInstanceRepository {
         let mut matching: Vec<&DocumentSnapshot> = store
             .iter()
             .filter(|s| {
-                s.document_type_id == *type_id
-                    && s.document_id == doc_id
-                    && s.revision == revision
+                s.document_type_id == *type_id && s.document_id == doc_id && s.revision == revision
             })
             .collect();
         matching.sort_by_key(|a| std::cmp::Reverse(a.created_at));

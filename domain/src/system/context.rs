@@ -1,4 +1,4 @@
-//! SystemContext combines declarative schema definitions and system-level configuration.
+//! `SystemContext` combines declarative schema definitions and system-level configuration.
 
 use crate::schema::{DocumentType, DocumentTypeId, SchemaRegistry};
 use crate::system::{LocaleId, SystemConfig};
@@ -12,16 +12,19 @@ pub struct SystemContext {
 
 impl SystemContext {
     /// Creates a new `SystemContext` from a loaded schema registry and system configuration.
+    #[must_use]
     pub fn new(schema: SchemaRegistry, config: SystemConfig) -> Self {
         Self { schema, config }
     }
 
     /// Looks up a document type by its unique identifier.
+    #[must_use]
     pub fn find_type(&self, id: &DocumentTypeId) -> Option<&DocumentType> {
         self.schema.get(id)
     }
 
     /// Looks up a document type by its collection name (plural) or single-type name (singular).
+    #[must_use]
     pub fn find_type_by_name(&self, name: &str) -> Option<&DocumentType> {
         self.schema.find_by_name(name)
     }
@@ -31,11 +34,13 @@ impl SystemContext {
     }
 
     /// Returns the system default locale.
+    #[must_use]
     pub fn default_locale(&self) -> &LocaleId {
         &self.config.default_locale
     }
 
     /// Checks if a locale is supported by the system.
+    #[must_use]
     pub fn contains_locale(&self, locale: &LocaleId) -> bool {
         self.config.contains_locale(locale)
     }
@@ -45,7 +50,7 @@ impl SystemContext {
 mod tests {
     use super::*;
     use crate::test_support::{
-        fixture_system_config, test_doc_type_id, test_locales, DocumentTypeBuilder,
+        DocumentTypeBuilder, fixture_system_config, test_doc_type_id, test_locales,
     };
 
     #[test]

@@ -32,6 +32,7 @@ pub struct ExecutionSummary {
 // ---------------------------------------------------------------------------
 
 /// Translates a single `MigrationStep` into a PostgreSQL DDL string using `sea-query`.
+#[must_use]
 pub fn step_to_sql(step: &MigrationStep) -> String {
     match step {
         MigrationStep::CreateTable(table) => build_create_table_sql(table),
@@ -59,6 +60,9 @@ pub fn step_to_sql(step: &MigrationStep) -> String {
 }
 
 /// Executes a `MigrationPlan` statement-by-statement outside transaction blocks.
+///
+/// # Errors
+/// Returns [`PersistenceError`] if any DDL statement fails execution.
 pub async fn execute_migration_plan(
     pool: &PgPool,
     plan: &MigrationPlan,
@@ -79,6 +83,7 @@ pub async fn execute_migration_plan(
 }
 
 /// Maps a `ColumnDefinition` to a typed `sea_query::ColumnDef`.
+#[must_use]
 pub fn build_column_def(col: &ColumnDefinition) -> ColumnDef {
     build_column_def_internal(col, col.is_primary_key)
 }
@@ -150,7 +155,7 @@ fn build_column_def_internal(col: &ColumnDefinition, include_pk: bool) -> Column
             def.uuid();
         }
         SqlColumnType::Varchar(Some(len)) => {
-            def.string_len(len as u32);
+            def.string_len(u32::try_from(len).unwrap_or(u32::MAX));
         }
         SqlColumnType::Varchar(None) => {
             def.string();
@@ -168,7 +173,7 @@ fn build_column_def_internal(col: &ColumnDefinition, include_pk: bool) -> Column
             def.big_integer();
         }
         SqlColumnType::Decimal(p, s) => {
-            def.decimal_len(p as u32, s as u32);
+            def.decimal_len(u32::from(p), u32::from(s));
         }
         SqlColumnType::Boolean => {
             def.boolean();
@@ -288,7 +293,9 @@ mod tests {
 
         assert!(sql.starts_with(r#"CREATE TABLE IF NOT EXISTS "articles_tags_links""#));
         assert!(sql.contains(r#"PRIMARY KEY ("source_id", "target_id")"#));
-        assert!(sql.contains(r#"FOREIGN KEY ("source_id") REFERENCES "articles" ("id") ON DELETE CASCADE"#));
+        assert!(sql.contains(
+            r#"FOREIGN KEY ("source_id") REFERENCES "articles" ("id") ON DELETE CASCADE"#
+        ));
     }
 
     #[test]

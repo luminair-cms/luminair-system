@@ -28,10 +28,12 @@ pub struct MigrationPlan {
 }
 
 impl MigrationPlan {
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.steps.len()
     }
@@ -42,6 +44,7 @@ impl MigrationPlan {
 // ---------------------------------------------------------------------------
 
 /// Organizes and sorts raw diff steps into a topologically sound execution order.
+#[must_use]
 pub fn plan_migrations(raw_steps: Vec<MigrationStep>) -> MigrationPlan {
     let mut drop_indexes = Vec::new();
     let mut drop_link_tables = Vec::new();
@@ -99,7 +102,12 @@ mod tests {
     fn test_topological_ordering_creates_entities_before_links_and_indexes() {
         let entity_table = TableDefinition::new("articles", TableKind::Entity, false);
         let link_table = TableDefinition::new("articles_tags_links", TableKind::Link, false);
-        let index_def = IndexDefinition::new("idx_articles_title", "articles", vec!["title".into()], false);
+        let index_def = IndexDefinition::new(
+            "idx_articles_title",
+            "articles",
+            vec!["title".into()],
+            false,
+        );
 
         let raw = vec![
             MigrationStep::CreateIndex(index_def),

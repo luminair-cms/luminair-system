@@ -1,4 +1,4 @@
-//! Schema discovery, JSON parsing, domain mapping, and SystemContext assembly.
+//! Schema discovery, JSON parsing, domain mapping, and `SystemContext` assembly.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -24,6 +24,9 @@ use crate::persistence::naming::is_reserved_sql_keyword;
 
 /// Loads schemas and system config from `schema_dir`, validates them,
 /// assembles `SystemContext`, and promotes it to `'static` lifetime via `Box::leak`.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if loading or schema validation fails.
 pub fn load_system_context_from_dir(
     schema_dir: &Path,
 ) -> Result<&'static SystemContext, SchemaLoaderError> {
@@ -34,6 +37,9 @@ pub fn load_system_context_from_dir(
 
 /// Walks `schema_dir`, loads `system-config.json` and all `document-types/*.json`,
 /// validates all cross-schema invariants, and returns `(SystemConfig, SchemaRegistry)`.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if files cannot be read or fail schema validation.
 pub fn load_schemas_from_dir(
     schema_dir: &Path,
 ) -> Result<(SystemConfig, SchemaRegistry), SchemaLoaderError> {
@@ -47,6 +53,9 @@ pub fn load_schemas_from_dir(
 }
 
 /// Parses the system configuration from a `system-config.json` string content (no `id` required).
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if JSON is malformed or locale configuration is invalid.
 pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
     let record: SystemConfigRecord =
         serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
@@ -72,6 +81,9 @@ pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderEr
 }
 
 /// Parses a single document type definition from JSON string content.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if JSON parsing, keyword check, or schema mapping fails.
 #[allow(clippy::mutable_key_type)]
 pub fn parse_document_type(
     content: &str,
@@ -79,8 +91,8 @@ pub fn parse_document_type(
 ) -> Result<DocumentType, SchemaLoaderError> {
     validate_file_stem(file_stem)?;
 
-    let record: DocumentRecord = serde_json::from_str(content)
-        .map_err(|source| SchemaLoaderError::JsonInline { source })?;
+    let record: DocumentRecord =
+        serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
 
     let info = parse_document_info(&record.info, file_stem)?;
     let options = parse_document_options(record.options);
@@ -97,6 +109,9 @@ pub fn parse_document_type(
 }
 
 /// Parses a `FieldTypeDto` into a domain `FieldType`.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError::Validation`] if the field type is unrecognized or bounds are invalid.
 pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoaderError> {
     match dto {
         FieldTypeDto::Simple(s) => {
@@ -130,9 +145,7 @@ pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoade
             Ok(FieldType::Primitive(PrimitiveType::Integer(size)))
         }
         FieldTypeDto::Decimal { decimal } => {
-            if decimal.precision == 0
-                || decimal.precision > 38
-                || decimal.scale > decimal.precision
+            if decimal.precision == 0 || decimal.precision > 38 || decimal.scale > decimal.precision
             {
                 return Err(SchemaLoaderError::Validation(format!(
                     "invalid decimal bounds: precision {} (must be in 1..=38) and scale {} (must be <= precision)",
@@ -148,10 +161,13 @@ pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoade
 }
 
 /// Parses constraint records into domain `FieldConstraint` variants.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if regex compilation or numeric parsing fails.
 #[allow(clippy::mutable_key_type)]
 pub fn parse_constraints(
     records: &[ConstraintRecord<'_>],
-    field_type: &FieldType,
+    field_type: FieldType,
 ) -> Result<HashSet<FieldConstraint>, SchemaLoaderError> {
     let mut constraints = HashSet::new();
 
@@ -193,6 +209,9 @@ pub fn parse_constraints(
 
 /// Parses an integer size identifier into a domain `IntegerSize`.
 /// Supported pairs: `int16`/`short`, `int32`/`integer`, `int64`/`long`.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError::Validation`] if the size string is unrecognized.
 pub fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
     match s.to_ascii_lowercase().as_str() {
         "int16" | "short" => Ok(IntegerSize::I16),
@@ -231,12 +250,11 @@ fn load_system_config_file(schema_dir: &Path) -> Result<SystemConfig, SchemaLoad
         });
     }
 
-    let config_content = std::fs::read_to_string(&config_path).map_err(|source| {
-        SchemaLoaderError::Io {
+    let config_content =
+        std::fs::read_to_string(&config_path).map_err(|source| SchemaLoaderError::Io {
             path: config_path.clone(),
             source,
-        }
-    })?;
+        })?;
 
     parse_system_config(&config_content).map_err(|err| match err {
         SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
@@ -271,7 +289,7 @@ fn load_document_types_from_dir(schema_dir: &Path) -> Result<Vec<DocumentType>, 
     }
 
     // Sort entries deterministically by file name
-    entries_vec.sort_by_key(|e| e.file_name());
+    entries_vec.sort_by_key(std::fs::DirEntry::file_name);
 
     let mut doc_types = Vec::with_capacity(entries_vec.len());
     for entry in entries_vec {
@@ -287,15 +305,12 @@ fn load_document_types_from_dir(schema_dir: &Path) -> Result<Vec<DocumentType>, 
 
 /// Loads and parses a single document type definition file from disk.
 fn load_document_type_file(path: &Path) -> Result<DocumentType, SchemaLoaderError> {
-    let file_stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            SchemaLoaderError::Validation(format!(
-                "invalid file stem for schema file '{}'",
-                path.display()
-            ))
-        })?;
+    let file_stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+        SchemaLoaderError::Validation(format!(
+            "invalid file stem for schema file '{}'",
+            path.display()
+        ))
+    })?;
 
     let content = std::fs::read_to_string(path).map_err(|source| SchemaLoaderError::Io {
         path: path.to_path_buf(),
@@ -385,7 +400,7 @@ fn parse_document_info(
 /// Maps document options record to domain `DocumentTypeOptions`.
 fn parse_document_options(options: Option<DocumentOptionsRecord>) -> DocumentTypeOptions {
     DocumentTypeOptions {
-        draft_and_publish: options.map(|o| o.draft_and_publish).unwrap_or(false),
+        draft_and_publish: options.is_some_and(|o| o.draft_and_publish),
     }
 }
 
@@ -457,7 +472,7 @@ fn parse_field_attribute(
     raw_constraints: &[ConstraintRecord<'_>],
 ) -> Result<FieldDefinition, SchemaLoaderError> {
     let field_type = parse_field_type(raw_ft)?;
-    let constraints = parse_constraints(raw_constraints, &field_type)?;
+    let constraints = parse_constraints(raw_constraints, field_type)?;
     Ok(FieldDefinition {
         id: attr_id,
         field_type,
@@ -492,13 +507,16 @@ fn parse_relation_attribute(
 /// Helper to parse a numeric bound from JSON into integer or decimal constraint values.
 fn parse_numeric_bound(
     val: &serde_json::Value,
-    field_type: &FieldType,
+    field_type: FieldType,
     bound_name: &str,
 ) -> Result<(Option<i64>, Option<Decimal>), SchemaLoaderError> {
     match val {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                if matches!(field_type, FieldType::Primitive(PrimitiveType::Decimal { .. })) {
+                if matches!(
+                    field_type,
+                    FieldType::Primitive(PrimitiveType::Decimal { .. })
+                ) {
                     Ok((None, Some(Decimal::from(i))))
                 } else {
                     Ok((Some(i), None))
@@ -514,7 +532,9 @@ fn parse_numeric_bound(
         }
         serde_json::Value::String(s) => {
             let dec = Decimal::from_str(s).map_err(|e| {
-                SchemaLoaderError::Validation(format!("invalid {bound_name} decimal string '{s}': {e}"))
+                SchemaLoaderError::Validation(format!(
+                    "invalid {bound_name} decimal string '{s}': {e}"
+                ))
             })?;
             Ok((None, Some(dec)))
         }
@@ -597,7 +617,10 @@ mod tests {
         }"#;
 
         let res = parse_document_type(json, "post");
-        assert!(matches!(res, Err(SchemaLoaderError::FileStemMismatch { .. })));
+        assert!(matches!(
+            res,
+            Err(SchemaLoaderError::FileStemMismatch { .. })
+        ));
     }
 
     #[test]
@@ -613,7 +636,10 @@ mod tests {
         }"#;
 
         let res = parse_document_type(json, "user");
-        assert!(matches!(res, Err(SchemaLoaderError::ReservedKeyword { .. })));
+        assert!(matches!(
+            res,
+            Err(SchemaLoaderError::ReservedKeyword { .. })
+        ));
     }
 
     #[test]
@@ -629,7 +655,7 @@ mod tests {
 
         let records: Vec<ConstraintRecord> = serde_json::from_str(json).unwrap();
         let field_type_text = FieldType::Primitive(PrimitiveType::Text);
-        let constraints = parse_constraints(&records, &field_type_text).unwrap();
+        let constraints = parse_constraints(&records, field_type_text).unwrap();
 
         assert!(constraints.contains(&FieldConstraint::MinLength(3)));
         assert!(constraints.contains(&FieldConstraint::MaxLength(50)));
@@ -649,10 +675,14 @@ mod tests {
             precision: 10,
             scale: 2,
         });
-        let constraints_dec = parse_constraints(&records_dec, &field_type_dec).unwrap();
+        let constraints_dec = parse_constraints(&records_dec, field_type_dec).unwrap();
 
-        assert!(constraints_dec.contains(&FieldConstraint::MinDecimal(Decimal::from_str("9.99").unwrap())));
-        assert!(constraints_dec.contains(&FieldConstraint::MaxDecimal(Decimal::from_str("99.95").unwrap())));
+        assert!(constraints_dec.contains(&FieldConstraint::MinDecimal(
+            Decimal::from_str("9.99").unwrap()
+        )));
+        assert!(constraints_dec.contains(&FieldConstraint::MaxDecimal(
+            Decimal::from_str("99.95").unwrap()
+        )));
 
         // Test min & max with minimum & maximum aliases
         let json_min_max = r#"[
@@ -660,7 +690,7 @@ mod tests {
             { "maximum": 25 }
         ]"#;
         let records_min_max: Vec<ConstraintRecord> = serde_json::from_str(json_min_max).unwrap();
-        let constraints_int = parse_constraints(&records_min_max, &field_type_text).unwrap();
+        let constraints_int = parse_constraints(&records_min_max, field_type_text).unwrap();
         assert!(constraints_int.contains(&FieldConstraint::MinInteger(5)));
         assert!(constraints_int.contains(&FieldConstraint::MaxInteger(25)));
     }

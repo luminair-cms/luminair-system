@@ -74,10 +74,15 @@ impl fmt::Display for ActorId {
 }
 
 impl ActorId {
+    #[must_use]
     pub fn to_urn(&self) -> String {
         self.to_string()
     }
 
+    /// Parses an [`ActorId`] from its URN representation (`user:...`, `service:...`, or `system`).
+    ///
+    /// # Errors
+    /// Returns [`DomainError::Validation`] if the URN format or underlying identifier is invalid.
     pub fn from_urn(urn: &str) -> Result<Self, DomainError> {
         if urn == "system" {
             Ok(ActorId::System)
@@ -96,6 +101,7 @@ impl ActorId {
         }
     }
 
+    #[must_use]
     pub fn as_user(&self) -> Option<&UserId> {
         match self {
             ActorId::User(u) => Some(u),
@@ -103,6 +109,7 @@ impl ActorId {
         }
     }
 
+    #[must_use]
     pub fn as_service(&self) -> Option<&ServiceId> {
         match self {
             ActorId::Service(s) => Some(s),
@@ -110,6 +117,7 @@ impl ActorId {
         }
     }
 
+    #[must_use]
     pub fn is_system(&self) -> bool {
         matches!(self, ActorId::System)
     }

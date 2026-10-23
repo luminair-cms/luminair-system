@@ -41,12 +41,12 @@ proptest! {
     fn vo_04_regex_pattern_compilation_and_matching(
         literal in "[a-zA-Z0-9]{1,10}"
     ) {
-        let pattern_str = format!("^{}$", literal);
+        let pattern_str = format!("^{literal}$");
         let res = RegexPattern::try_new(&pattern_str);
         prop_assert!(res.is_ok(), "pattern compilation failed");
         let rp = res.unwrap();
         prop_assert!(rp.is_match(&literal), "literal did not match");
-        let non_match = format!("{}x", literal);
+        let non_match = format!("{literal}x");
         prop_assert!(!rp.is_match(&non_match), "unexpected match for non_match");
     }
 }

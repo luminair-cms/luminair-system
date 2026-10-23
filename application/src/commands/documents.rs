@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-pub use domain::content::{UnpublishDraftResolution, VersionView};
 use domain::content::{ContentValue, DocumentInstanceId, FieldFilter, Pagination};
+pub use domain::content::{UnpublishDraftResolution, VersionView};
 use domain::schema::{AttributeId, DocumentTypeId};
 
 /// Query command to find documents matching criteria with pagination and optional relation enrichment.
@@ -22,6 +22,7 @@ pub struct FindDocumentsCommand {
 }
 
 impl FindDocumentsCommand {
+    #[must_use]
     pub fn new(document_type: &'static DocumentTypeId, pagination: Pagination) -> Self {
         Self {
             document_type,
@@ -32,16 +33,19 @@ impl FindDocumentsCommand {
         }
     }
 
+    #[must_use]
     pub fn with_view(mut self, view: VersionView) -> Self {
         self.view = view;
         self
     }
 
+    #[must_use]
     pub fn with_filters(mut self, filters: Vec<FieldFilter>) -> Self {
         self.filters = filters;
         self
     }
 
+    #[must_use]
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
         self.populate = populate;
         self
@@ -62,6 +66,7 @@ pub struct FindByIdCommand {
 }
 
 impl FindByIdCommand {
+    #[must_use]
     pub fn new(
         document_type: &'static DocumentTypeId,
         document_instance_id: DocumentInstanceId,
@@ -74,11 +79,13 @@ impl FindByIdCommand {
         }
     }
 
+    #[must_use]
     pub fn with_view(mut self, view: VersionView) -> Self {
         self.view = view;
         self
     }
 
+    #[must_use]
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
         self.populate = populate;
         self
@@ -112,6 +119,7 @@ pub struct CreateDocumentCommand {
 }
 
 impl CreateDocumentCommand {
+    #[must_use]
     pub fn new(
         document_type: &'static DocumentTypeId,
         fields: HashMap<AttributeId, ContentValue>,
@@ -124,11 +132,13 @@ impl CreateDocumentCommand {
         }
     }
 
+    #[must_use]
     pub fn with_relations(mut self, relations: HashMap<AttributeId, RelationAction>) -> Self {
         self.relations = relations;
         self
     }
 
+    #[must_use]
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
         self.populate = populate;
         self
@@ -153,6 +163,7 @@ pub struct UpdateDocumentCommand {
 }
 
 impl UpdateDocumentCommand {
+    #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
         document_type: &'static DocumentTypeId,
@@ -168,16 +179,19 @@ impl UpdateDocumentCommand {
         }
     }
 
+    #[must_use]
     pub fn with_expected_version(mut self, version: u32) -> Self {
         self.expected_version = Some(version);
         self
     }
 
+    #[must_use]
     pub fn with_relations(mut self, relations: HashMap<AttributeId, RelationAction>) -> Self {
         self.relations = relations;
         self
     }
 
+    #[must_use]
     pub fn with_populate(mut self, populate: Vec<AttributeId>) -> Self {
         self.populate = populate;
         self
@@ -194,6 +208,7 @@ pub struct DeleteDocumentCommand {
 }
 
 impl DeleteDocumentCommand {
+    #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
         document_type: &'static DocumentTypeId,
@@ -217,6 +232,7 @@ pub struct PublishDocumentCommand {
 }
 
 impl PublishDocumentCommand {
+    #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
         document_type: &'static DocumentTypeId,
@@ -228,6 +244,7 @@ impl PublishDocumentCommand {
         }
     }
 
+    #[must_use]
     pub fn with_expected_version(mut self, version: u32) -> Self {
         self.expected_version = Some(version);
         self
@@ -246,6 +263,7 @@ pub struct UnpublishDocumentCommand {
 }
 
 impl UnpublishDocumentCommand {
+    #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
         document_type: &'static DocumentTypeId,
@@ -257,6 +275,7 @@ impl UnpublishDocumentCommand {
         }
     }
 
+    #[must_use]
     pub fn with_draft_resolution(mut self, resolution: UnpublishDraftResolution) -> Self {
         self.draft_resolution = resolution;
         self
@@ -271,6 +290,7 @@ pub struct DiscardDraftCommand {
 }
 
 impl DiscardDraftCommand {
+    #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
         document_type: &'static DocumentTypeId,
@@ -293,6 +313,7 @@ pub struct RestoreSnapshotCommand {
 }
 
 impl RestoreSnapshotCommand {
+    #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
         document_type: &'static DocumentTypeId,
@@ -306,6 +327,7 @@ impl RestoreSnapshotCommand {
         }
     }
 
+    #[must_use]
     pub fn with_discard_pending_edits(mut self) -> Self {
         self.discard_pending_edits = true;
         self
@@ -321,6 +343,7 @@ pub struct ListAdminHeadersCommand {
 }
 
 impl ListAdminHeadersCommand {
+    #[must_use]
     pub fn new(document_type: &'static DocumentTypeId, pagination: Pagination) -> Self {
         Self {
             document_type,
@@ -329,6 +352,7 @@ impl ListAdminHeadersCommand {
         }
     }
 
+    #[must_use]
     pub fn with_status_filter(mut self, status: domain::content::DocumentStatus) -> Self {
         self.status_filter = Some(status);
         self
@@ -343,6 +367,7 @@ pub struct ListSnapshotsCommand {
 }
 
 impl ListSnapshotsCommand {
+    #[must_use]
     pub fn new(
         document_type: &'static DocumentTypeId,
         document_instance_id: DocumentInstanceId,
@@ -363,6 +388,7 @@ pub struct GetSnapshotCommand {
 }
 
 impl GetSnapshotCommand {
+    #[must_use]
     pub fn new(
         document_type: &'static DocumentTypeId,
         document_instance_id: DocumentInstanceId,
@@ -428,8 +454,8 @@ mod tests {
         assert_eq!(create.document_type, type_id);
         assert!(create.fields.is_empty());
 
-        let update = UpdateDocumentCommand::new(id, type_id, HashMap::new())
-            .with_expected_version(2);
+        let update =
+            UpdateDocumentCommand::new(id, type_id, HashMap::new()).with_expected_version(2);
         assert_eq!(update.document_instance_id, id);
         assert_eq!(update.document_type, type_id);
         assert_eq!(update.expected_version, Some(2));

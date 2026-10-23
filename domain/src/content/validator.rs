@@ -8,7 +8,7 @@ use crate::schema::{AttributeId, DocumentType, FieldConstraint};
 use crate::system::LocaleId;
 use crate::system::config::SystemConfig;
 
-/// Evaluates string constraints (MinLength, MaxLength, Pattern) against a string value.
+/// Evaluates string constraints (`MinLength`, `MaxLength`, `Pattern`) against a string value.
 /// If `locale` is provided, includes it in the error reason.
 fn evaluate_str_constraint(
     attr_id: &AttributeId,
@@ -31,19 +31,18 @@ fn evaluate_str_constraint(
         FieldConstraint::MinLength(min) => {
             let len = s.chars().count();
             if len < *min {
-                return violated(format!("length {} is below minimum {}", len, min));
+                return violated(format!("length {len} is below minimum {min}"));
             }
         }
         FieldConstraint::MaxLength(max) => {
             let len = s.chars().count();
             if len > *max {
-                return violated(format!("length {} exceeds maximum {}", len, max));
+                return violated(format!("length {len} exceeds maximum {max}"));
             }
         }
         FieldConstraint::Pattern(pattern) if !pattern.is_match(s) => {
             return violated(format!(
-                "value '{}' does not match pattern '{}'",
-                s,
+                "value '{s}' does not match pattern '{}'",
                 pattern.as_str()
             ));
         }
@@ -71,30 +70,29 @@ fn evaluate_constraint(
             FieldConstraint::MinLength(_)
             | FieldConstraint::MaxLength(_)
             | FieldConstraint::Pattern(_),
-            DomainValue::Primitive(PrimitiveValue::Text(s))
-            | DomainValue::Primitive(PrimitiveValue::Uid(s)),
+            DomainValue::Primitive(PrimitiveValue::Text(s) | PrimitiveValue::Uid(s)),
         ) => evaluate_str_constraint(attr_id, constraint, s, None),
         (FieldConstraint::MinInteger(min), DomainValue::Primitive(PrimitiveValue::Integer(n))) => {
             if *n < *min {
-                return violated(format!("value {} is below minimum {}", n, min));
+                return violated(format!("value {n} is below minimum {min}"));
             }
             None
         }
         (FieldConstraint::MaxInteger(max), DomainValue::Primitive(PrimitiveValue::Integer(n))) => {
             if *n > *max {
-                return violated(format!("value {} exceeds maximum {}", n, max));
+                return violated(format!("value {n} exceeds maximum {max}"));
             }
             None
         }
         (FieldConstraint::MinDecimal(min), DomainValue::Primitive(PrimitiveValue::Decimal(d))) => {
             if d < min {
-                return violated(format!("value {} is below minimum {}", d, min));
+                return violated(format!("value {d} is below minimum {min}"));
             }
             None
         }
         (FieldConstraint::MaxDecimal(max), DomainValue::Primitive(PrimitiveValue::Decimal(d))) => {
             if d > max {
-                return violated(format!("value {} exceeds maximum {}", d, max));
+                return violated(format!("value {d} exceeds maximum {max}"));
             }
             None
         }
@@ -106,7 +104,7 @@ fn evaluate_constraint(
 #[allow(clippy::mutable_key_type)]
 fn validate_field_value(
     attr_id: &AttributeId,
-    field_type: &FieldType,
+    field_type: FieldType,
     constraints: &HashSet<FieldConstraint>,
     val: &ContentValue,
     system_config: &SystemConfig,
@@ -115,33 +113,26 @@ fn validate_field_value(
     match val {
         ContentValue::Null => {}
         ContentValue::Scalar(dv) => {
-            if !dv.matches_field_type(field_type) {
-                errors.push(DomainError::InvalidFieldValue {
-                    attribute_id: attr_id.clone(),
-                    reason: format!("value does not match field type {:?}", field_type),
-                });
-            } else {
+            if dv.matches_field_type(&field_type) {
                 for constraint in constraints {
                     if let Some(err) = evaluate_constraint(attr_id, constraint, dv) {
                         errors.push(err);
                     }
                 }
+            } else {
+                errors.push(DomainError::InvalidFieldValue {
+                    attribute_id: attr_id.clone(),
+                    reason: format!("value does not match field type {field_type:?}"),
+                });
             }
         }
         ContentValue::LocalizedText(map) => {
-            if *field_type != FieldType::LocalizedText {
-                errors.push(DomainError::InvalidFieldValue {
-                    attribute_id: attr_id.clone(),
-                    reason: "localized text value provided for non-localized field".to_string(),
-                });
-            } else {
+            if field_type == FieldType::LocalizedText {
                 let mut sorted_locales: Vec<_> = map.keys().collect();
                 sorted_locales.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
                 for locale in sorted_locales {
                     let localized_str = &map[locale];
-                    if !system_config.contains_locale(locale) {
-                        errors.push(DomainError::UnknownLocale(locale.clone()));
-                    } else {
+                    if system_config.contains_locale(locale) {
                         for constraint in constraints {
                             if let Some(err) = evaluate_str_constraint(
                                 attr_id,
@@ -152,8 +143,15 @@ fn validate_field_value(
                                 errors.push(err);
                             }
                         }
+                    } else {
+                        errors.push(DomainError::UnknownLocale(locale.clone()));
                     }
                 }
+            } else {
+                errors.push(DomainError::InvalidFieldValue {
+                    attribute_id: attr_id.clone(),
+                    reason: "localized text value provided for non-localized field".to_string(),
+                });
             }
         }
     }
@@ -182,7 +180,7 @@ fn validate_content_with_mode(
             Some(val) => {
                 validate_field_value(
                     attr_id,
-                    &field_def.field_type,
+                    field_def.field_type,
                     &field_def.constraints,
                     val,
                     system_config,
@@ -207,6 +205,9 @@ fn validate_content_with_mode(
 }
 
 /// Validates document instance content for draft saving (lenient: skips required checks for missing/null).
+///
+/// # Errors
+/// Returns a collection of [`DomainError`] if any field value violates constraint or type rules.
 pub fn validate_draft_content(
     doc_type: &DocumentType,
     content: &DocumentContent,
@@ -216,6 +217,9 @@ pub fn validate_draft_content(
 }
 
 /// Validates document instance content against strict schema rules for publication.
+///
+/// # Errors
+/// Returns a collection of [`DomainError`] if required fields are missing or constraint/type rules fail.
 pub fn validate_publish_content(
     doc_type: &DocumentType,
     content: &DocumentContent,
@@ -225,6 +229,9 @@ pub fn validate_publish_content(
 }
 
 /// Backward-compatible alias delegating to `validate_publish_content`.
+///
+/// # Errors
+/// Returns a collection of [`DomainError`] if validation fails.
 pub fn validate_content(
     doc_type: &DocumentType,
     content: &DocumentContent,
@@ -236,14 +243,14 @@ pub fn validate_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use rust_decimal::Decimal;
+    use std::collections::HashMap;
 
     use crate::schema::pattern::RegexPattern;
     use crate::schema::types::IntegerSize;
     use crate::test_support::{
-        decimal_field, draft_content, fixture_system_config, integer_field, localized_field,
-        test_attr_id, test_locales, text_field, DocumentTypeBuilder,
+        DocumentTypeBuilder, decimal_field, draft_content, fixture_system_config, integer_field,
+        localized_field, test_attr_id, test_locales, text_field,
     };
 
     fn make_test_setup() -> (DocumentType, SystemConfig, AttributeId) {
@@ -331,12 +338,7 @@ mod tests {
         let title_attr = test_attr_id("title");
         let pattern = RegexPattern::try_new(r"^[A-Z][a-z]+$").unwrap();
         let doc_type = DocumentTypeBuilder::collection("article")
-            .with_field(
-                text_field("title")
-                    .min_len(3)
-                    .max_len(10)
-                    .pattern(pattern),
-            )
+            .with_field(text_field("title").min_len(3).max_len(10).pattern(pattern))
             .build();
         let config = fixture_system_config();
 
@@ -354,7 +356,8 @@ mod tests {
             title_attr.clone(),
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Hi".into()))),
         );
-        let short_err = validate_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
+        let short_err =
+            validate_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
         assert!(short_err.iter().any(|e| matches!(e, DomainError::InvalidFieldValue { reason, .. } if reason.contains("below minimum"))));
 
         // Invalid: pattern mismatch
@@ -363,7 +366,8 @@ mod tests {
             title_attr,
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("hello".into()))),
         );
-        let pattern_err = validate_content(&doc_type, &draft_content(regex_fields), &config).unwrap_err();
+        let pattern_err =
+            validate_content(&doc_type, &draft_content(regex_fields), &config).unwrap_err();
         assert!(pattern_err.iter().any(|e| matches!(e, DomainError::InvalidFieldValue { reason, .. } if reason.contains("does not match pattern"))));
     }
 
@@ -380,7 +384,7 @@ mod tests {
             )
             .with_field(
                 decimal_field("price", 6, 2)
-                    .min_dec(Decimal::new(1000, 2))  // 10.00
+                    .min_dec(Decimal::new(1000, 2)) // 10.00
                     .max_dec(Decimal::new(5000, 2)), // 50.00
             )
             .build();
@@ -394,7 +398,9 @@ mod tests {
         );
         valid_fields.insert(
             price_attr.clone(),
-            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Decimal(Decimal::new(2500, 2)))),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Decimal(
+                Decimal::new(2500, 2),
+            ))),
         );
         assert!(validate_content(&doc_type, &draft_content(valid_fields), &config).is_ok());
 
@@ -406,9 +412,12 @@ mod tests {
         );
         invalid_fields.insert(
             price_attr,
-            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Decimal(Decimal::new(500, 2)))), // 5.00
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Decimal(
+                Decimal::new(500, 2),
+            ))), // 5.00
         );
-        let errors = validate_content(&doc_type, &draft_content(invalid_fields), &config).unwrap_err();
+        let errors =
+            validate_content(&doc_type, &draft_content(invalid_fields), &config).unwrap_err();
         assert_eq!(errors.len(), 2);
     }
 
@@ -426,7 +435,10 @@ mod tests {
         valid_locales.insert(en.clone(), "Hello World".to_string());
         valid_locales.insert(uk.clone(), "Привіт світ".to_string());
         let mut fields = HashMap::new();
-        fields.insert(desc_attr.clone(), ContentValue::LocalizedText(valid_locales));
+        fields.insert(
+            desc_attr.clone(),
+            ContentValue::LocalizedText(valid_locales),
+        );
         assert!(validate_content(&doc_type, &draft_content(fields), &config).is_ok());
 
         // Unknown locale error
@@ -434,7 +446,8 @@ mod tests {
         with_de.insert(de.clone(), "Guten Tag".to_string());
         let mut de_fields = HashMap::new();
         de_fields.insert(desc_attr.clone(), ContentValue::LocalizedText(with_de));
-        let de_errors = validate_content(&doc_type, &draft_content(de_fields), &config).unwrap_err();
+        let de_errors =
+            validate_content(&doc_type, &draft_content(de_fields), &config).unwrap_err();
         assert!(matches!(&de_errors[0], DomainError::UnknownLocale(loc) if *loc == de));
 
         // Constraint violation on a specific locale
@@ -442,7 +455,8 @@ mod tests {
         short_locale.insert(en, "Hey".to_string()); // len 3 < min 4
         let mut short_fields = HashMap::new();
         short_fields.insert(desc_attr, ContentValue::LocalizedText(short_locale));
-        let constraint_err = validate_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
+        let constraint_err =
+            validate_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
         assert!(matches!(
             &constraint_err[0],
             DomainError::InvalidFieldValue { reason, .. } if reason.contains("locale 'en'")
@@ -457,7 +471,9 @@ mod tests {
         let mut fields = HashMap::new();
         fields.insert(
             title_attr,
-            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Valid Title".into()))),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+                "Valid Title".into(),
+            ))),
         );
         fields.insert(
             extra_attr.clone(),
@@ -482,7 +498,9 @@ mod tests {
         assert!(validate_draft_content(&doc_type, &empty_content, &config).is_ok());
         let pub_errs = validate_publish_content(&doc_type, &empty_content, &config).unwrap_err();
         assert_eq!(pub_errs.len(), 1);
-        assert!(matches!(&pub_errs[0], DomainError::InvalidFieldValue { attribute_id, .. } if *attribute_id == title_attr));
+        assert!(
+            matches!(&pub_errs[0], DomainError::InvalidFieldValue { attribute_id, .. } if *attribute_id == title_attr)
+        );
 
         // 2. Null required field: Draft succeeds, Publish fails
         let mut null_fields = HashMap::new();
@@ -508,7 +526,10 @@ mod tests {
         let mut de_loc_map = HashMap::new();
         de_loc_map.insert(de.clone(), "Hallo".to_string());
         let mut loc_fields = HashMap::new();
-        loc_fields.insert(test_attr_id("summary"), ContentValue::LocalizedText(de_loc_map));
+        loc_fields.insert(
+            test_attr_id("summary"),
+            ContentValue::LocalizedText(de_loc_map),
+        );
         let loc_content = draft_content(loc_fields);
         assert!(matches!(
             &validate_draft_content(&localized_doc_type, &loc_content, &config).unwrap_err()[0],

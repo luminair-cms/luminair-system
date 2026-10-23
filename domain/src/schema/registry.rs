@@ -12,13 +12,13 @@ pub struct SchemaRegistry {
     by_name: HashMap<String, DocumentTypeId>,
 }
 
-
 impl SchemaRegistry {
+    #[must_use]
     pub fn new(types: Vec<DocumentType>) -> Self {
         let types: IndexSet<DocumentType> = types.into_iter().collect();
 
         let mut by_name = HashMap::new();
-        for dt in types.iter() {
+        for dt in &types {
             let api_id = match dt.kind {
                 DocumentKind::Singleton => dt.info.singular_name.as_ref().to_string(),
                 DocumentKind::Collection => dt.info.plural_name.as_ref().to_string(),
@@ -26,13 +26,14 @@ impl SchemaRegistry {
             by_name.insert(api_id, dt.id.clone());
         }
 
-        Self {
-            types, by_name
-        }
+        Self { types, by_name }
     }
 
     /// Constructs a `SchemaRegistry` and validates all registered document types,
     /// including `display_fields`, field constraint applicability, and relation target existence.
+    ///
+    /// # Errors
+    /// Returns [`DomainError`] if any document type schema definition is invalid.
     pub fn try_new(types: Vec<DocumentType>) -> Result<Self, DomainError> {
         let registry = Self::new(types);
         registry.validate()?;
@@ -43,12 +44,16 @@ impl SchemaRegistry {
     /// 1. Each document type's `display_fields` satisfy `validate_display_fields()`.
     /// 2. Each field's constraints are applicable to its `field_type`.
     /// 3. Each relation's `target` `DocumentTypeId` exists in the registry.
+    ///
+    /// # Errors
+    /// Returns [`DomainError`] if validation fails.
     pub fn validate(&self) -> Result<(), DomainError> {
         for dt in &self.types {
             dt.validate_display_fields()?;
 
             for field in &dt.fields {
-                if let FieldType::Primitive(PrimitiveType::Decimal { precision, scale }) = field.field_type
+                if let FieldType::Primitive(PrimitiveType::Decimal { precision, scale }) =
+                    field.field_type
                     && (precision == 0 || precision > 38 || scale > precision)
                 {
                     return Err(DomainError::Validation(format!(
@@ -80,10 +85,12 @@ impl SchemaRegistry {
         self.types.iter()
     }
 
+    #[must_use]
     pub fn get(&self, id: &DocumentTypeId) -> Option<&DocumentType> {
         self.types.get(id)
     }
 
+    #[must_use]
     pub fn find_by_name(&self, plural_name: &str) -> Option<&DocumentType> {
         self.by_name
             .get(plural_name)
@@ -98,7 +105,7 @@ mod tests {
     use crate::schema::attributes::RelationDefinition;
     use crate::schema::types::{FieldType, PrimitiveType};
     use crate::test_support::{
-        test_attr_id, test_doc_type_id, text_field, DocumentTypeBuilder, FieldDefinitionBuilder,
+        DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_doc_type_id, text_field,
     };
 
     #[test]
@@ -113,7 +120,10 @@ mod tests {
         // Collection is found by plural name
         assert_eq!(registry.find_by_name("articles").unwrap().id, coll_id);
         // SingleType is found by singular name
-        assert_eq!(registry.find_by_name("site-settings").unwrap().id, single_id);
+        assert_eq!(
+            registry.find_by_name("site-settings").unwrap().id,
+            single_id
+        );
 
         // Found by ID
         assert_eq!(registry.get(&coll_id).unwrap().id, coll_id);
@@ -162,7 +172,10 @@ mod tests {
             .build();
 
         let res = SchemaRegistry::try_new(vec![article]);
-        assert!(matches!(res, Err(DomainError::InvalidSchemaDisplayField { .. })));
+        assert!(matches!(
+            res,
+            Err(DomainError::InvalidSchemaDisplayField { .. })
+        ));
     }
 
     #[test]
@@ -177,17 +190,17 @@ mod tests {
             .build();
 
         let res = SchemaRegistry::try_new(vec![article]);
-        assert!(matches!(res, Err(DomainError::DocumentTypeNotFound(target)) if target.as_ref() == "unregistered-author"));
+        assert!(
+            matches!(res, Err(DomainError::DocumentTypeNotFound(target)) if target.as_ref() == "unregistered-author")
+        );
     }
 
     #[test]
     fn test_schema_registry_try_new_inapplicable_constraint() {
-        let invalid_field = FieldDefinitionBuilder::new(
-            "title",
-            FieldType::Primitive(PrimitiveType::Text),
-        )
-        .min_int(10)
-        .build();
+        let invalid_field =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text))
+                .min_int(10)
+                .build();
 
         let article = DocumentTypeBuilder::collection("article")
             .with_field(invalid_field)

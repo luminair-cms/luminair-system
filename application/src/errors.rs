@@ -26,7 +26,8 @@ pub enum ConflictCode {
 }
 
 impl ConflictCode {
-    /// Returns the static snake_case string representation of the conflict code.
+    /// Returns the static `snake_case` string representation of the conflict code.
+    #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::DraftHasPendingEdits => "draft_has_pending_edits",
@@ -57,6 +58,7 @@ pub struct InvalidParam {
 }
 
 impl InvalidParam {
+    #[must_use]
     pub fn new(
         name: impl Into<String>,
         reason: impl Into<String>,
@@ -69,7 +71,8 @@ impl InvalidParam {
         }
     }
 
-    /// Converts a DomainError into a structured InvalidParam if applicable.
+    /// Converts a `DomainError` into a structured `InvalidParam` if applicable.
+    #[must_use]
     pub fn from_domain_error(err: &DomainError) -> Self {
         match err {
             DomainError::InvalidFieldValue {
@@ -119,7 +122,7 @@ impl std::ops::Deref for InvalidParam {
 fn format_invalid_params(params: &[InvalidParam]) -> String {
     params
         .iter()
-        .map(|p| p.to_string())
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -156,7 +159,7 @@ pub struct ProblemDetails {
     pub title: String,
     /// HTTP status code.
     pub status: u16,
-    /// Stable, machine-readable application error code (e.g. "draft_has_pending_edits").
+    /// Stable, machine-readable application error code (e.g. "`draft_has_pending_edits`").
     pub code: String,
     /// Human-readable explanation of this specific occurrence (English fallback).
     pub detail: String,
@@ -242,6 +245,7 @@ impl ApplicationError {
     }
 
     /// Convenience constructor for restoring a snapshot over pending working draft edits.
+    #[must_use]
     pub fn draft_overwrite_conflict(
         document_id: DocumentInstanceId,
         target_revision: u32,
@@ -259,21 +263,27 @@ impl ApplicationError {
     }
 
     /// Convenience constructor for publishing a clean published document with no changes.
+    #[must_use]
     pub fn already_published_conflict(document_id: DocumentInstanceId) -> Self {
         Self::Conflict {
             code: ConflictCode::AlreadyPublished,
-            message: format!("document '{document_id}' is already published with no pending changes"),
+            message: format!(
+                "document '{document_id}' is already published with no pending changes"
+            ),
             details: Some(serde_json::json!({
                 "document_id": document_id.to_string(),
             })),
         }
     }
 
-    /// Convenience constructor for publish/unpublish when draft_and_publish is disabled.
+    /// Convenience constructor for publish/unpublish when `draft_and_publish` is disabled.
+    #[must_use]
     pub fn draft_publish_disabled_conflict(type_title: &str) -> Self {
         Self::Conflict {
             code: ConflictCode::DraftAndPublishDisabled,
-            message: format!("document type '{type_title}' does not support draft-and-publish workflow"),
+            message: format!(
+                "document type '{type_title}' does not support draft-and-publish workflow"
+            ),
             details: Some(serde_json::json!({
                 "document_type": type_title,
             })),
@@ -281,6 +291,7 @@ impl ApplicationError {
     }
 
     /// Convenience constructor for optimistic concurrency control version mismatch.
+    #[must_use]
     pub fn version_mismatch_conflict(expected: u32, found: u32) -> Self {
         Self::Conflict {
             code: ConflictCode::VersionMismatch,
@@ -293,11 +304,13 @@ impl ApplicationError {
     }
 
     /// Convenience constructor for user who has not requested access.
+    #[must_use]
     pub fn access_not_requested(user_id: UserId) -> Self {
         Self::Onboarding(OnboardingStatus::AccessNotRequested { user_id })
     }
 
     /// Convenience constructor for user whose access request is pending review.
+    #[must_use]
     pub fn access_pending(user_id: UserId, submitted_at: DateTime<Utc>) -> Self {
         Self::Onboarding(OnboardingStatus::AccessPending {
             user_id,
@@ -306,11 +319,13 @@ impl ApplicationError {
     }
 
     /// Convenience constructor for user whose access request was rejected.
+    #[must_use]
     pub fn access_rejected(user_id: UserId, reason: Option<String>) -> Self {
         Self::Onboarding(OnboardingStatus::AccessRejected { user_id, reason })
     }
 
     /// Convenience constructor for single validation failure.
+    #[must_use]
     pub fn validation_single(
         name: impl Into<String>,
         reason: impl Into<String>,
@@ -319,7 +334,8 @@ impl ApplicationError {
         Self::Validation(vec![InvalidParam::new(name, reason, code)])
     }
 
-    /// Returns the canonical machine-readable snake_case error code.
+    /// Returns the canonical machine-readable `snake_case` error code.
+    #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
             Self::Domain(d) => match d {
@@ -352,6 +368,7 @@ impl ApplicationError {
     }
 
     /// Returns the HTTP status code recommended for this error.
+    #[must_use]
     pub fn status_code(&self) -> u16 {
         match self {
             Self::Domain(d) => match d {
@@ -370,8 +387,7 @@ impl ApplicationError {
                 | DomainError::InvalidSchemaDisplayField { .. }
                 | DomainError::Validation(_) => 422,
             },
-            Self::Unauthorized { .. } => 403,
-            Self::Onboarding(_) => 403,
+            Self::Unauthorized { .. } | Self::Onboarding(_) => 403,
             Self::NotFound { .. } => 404,
             Self::Validation(_) => 422,
             Self::Conflict { .. } => 409,
@@ -380,20 +396,27 @@ impl ApplicationError {
     }
 
     /// Converts this application error into an RFC 9457 compliant Problem Details representation.
+    #[must_use]
     pub fn to_problem_details(&self) -> ProblemDetails {
         let status = self.status_code();
         let code = self.code();
-        let title = match status {
-            400 => "Bad Request",
-            401 => "Unauthorized",
-            403 => "Forbidden",
-            404 => "Not Found",
-            409 => "Conflict",
-            422 => "Unprocessable Entity",
-            _ => "Internal Server Error",
-        };
+        let (detail, details, invalid_params) = self.problem_details_payload();
 
-        let (detail, details, invalid_params) = match self {
+        ProblemDetails {
+            problem_type: format!("urn:luminair:error:{code}"),
+            title: status_title(status).to_string(),
+            status,
+            code: code.to_string(),
+            detail,
+            details,
+            invalid_params,
+        }
+    }
+
+    fn problem_details_payload(
+        &self,
+    ) -> (String, Option<serde_json::Value>, Option<Vec<InvalidParam>>) {
+        match self {
             Self::Domain(d) => match d {
                 DomainError::InvalidFieldValue {
                     attribute_id,
@@ -473,26 +496,24 @@ impl ApplicationError {
                 })),
                 None,
             ),
-            Self::Validation(params) => (
-                format_invalid_params(params),
-                None,
-                Some(params.clone()),
-            ),
+            Self::Validation(params) => (format_invalid_params(params), None, Some(params.clone())),
             Self::Conflict {
                 message, details, ..
             } => (message.clone(), details.clone(), None),
             Self::Internal(msg) => (msg.clone(), None, None),
-        };
-
-        ProblemDetails {
-            problem_type: format!("urn:luminair:error:{code}"),
-            title: title.to_string(),
-            status,
-            code: code.to_string(),
-            detail,
-            details,
-            invalid_params,
         }
+    }
+}
+
+const fn status_title(status: u16) -> &'static str {
+    match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        409 => "Conflict",
+        422 => "Unprocessable Entity",
+        _ => "Internal Server Error",
     }
 }
 
@@ -554,13 +575,19 @@ mod tests {
             "title must not be empty",
             "required_field_missing",
         );
-        assert_eq!(err.to_string(), "validation error: title: title must not be empty");
+        assert_eq!(
+            err.to_string(),
+            "validation error: title: title must not be empty"
+        );
         assert_eq!(err.code(), "validation_failed");
         assert_eq!(err.status_code(), 422);
 
         let problem = err.to_problem_details();
         assert_eq!(problem.invalid_params.as_ref().unwrap().len(), 1);
-        assert_eq!(problem.invalid_params.as_ref().unwrap()[0].code, "required_field_missing");
+        assert_eq!(
+            problem.invalid_params.as_ref().unwrap()[0].code,
+            "required_field_missing"
+        );
     }
 
     #[test]
@@ -605,10 +632,8 @@ mod tests {
 
     #[test]
     fn test_conflict_error_display_and_helpers() {
-        let err = ApplicationError::conflict(
-            ConflictCode::GenericConflict,
-            "locale 'en' already active",
-        );
+        let err =
+            ApplicationError::conflict(ConflictCode::GenericConflict, "locale 'en' already active");
         assert_eq!(
             err.to_string(),
             "conflict [generic_conflict]: locale 'en' already active"

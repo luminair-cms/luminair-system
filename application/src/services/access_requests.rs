@@ -10,13 +10,18 @@ use domain::auth::{
 };
 use domain::errors::DomainError;
 
-use crate::commands::access_requests::*;
+use crate::commands::access_requests::{
+    ApproveAccessRequestCommand, RejectAccessRequestCommand, SubmitAccessRequestCommand,
+};
 use crate::context::CallerContext;
 use crate::errors::ApplicationError;
 
 /// Port trait defining use cases for user access requests and enrollment.
 pub trait AccessRequestsService: Send + Sync + 'static {
-    /// Submits a new access request for an authenticated IdP identity.
+    /// Submits a new access request for an authenticated `IdP` identity.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if submission fails due to duplicate requests or storage errors.
     fn submit(
         &self,
         cmd: SubmitAccessRequestCommand,
@@ -26,6 +31,9 @@ pub trait AccessRequestsService: Send + Sync + 'static {
     ///
     /// In `infrastructure`, persisting `assignments` and `request` must execute
     /// within a single database transaction wrapped in `with_occ_retry`.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if the caller is unauthorized or approval validation fails.
     fn approve(
         &self,
         caller: &CallerContext,
@@ -33,6 +41,9 @@ pub trait AccessRequestsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<UserRoleAssignment>, ApplicationError>> + Send;
 
     /// Rejects a pending access request with an optional reason.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if the caller is unauthorized or state transition fails.
     fn reject(
         &self,
         caller: &CallerContext,
@@ -40,6 +51,9 @@ pub trait AccessRequestsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<AccessRequest, ApplicationError>> + Send;
 
     /// Fetches an access request by identifier (allowed for the requester or users with `ManageUsers`).
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if not found or unauthorized.
     fn get_by_id(
         &self,
         caller: &CallerContext,
@@ -47,6 +61,9 @@ pub trait AccessRequestsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<AccessRequest, ApplicationError>> + Send;
 
     /// Lists all pending access requests awaiting administrator review.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if unauthorized or on storage failure.
     fn list_pending(
         &self,
         caller: &CallerContext,

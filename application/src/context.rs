@@ -1,8 +1,6 @@
 //! Security and caller identity context.
 
-use domain::auth::{
-    ActorId, AuthorizationService, Permission, Role, RoleId, ServiceId, UserId,
-};
+use domain::auth::{ActorId, AuthorizationService, Permission, Role, RoleId, ServiceId, UserId};
 use domain::content::DocumentInstance;
 
 use crate::errors::ApplicationError;
@@ -18,6 +16,7 @@ pub struct CallerContext {
 
 impl CallerContext {
     /// Creates a new `CallerContext` for an authenticated actor (user, service, or system) and their roles.
+    #[must_use]
     pub fn new(actor: impl Into<ActorId>, roles: Vec<Role>) -> Self {
         Self {
             actor: actor.into(),
@@ -26,6 +25,7 @@ impl CallerContext {
     }
 
     /// Creates a new `CallerContext` for a service actor.
+    #[must_use]
     pub fn service(service_id: ServiceId, roles: Vec<Role>) -> Self {
         Self {
             actor: ActorId::Service(service_id),
@@ -34,6 +34,7 @@ impl CallerContext {
     }
 
     /// Creates an internal system caller context with administrative privileges.
+    #[must_use]
     pub fn system() -> Self {
         let admin_role = Role {
             id: RoleId::new(uuid::Uuid::nil()),
@@ -57,6 +58,7 @@ impl CallerContext {
     }
 
     /// Returns the associated user ID if the actor is a human user.
+    #[must_use]
     pub fn user_id(&self) -> Option<&UserId> {
         self.actor.as_user()
     }
@@ -68,13 +70,15 @@ impl CallerContext {
     /// 2. Owner rule (creators have full rights to their own instances, excluding publish).
     /// 3. RBAC (across all assigned roles).
     /// 4. Default DENY.
+    #[must_use]
     pub fn can(&self, action: &Permission, instance: Option<&DocumentInstance>) -> bool {
         AuthorizationService::can_actor(&self.actor, action, instance, &self.roles)
     }
 
     /// Enforces that the caller has permission to perform `action` on the optional `instance`.
     ///
-    /// Returns `Ok(())` if allowed, or `Err(ApplicationError::Unauthorized)` if denied.
+    /// # Errors
+    /// Returns [`ApplicationError::Unauthorized`] if the caller lacks permission.
     pub fn check_permission(
         &self,
         action: &Permission,
@@ -129,10 +133,7 @@ mod tests {
 
         let res = ctx.check_permission(&Permission::DeleteDocument(Some(type_id.clone())), None);
         match res {
-            Err(ApplicationError::Unauthorized {
-                actor,
-                action,
-            }) => {
+            Err(ApplicationError::Unauthorized { actor, action }) => {
                 assert_eq!(actor, ActorId::User(user_id));
                 assert_eq!(action, Permission::DeleteDocument(Some(type_id)));
             }

@@ -1,11 +1,11 @@
-//! Integration tests for schema loading and SystemContext assembly.
+//! Integration tests for schema loading and `SystemContext` assembly.
 
 use std::fs;
 
 use domain::schema::DocumentTypeId;
 use domain::system::LocaleId;
 use infrastructure::schema_loader::{
-    load_schemas_from_dir, load_system_context_from_dir, SchemaLoaderError,
+    SchemaLoaderError, load_schemas_from_dir, load_system_context_from_dir,
 };
 
 fn create_temp_schema_dir(prefix: &str) -> std::path::PathBuf {
@@ -76,7 +76,11 @@ fn test_load_schemas_from_dir_success() {
             }
         }
     }"#;
-    fs::write(dir.join("document-types").join("article.json"), article_json).expect("write article.json");
+    fs::write(
+        dir.join("document-types").join("article.json"),
+        article_json,
+    )
+    .expect("write article.json");
 
     let category_json = r#"{
         "kind": "collection",
@@ -105,7 +109,11 @@ fn test_load_schemas_from_dir_success() {
             }
         }
     }"#;
-    fs::write(dir.join("document-types").join("category.json"), category_json).expect("write category.json");
+    fs::write(
+        dir.join("document-types").join("category.json"),
+        category_json,
+    )
+    .expect("write category.json");
 
     let tag_json = r#"{
         "kind": "collection",
@@ -159,7 +167,10 @@ fn test_load_schemas_missing_system_config() {
     let dir = create_temp_schema_dir("missing_config");
     let res = load_schemas_from_dir(&dir);
 
-    assert!(matches!(res, Err(SchemaLoaderError::MissingSystemConfig { .. })));
+    assert!(matches!(
+        res,
+        Err(SchemaLoaderError::MissingSystemConfig { .. })
+    ));
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -202,7 +213,10 @@ fn test_load_schemas_file_stem_mismatch() {
     fs::write(dir.join("document-types").join("article.json"), json).unwrap();
 
     let res = load_schemas_from_dir(&dir);
-    assert!(matches!(res, Err(SchemaLoaderError::FileStemMismatch { .. })));
+    assert!(matches!(
+        res,
+        Err(SchemaLoaderError::FileStemMismatch { .. })
+    ));
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -268,7 +282,9 @@ fn test_load_schemas_invalid_display_fields_max_exceeded() {
     let res = load_schemas_from_dir(&dir);
     assert!(matches!(
         res,
-        Err(SchemaLoaderError::Domain(domain::errors::DomainError::InvalidSchemaDisplayField { .. }))
+        Err(SchemaLoaderError::Domain(
+            domain::errors::DomainError::InvalidSchemaDisplayField { .. }
+        ))
     ));
     let _ = fs::remove_dir_all(dir);
 }

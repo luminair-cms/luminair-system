@@ -74,6 +74,9 @@ impl DocumentType {
     /// 2. No duplicate attributes.
     /// 3. Attributes must exist in `fields` (excluding `Json`) or in `relations` (`HasOne` / `BelongsToOne`).
     /// 4. Maximum 1 relational display field.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::InvalidSchemaDisplayField`] if any display field rule is violated.
     pub fn validate_display_fields(&self) -> Result<(), DomainError> {
         // Rule 1: Max 3 Total
         if self.info.display_fields.len() > 3 {
@@ -139,6 +142,7 @@ impl DocumentType {
 
     /// Returns the configured `display_fields`, or falls back to the first declared
     /// `Text`, `Uid`, or `LocalizedText` field in `self.fields`.
+    #[must_use]
     pub fn effective_display_fields(&self) -> Vec<AttributeId> {
         if !self.info.display_fields.is_empty() {
             return self.info.display_fields.clone();
@@ -159,6 +163,7 @@ impl DocumentType {
 
     /// Returns the singular `RelationDefinition` if `self.info.display_fields` contains
     /// a singular relation attribute (`HasOne` or `BelongsToOne`).
+    #[must_use]
     pub fn relational_display_field(&self) -> Option<&RelationDefinition> {
         self.info.display_fields.iter().find_map(|attr_id| {
             self.relations.get(attr_id).filter(|rel| {
@@ -223,10 +228,19 @@ mod tests {
 
     #[test]
     fn test_display_fields_valid_up_to_three_fields_including_one_relation() {
-        use crate::test_support::{test_attr_id, test_doc_type_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_doc_type_id,
+        };
 
-        let f1 = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f2 = FieldDefinitionBuilder::new("year", FieldType::Primitive(PrimitiveType::Integer(crate::schema::types::IntegerSize::I32))).build();
+        let f1 =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f2 = FieldDefinitionBuilder::new(
+            "year",
+            FieldType::Primitive(PrimitiveType::Integer(
+                crate::schema::types::IntegerSize::I32,
+            )),
+        )
+        .build();
         let rel = RelationDefinition {
             id: test_attr_id("author"),
             relation_type: RelationType::HasOne,
@@ -237,13 +251,21 @@ mod tests {
             .with_field(f1)
             .with_field(f2)
             .with_relation(rel)
-            .with_display_fields(vec![test_attr_id("title"), test_attr_id("year"), test_attr_id("author")])
+            .with_display_fields(vec![
+                test_attr_id("title"),
+                test_attr_id("year"),
+                test_attr_id("author"),
+            ])
             .build();
 
         assert!(doc_type.validate_display_fields().is_ok());
         assert_eq!(
             doc_type.effective_display_fields(),
-            vec![test_attr_id("title"), test_attr_id("year"), test_attr_id("author")]
+            vec![
+                test_attr_id("title"),
+                test_attr_id("year"),
+                test_attr_id("author")
+            ]
         );
         assert_eq!(
             doc_type.relational_display_field().map(|r| r.id.clone()),
@@ -253,12 +275,16 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_more_than_three() {
-        use crate::test_support::{test_attr_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
 
-        let f1 = FieldDefinitionBuilder::new("f1", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f2 = FieldDefinitionBuilder::new("f2", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f3 = FieldDefinitionBuilder::new("f3", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f4 = FieldDefinitionBuilder::new("f4", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f1 =
+            FieldDefinitionBuilder::new("f1", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f2 =
+            FieldDefinitionBuilder::new("f2", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f3 =
+            FieldDefinitionBuilder::new("f3", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f4 =
+            FieldDefinitionBuilder::new("f4", FieldType::Primitive(PrimitiveType::Text)).build();
 
         let doc_type = DocumentTypeBuilder::collection("test-doc")
             .with_field(f1)
@@ -280,9 +306,10 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_duplicates() {
-        use crate::test_support::{test_attr_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
 
-        let f1 = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f1 =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
 
         let doc_type = DocumentTypeBuilder::collection("test-doc")
             .with_field(f1)
@@ -296,9 +323,12 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_more_than_one_relation() {
-        use crate::test_support::{test_attr_id, test_doc_type_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_doc_type_id,
+        };
 
-        let f1 = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f1 =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
         let rel1 = RelationDefinition {
             id: test_attr_id("author"),
             relation_type: RelationType::HasOne,
@@ -323,12 +353,15 @@ mod tests {
 
         let err = doc_type.validate_display_fields().unwrap_err();
         assert!(matches!(err, DomainError::InvalidSchemaDisplayField { .. }));
-        assert!(err.to_string().contains("at most 1 relational display field"));
+        assert!(
+            err.to_string()
+                .contains("at most 1 relational display field")
+        );
     }
 
     #[test]
     fn test_display_fields_rejects_multi_cardinality_relations() {
-        use crate::test_support::{test_attr_id, test_doc_type_id, DocumentTypeBuilder};
+        use crate::test_support::{DocumentTypeBuilder, test_attr_id, test_doc_type_id};
 
         let rel_many = RelationDefinition {
             id: test_attr_id("tags"),
@@ -348,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_json_field() {
-        use crate::test_support::{test_attr_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
 
         let f_json = FieldDefinitionBuilder::new("metadata", FieldType::Json).build();
 
@@ -364,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_undeclared_attribute() {
-        use crate::test_support::{test_attr_id, DocumentTypeBuilder};
+        use crate::test_support::{DocumentTypeBuilder, test_attr_id};
 
         let doc_type = DocumentTypeBuilder::collection("record")
             .with_display_fields(vec![test_attr_id("missing")])
@@ -377,18 +410,28 @@ mod tests {
 
     #[test]
     fn test_effective_display_fields_fallback() {
-        use crate::test_support::{test_attr_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
 
         // Fallback to first text field when display_fields is empty
-        let f_int = FieldDefinitionBuilder::new("counter", FieldType::Primitive(PrimitiveType::Integer(crate::schema::types::IntegerSize::I64))).build();
-        let f_text = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f_int = FieldDefinitionBuilder::new(
+            "counter",
+            FieldType::Primitive(PrimitiveType::Integer(
+                crate::schema::types::IntegerSize::I64,
+            )),
+        )
+        .build();
+        let f_text =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
 
         let doc_type = DocumentTypeBuilder::collection("item")
             .with_field(f_int)
             .with_field(f_text)
             .build();
 
-        assert_eq!(doc_type.effective_display_fields(), vec![test_attr_id("title")]);
+        assert_eq!(
+            doc_type.effective_display_fields(),
+            vec![test_attr_id("title")]
+        );
         assert!(doc_type.relational_display_field().is_none());
 
         // Localized text fallback
@@ -396,10 +439,15 @@ mod tests {
         let doc_loc = DocumentTypeBuilder::collection("item")
             .with_field(f_loc)
             .build();
-        assert_eq!(doc_loc.effective_display_fields(), vec![test_attr_id("heading")]);
+        assert_eq!(
+            doc_loc.effective_display_fields(),
+            vec![test_attr_id("heading")]
+        );
 
         // No eligible text field -> empty vec
-        let f_bool = FieldDefinitionBuilder::new("is-active", FieldType::Primitive(PrimitiveType::Boolean)).build();
+        let f_bool =
+            FieldDefinitionBuilder::new("is-active", FieldType::Primitive(PrimitiveType::Boolean))
+                .build();
         let doc_no_text = DocumentTypeBuilder::collection("item")
             .with_field(f_bool)
             .build();

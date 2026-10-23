@@ -9,15 +9,15 @@ pub mod planner;
 pub mod sync;
 
 pub use builder::{build_desired_schema, build_document_type_tables};
-pub use diff::{compute_diff, DiffError, MigrationStep, SafetyPolicy};
-pub use executor::{build_column_def, execute_migration_plan, step_to_sql, ExecutionSummary};
-pub use introspector::{introspect_database_schema, SYSTEM_TABLES};
+pub use diff::{DiffError, MigrationStep, SafetyPolicy, compute_diff};
+pub use executor::{ExecutionSummary, build_column_def, execute_migration_plan, step_to_sql};
+pub use introspector::{SYSTEM_TABLES, introspect_database_schema};
 pub use model::{
     ColumnDefinition, DatabaseSchema, ForeignKeyAction, ForeignKeyDefinition, IndexDefinition,
     SqlColumnType, TableDefinition, TableKind,
 };
-pub use planner::{plan_migrations, MigrationPlan};
+pub use planner::{MigrationPlan, plan_migrations};
 pub use sync::{
-    generate_ddl_for_document_type, generate_ddl_for_registry, sync_dynamic_schemas,
-    sync_dynamic_schemas_from_dir, SchemaSyncResult,
+    SchemaSyncResult, generate_ddl_for_document_type, generate_ddl_for_registry,
+    sync_dynamic_schemas, sync_dynamic_schemas_from_dir,
 };

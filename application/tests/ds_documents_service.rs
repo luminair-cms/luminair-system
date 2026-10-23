@@ -13,7 +13,7 @@ use domain::errors::DomainError;
 use domain::schema::{DocumentType, RelationDefinition, RelationType, SchemaRegistry};
 use domain::system::SystemContext;
 use domain::test_support::{
-    fixture_system_config, test_attr_id, test_user_id, text_field, DocumentTypeBuilder,
+    DocumentTypeBuilder, fixture_system_config, test_attr_id, test_user_id, text_field,
 };
 
 fn setup_service_fixture(
@@ -29,15 +29,19 @@ fn setup_service_fixture(
     } else {
         DocumentTypeBuilder::collection("article")
     };
-    builder = builder.with_title("Article").with_field(text_field("title"));
+    builder = builder
+        .with_title("Article")
+        .with_field(text_field("title"));
     if !draft_and_publish {
         builder = builder.with_draft_and_publish(false);
     }
     let dt = builder.build();
     let type_id = dt.id.clone();
     let schema = SchemaRegistry::new(vec![dt]);
-    let ctx: &'static SystemContext =
-        Box::leak(Box::new(SystemContext::new(schema, fixture_system_config())));
+    let ctx: &'static SystemContext = Box::leak(Box::new(SystemContext::new(
+        schema,
+        fixture_system_config(),
+    )));
     let leaked_dt = ctx.find_type(&type_id).unwrap();
 
     let repo = FakeDocumentInstanceRepository::new();
@@ -97,7 +101,9 @@ async fn ds_02_create_blocked_for_second_singletype_instance() {
 
     assert!(matches!(
         second,
-        Err(ApplicationError::Domain(DomainError::SingleTypeAlreadyExists(_)))
+        Err(ApplicationError::Domain(
+            DomainError::SingleTypeAlreadyExists(_)
+        ))
     ));
 }
 
@@ -225,7 +231,10 @@ async fn ds_17_publish_rejects_already_published_document_without_pending_change
     match res {
         Err(ApplicationError::Conflict { code, message, .. }) => {
             assert_eq!(code, ConflictCode::AlreadyPublished);
-            assert!(message.contains("already published"), "unexpected message: {message}");
+            assert!(
+                message.contains("already published"),
+                "unexpected message: {message}"
+            );
         }
         other => panic!("expected Conflict, got {other:?}"),
     }
@@ -245,7 +254,10 @@ async fn ds_17_publish_rejects_already_published_document_without_pending_change
         .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
         .await
         .unwrap();
-    assert!(snapshots.is_empty(), "no snapshot may be created: {snapshots:?}");
+    assert!(
+        snapshots.is_empty(),
+        "no snapshot may be created: {snapshots:?}"
+    );
 }
 
 #[tokio::test]
@@ -254,7 +266,9 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
     let mut fields = HashMap::new();
     fields.insert(
         test_attr_id("title"),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Static".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Static".into(),
+        ))),
     );
     let inst = service
         .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
@@ -389,7 +403,9 @@ async fn ds_09_unpublish_rejects_already_draft_instance() {
 
     assert!(matches!(
         res,
-        Err(ApplicationError::Domain(DomainError::InvalidStateTransition { .. }))
+        Err(ApplicationError::Domain(
+            DomainError::InvalidStateTransition { .. }
+        ))
     ));
 }
 
@@ -468,7 +484,9 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
     let mut fields = HashMap::new();
     fields.insert(
         test_attr_id("title"),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Secret".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Secret".into(),
+        ))),
     );
     let inst = service
         .create(&admin, CreateDocumentCommand::new(&doc_type.id, fields))
@@ -483,17 +501,29 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
             UpdateDocumentCommand::new(inst.id, &doc_type.id, HashMap::new()),
         )
         .await;
-    assert!(matches!(update_res, Err(ApplicationError::Unauthorized { .. })));
+    assert!(matches!(
+        update_res,
+        Err(ApplicationError::Unauthorized { .. })
+    ));
 
     let delete_res = service
         .delete(&stranger, DeleteDocumentCommand::new(inst.id, &doc_type.id))
         .await;
-    assert!(matches!(delete_res, Err(ApplicationError::Unauthorized { .. })));
+    assert!(matches!(
+        delete_res,
+        Err(ApplicationError::Unauthorized { .. })
+    ));
 
     let publish_res = service
-        .publish(&stranger, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(
+            &stranger,
+            PublishDocumentCommand::new(inst.id, &doc_type.id),
+        )
         .await;
-    assert!(matches!(publish_res, Err(ApplicationError::Unauthorized { .. })));
+    assert!(matches!(
+        publish_res,
+        Err(ApplicationError::Unauthorized { .. })
+    ));
 
     let unpublish_res = service
         .unpublish(
@@ -501,7 +531,10 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
             UnpublishDocumentCommand::new(inst.id, &doc_type.id),
         )
         .await;
-    assert!(matches!(unpublish_res, Err(ApplicationError::Unauthorized { .. })));
+    assert!(matches!(
+        unpublish_res,
+        Err(ApplicationError::Unauthorized { .. })
+    ));
 }
 
 #[tokio::test]
@@ -536,7 +569,9 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
         .await;
     assert!(matches!(
         fail_discard,
-        Err(ApplicationError::Domain(DomainError::InvalidStateTransition { .. }))
+        Err(ApplicationError::Domain(
+            DomainError::InvalidStateTransition { .. }
+        ))
     ));
 
     // 2. Edit draft -> transitions to Modified state
@@ -557,7 +592,10 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
         .unwrap();
     assert!(matches!(
         modified.content.publication_state,
-        PublicationState::Modified { live_revision: 1, .. }
+        PublicationState::Modified {
+            live_revision: 1,
+            ..
+        }
     ));
     assert_eq!(
         modified.get_field(&test_attr_id("title")),
@@ -605,7 +643,9 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     let mut fields_v1 = HashMap::new();
     fields_v1.insert(
         test_attr_id("title"),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("V1 Title".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "V1 Title".into(),
+        ))),
     );
     let inst = service
         .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_v1))
@@ -625,7 +665,9 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     let mut fields_v2 = HashMap::new();
     fields_v2.insert(
         test_attr_id("title"),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("V2 Title".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "V2 Title".into(),
+        ))),
     );
     service
         .update(
@@ -779,7 +821,9 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     let mut fields_a1 = HashMap::new();
     fields_a1.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Live V1 A".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Live V1 A".into(),
+        ))),
     );
     let inst_a = service
         .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_a1))
@@ -787,17 +831,25 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
         .unwrap();
 
     service
-        .publish(&caller, PublishDocumentCommand::new(inst_a.id, &doc_type.id))
+        .publish(
+            &caller,
+            PublishDocumentCommand::new(inst_a.id, &doc_type.id),
+        )
         .await
         .unwrap();
 
     let mut fields_a2 = HashMap::new();
     fields_a2.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft V2 A".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Draft V2 A".into(),
+        ))),
     );
     service
-        .update(&caller, UpdateDocumentCommand::new(inst_a.id, &doc_type.id, fields_a2))
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst_a.id, &doc_type.id, fields_a2),
+        )
         .await
         .unwrap();
 
@@ -861,7 +913,9 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     let mut fields_b1 = HashMap::new();
     fields_b1.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Live V1 B".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Live V1 B".into(),
+        ))),
     );
     let inst_b = service
         .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_b1))
@@ -869,17 +923,25 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
         .unwrap();
 
     service
-        .publish(&caller, PublishDocumentCommand::new(inst_b.id, &doc_type.id))
+        .publish(
+            &caller,
+            PublishDocumentCommand::new(inst_b.id, &doc_type.id),
+        )
         .await
         .unwrap();
 
     let mut fields_b2 = HashMap::new();
     fields_b2.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft V2 B".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Draft V2 B".into(),
+        ))),
     );
     service
-        .update(&caller, UpdateDocumentCommand::new(inst_b.id, &doc_type.id, fields_b2))
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst_b.id, &doc_type.id, fields_b2),
+        )
         .await
         .unwrap();
 
@@ -950,8 +1012,10 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
 
     let article_type_id = article_type.id.clone();
     let schema = SchemaRegistry::new(vec![article_type, author_type]);
-    let ctx: &'static SystemContext =
-        Box::leak(Box::new(SystemContext::new(schema, fixture_system_config())));
+    let ctx: &'static SystemContext = Box::leak(Box::new(SystemContext::new(
+        schema,
+        fixture_system_config(),
+    )));
     let leaked_article = ctx.find_type(&article_type_id).unwrap();
     let leaked_author = ctx.find_type(&author_type_id).unwrap();
 
@@ -1094,10 +1158,15 @@ async fn test_version_views_across_all_four_document_states() {
     let mut draft_fields = HashMap::new();
     draft_fields.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft Title".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Draft Title".into(),
+        ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, draft_fields))
+        .create(
+            &caller,
+            CreateDocumentCommand::new(&doc_type.id, draft_fields),
+        )
         .await
         .unwrap();
 
@@ -1105,7 +1174,10 @@ async fn test_version_views_across_all_four_document_states() {
         .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
         .await
         .unwrap();
-    assert!(pub_view_1.is_none(), "Draft must not be visible in Published tab");
+    assert!(
+        pub_view_1.is_none(),
+        "Draft must not be visible in Published tab"
+    );
 
     let work_view_1 = service
         .find_by_id(
@@ -1271,7 +1343,9 @@ async fn ds_18_get_snapshot_returns_historical_revision() {
     let mut f1 = HashMap::new();
     f1.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Revision 1".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Revision 1".into(),
+        ))),
     );
     let inst = service
         .create(&caller, CreateDocumentCommand::new(&doc_type.id, f1))
@@ -1286,10 +1360,15 @@ async fn ds_18_get_snapshot_returns_historical_revision() {
     let mut f2 = HashMap::new();
     f2.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Revision 2".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Revision 2".into(),
+        ))),
     );
     service
-        .update(&caller, UpdateDocumentCommand::new(inst.id, &doc_type.id, f2))
+        .update(
+            &caller,
+            UpdateDocumentCommand::new(inst.id, &doc_type.id, f2),
+        )
         .await
         .unwrap();
     service
@@ -1315,7 +1394,13 @@ async fn ds_18_get_snapshot_returns_historical_revision() {
     let res = service
         .get_snapshot(&caller, GetSnapshotCommand::new(&doc_type.id, inst.id, 99))
         .await;
-    assert!(matches!(res, Err(ApplicationError::NotFound { entity: "DocumentSnapshot", .. })));
+    assert!(matches!(
+        res,
+        Err(ApplicationError::NotFound {
+            entity: "DocumentSnapshot",
+            ..
+        })
+    ));
 }
 
 #[tokio::test]
@@ -1326,7 +1411,9 @@ async fn test_update_occ_version_mismatch_conflict() {
     let mut fields = HashMap::new();
     fields.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Original".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Original".into(),
+        ))),
     );
     let inst = service
         .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
@@ -1338,7 +1425,9 @@ async fn test_update_occ_version_mismatch_conflict() {
     let mut u1 = HashMap::new();
     u1.insert(
         title_attr.clone(),
-        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Updated".into()))),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+            "Updated".into(),
+        ))),
     );
     let updated = service
         .update(
@@ -1394,6 +1483,8 @@ async fn test_restore_snapshot_on_draft_fails_immediately_with_invalid_state_tra
         .await;
     assert!(matches!(
         res,
-        Err(ApplicationError::Domain(DomainError::InvalidStateTransition { .. }))
+        Err(ApplicationError::Domain(
+            DomainError::InvalidStateTransition { .. }
+        ))
     ));
 }

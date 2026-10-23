@@ -47,6 +47,7 @@ pub struct Role {
 }
 
 impl Role {
+    #[must_use]
     pub fn has_permission(&self, action: &Permission) -> bool {
         self.permissions.iter().any(|p| p.matches(action))
     }
@@ -67,21 +68,24 @@ pub enum Permission {
 impl Permission {
     /// Checks if this permission satisfies the requested action.
     /// `None` indicates a wildcard granting access to all document types.
+    #[must_use]
     pub fn matches(&self, action: &Permission) -> bool {
         match (self, action) {
-            (Permission::ManageSchema, Permission::ManageSchema) => true,
-            (Permission::ManageRoles, Permission::ManageRoles) => true,
-            (Permission::ManageUsers, Permission::ManageUsers) => true,
-            (Permission::CreateDocument(None), Permission::CreateDocument(_)) => true,
-            (Permission::CreateDocument(Some(a)), Permission::CreateDocument(Some(b))) => a == b,
-            (Permission::ReadDocument(None), Permission::ReadDocument(_)) => true,
-            (Permission::ReadDocument(Some(a)), Permission::ReadDocument(Some(b))) => a == b,
-            (Permission::UpdateDocument(None), Permission::UpdateDocument(_)) => true,
-            (Permission::UpdateDocument(Some(a)), Permission::UpdateDocument(Some(b))) => a == b,
-            (Permission::DeleteDocument(None), Permission::DeleteDocument(_)) => true,
-            (Permission::DeleteDocument(Some(a)), Permission::DeleteDocument(Some(b))) => a == b,
-            (Permission::PublishDocument(None), Permission::PublishDocument(_)) => true,
-            (Permission::PublishDocument(Some(a)), Permission::PublishDocument(Some(b))) => a == b,
+            (Permission::ManageSchema, Permission::ManageSchema)
+            | (Permission::ManageRoles, Permission::ManageRoles)
+            | (Permission::ManageUsers, Permission::ManageUsers)
+            | (Permission::CreateDocument(None), Permission::CreateDocument(_))
+            | (Permission::ReadDocument(None), Permission::ReadDocument(_))
+            | (Permission::UpdateDocument(None), Permission::UpdateDocument(_))
+            | (Permission::DeleteDocument(None), Permission::DeleteDocument(_))
+            | (Permission::PublishDocument(None), Permission::PublishDocument(_)) => true,
+            (Permission::CreateDocument(Some(a)), Permission::CreateDocument(Some(b)))
+            | (Permission::ReadDocument(Some(a)), Permission::ReadDocument(Some(b)))
+            | (Permission::UpdateDocument(Some(a)), Permission::UpdateDocument(Some(b)))
+            | (Permission::DeleteDocument(Some(a)), Permission::DeleteDocument(Some(b)))
+            | (Permission::PublishDocument(Some(a)), Permission::PublishDocument(Some(b))) => {
+                a == b
+            }
             _ => false,
         }
     }
@@ -136,24 +140,60 @@ mod tests {
         assert!(Permission::ManageUsers.matches(&Permission::ManageUsers));
 
         // Create
-        assert!(Permission::CreateDocument(None).matches(&Permission::CreateDocument(Some(doc_type.clone()))));
-        assert!(Permission::CreateDocument(Some(doc_type.clone())).matches(&Permission::CreateDocument(Some(doc_type.clone()))));
-        assert!(!Permission::CreateDocument(Some(doc_type.clone())).matches(&Permission::CreateDocument(Some(other_type.clone()))));
+        assert!(
+            Permission::CreateDocument(None)
+                .matches(&Permission::CreateDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            Permission::CreateDocument(Some(doc_type.clone()))
+                .matches(&Permission::CreateDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            !Permission::CreateDocument(Some(doc_type.clone()))
+                .matches(&Permission::CreateDocument(Some(other_type.clone())))
+        );
 
         // Update
-        assert!(Permission::UpdateDocument(None).matches(&Permission::UpdateDocument(Some(doc_type.clone()))));
-        assert!(Permission::UpdateDocument(Some(doc_type.clone())).matches(&Permission::UpdateDocument(Some(doc_type.clone()))));
-        assert!(!Permission::UpdateDocument(Some(doc_type.clone())).matches(&Permission::UpdateDocument(Some(other_type.clone()))));
+        assert!(
+            Permission::UpdateDocument(None)
+                .matches(&Permission::UpdateDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            Permission::UpdateDocument(Some(doc_type.clone()))
+                .matches(&Permission::UpdateDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            !Permission::UpdateDocument(Some(doc_type.clone()))
+                .matches(&Permission::UpdateDocument(Some(other_type.clone())))
+        );
 
         // Delete
-        assert!(Permission::DeleteDocument(None).matches(&Permission::DeleteDocument(Some(doc_type.clone()))));
-        assert!(Permission::DeleteDocument(Some(doc_type.clone())).matches(&Permission::DeleteDocument(Some(doc_type.clone()))));
-        assert!(!Permission::DeleteDocument(Some(doc_type.clone())).matches(&Permission::DeleteDocument(Some(other_type.clone()))));
+        assert!(
+            Permission::DeleteDocument(None)
+                .matches(&Permission::DeleteDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            Permission::DeleteDocument(Some(doc_type.clone()))
+                .matches(&Permission::DeleteDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            !Permission::DeleteDocument(Some(doc_type.clone()))
+                .matches(&Permission::DeleteDocument(Some(other_type.clone())))
+        );
 
         // Publish
-        assert!(Permission::PublishDocument(None).matches(&Permission::PublishDocument(Some(doc_type.clone()))));
-        assert!(Permission::PublishDocument(Some(doc_type.clone())).matches(&Permission::PublishDocument(Some(doc_type.clone()))));
-        assert!(!Permission::PublishDocument(Some(doc_type.clone())).matches(&Permission::PublishDocument(Some(other_type))));
+        assert!(
+            Permission::PublishDocument(None)
+                .matches(&Permission::PublishDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            Permission::PublishDocument(Some(doc_type.clone()))
+                .matches(&Permission::PublishDocument(Some(doc_type.clone())))
+        );
+        assert!(
+            !Permission::PublishDocument(Some(doc_type.clone()))
+                .matches(&Permission::PublishDocument(Some(other_type)))
+        );
     }
 
     #[test]

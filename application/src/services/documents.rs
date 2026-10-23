@@ -6,23 +6,31 @@ use std::future::Future;
 use chrono::Utc;
 use domain::auth::Permission;
 use domain::content::{
-    extract_display_identity, validate_content, validate_publish_content, DocumentHeader,
-    DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, DocumentSnapshot,
-    DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader, SnapshotId,
-    SnapshotReason, UnpublishDraftResolution, VersionView,
+    DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
+    DocumentSnapshot, DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader,
+    SnapshotId, SnapshotReason, UnpublishDraftResolution, VersionView, extract_display_identity,
+    validate_content, validate_publish_content,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentKind, DocumentType, DocumentTypeId, RelationType};
 use domain::system::SystemContext;
 use uuid::Uuid;
 
-use crate::commands::documents::*;
+use crate::commands::documents::{
+    CreateDocumentCommand, DeleteDocumentCommand, DiscardDraftCommand, FindByIdCommand,
+    FindDocumentsCommand, GetSnapshotCommand, ListAdminHeadersCommand, ListSnapshotsCommand,
+    PublishDocumentCommand, RelationAction, RestoreSnapshotCommand, UnpublishDocumentCommand,
+    UpdateDocumentCommand,
+};
 use crate::context::CallerContext;
 use crate::errors::ApplicationError;
 
 /// Port trait defining use cases for document instances.
 pub trait DocumentsService: Send + Sync + 'static {
     /// Queries a paginated list of documents with sequential count and optional relation enrichment.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if unauthorized or on repository query failure.
     fn find(
         &self,
         caller: &CallerContext,
@@ -30,6 +38,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(Vec<DocumentInstance>, u64), ApplicationError>> + Send;
 
     /// Fetches a single document instance by identifier with optional relation enrichment.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if unauthorized or on repository query failure.
     fn find_by_id(
         &self,
         caller: &CallerContext,
@@ -37,6 +48,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<DocumentInstance>, ApplicationError>> + Send;
 
     /// Creates a new draft document instance, enforcing singleton limits and schema validation.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if validation fails, unauthorized, or duplicate singleton exists.
     fn create(
         &self,
         caller: &CallerContext,
@@ -44,6 +58,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
 
     /// Updates field values of an existing document instance.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] on optimistic concurrency failure, validation error, or unauthorized.
     fn update(
         &self,
         caller: &CallerContext,
@@ -51,6 +68,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
 
     /// Deletes a document instance by identifier.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if unauthorized, not found, or on storage failure.
     fn delete(
         &self,
         caller: &CallerContext,
@@ -58,6 +78,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), ApplicationError>> + Send;
 
     /// Publishes a draft document instance.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if publication validation fails, unauthorized, or on conflict.
     fn publish(
         &self,
         caller: &CallerContext,
@@ -65,6 +88,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
 
     /// Reverts a published document instance back to draft state (not visible for public use).
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if unauthorized or state transition fails.
     fn unpublish(
         &self,
         caller: &CallerContext,
@@ -72,6 +98,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
 
     /// Discards pending draft edits, reverting the document to its clean live published state.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if the document is not in Modified state or unauthorized.
     fn discard_draft(
         &self,
         caller: &CallerContext,
@@ -79,6 +108,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
 
     /// Restores a historical snapshot revision into the current draft.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if snapshot not found, conflict with pending edits, or unauthorized.
     fn restore_snapshot(
         &self,
         caller: &CallerContext,
@@ -86,6 +118,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
 
     /// Lists lightweight document headers for Admin Studio views with 2-phase relational enrichment.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if unauthorized or on storage query error.
     fn list_admin_headers(
         &self,
         caller: &CallerContext,
@@ -93,6 +128,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(Vec<DocumentHeader>, u64), ApplicationError>> + Send;
 
     /// Lists revision snapshot headers for a document instance.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if unauthorized or on storage query error.
     fn list_snapshots(
         &self,
         caller: &CallerContext,
@@ -100,6 +138,9 @@ pub trait DocumentsService: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<SnapshotHeader>, ApplicationError>> + Send;
 
     /// Fetches a specific historical revision snapshot by revision number.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if snapshot is not found or unauthorized.
     fn get_snapshot(
         &self,
         caller: &CallerContext,
@@ -114,11 +155,11 @@ pub struct DocumentsServiceImpl<R, S = R> {
     pub context: &'static SystemContext,
 }
 
-impl<R> DocumentsServiceImpl<R, R>
+impl<Repo> DocumentsServiceImpl<Repo, Repo>
 where
-    R: DocumentInstanceRepository + DocumentSnapshotRepository + Clone + 'static,
+    Repo: DocumentInstanceRepository + DocumentSnapshotRepository + Clone + 'static,
 {
-    pub fn new(instance_repo: R, context: &'static SystemContext) -> Self {
+    pub fn new(instance_repo: Repo, context: &'static SystemContext) -> Self {
         let snapshot_repo = instance_repo.clone();
         Self {
             instance_repo,
@@ -148,6 +189,9 @@ where
     /// Two-phase batch relation enrichment:
     /// 1. Fetches related instances for all parent instances in a single batch query.
     /// 2. Stitches relations in-memory to each corresponding document instance.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError`] if the repository fails to fetch relations.
     pub async fn enrich(
         &self,
         type_id: &DocumentTypeId,
@@ -186,6 +230,9 @@ where
     }
 
     /// Validates relational actions against schema registry invariants and applies them to the document instance.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError::Validation`] if a relation attribute is invalid or violates cardinality.
     pub fn validate_and_apply_relations(
         &self,
         doc_type: &DocumentType,
@@ -250,7 +297,7 @@ where
                             ));
                         }
                     }
-                    instance.connect_relations(attr, target_ids);
+                    instance.connect_relations(&attr, target_ids);
                 }
                 RelationAction::Disconnect(target_ids) => {
                     instance.disconnect_relations(&attr, &target_ids);
@@ -358,11 +405,8 @@ where
             ));
         }
 
-        let mut instance = DocumentInstance::new(
-            cmd.document_type.clone(),
-            caller.actor.clone(),
-            Utc::now(),
-        );
+        let mut instance =
+            DocumentInstance::new(cmd.document_type.clone(), caller.actor.clone(), Utc::now());
         instance.replace_fields(cmd.fields);
 
         // Schema constraint and required field validation
@@ -396,7 +440,9 @@ where
                 .await?;
         }
 
-        if !cmd.populate.is_empty() {
+        if cmd.populate.is_empty() {
+            Ok(instance)
+        } else {
             let mut enriched = self
                 .enrich(cmd.document_type, &cmd.populate, vec![instance])
                 .await?;
@@ -404,8 +450,6 @@ where
                 ApplicationError::Internal("enriched instance missing from batch result".into())
             })?;
             Ok(doc)
-        } else {
-            Ok(instance)
         }
     }
 
@@ -416,7 +460,11 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Working,
+            )
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -440,7 +488,9 @@ where
             ));
         }
 
-        let prev_published_snapshot = if !doc_type.options.draft_and_publish {
+        let prev_published_snapshot = if doc_type.options.draft_and_publish {
+            None
+        } else {
             let prev_rev = match instance.content.publication_state {
                 PublicationState::Published { revision, .. } => revision,
                 _ => 0,
@@ -460,8 +510,6 @@ where
             } else {
                 None
             }
-        } else {
-            None
         };
 
         // Apply updated fields (supports partial PATCH: omitted fields are retained,
@@ -508,7 +556,9 @@ where
                 .await?;
         }
 
-        if !cmd.populate.is_empty() {
+        if cmd.populate.is_empty() {
+            Ok(instance)
+        } else {
             let mut enriched = self
                 .enrich(cmd.document_type, &cmd.populate, vec![instance])
                 .await?;
@@ -516,8 +566,6 @@ where
                 ApplicationError::Internal("enriched instance missing from batch result".into())
             })?;
             Ok(doc)
-        } else {
-            Ok(instance)
         }
     }
 
@@ -528,7 +576,11 @@ where
     ) -> Result<(), ApplicationError> {
         let instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Working,
+            )
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -552,7 +604,11 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Working,
+            )
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -605,7 +661,11 @@ where
         let now = Utc::now();
         let prev_published = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Published)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Published,
+            )
             .await?;
 
         let archived_snapshot = prev_published.and_then(|prev_live| {
@@ -659,7 +719,11 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Working,
+            )
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -688,14 +752,19 @@ where
         ) {
             return Err(ApplicationError::Domain(
                 DomainError::InvalidStateTransition {
-                    reason: "cannot unpublish a document that is not currently published".to_string(),
-                }
+                    reason: "cannot unpublish a document that is not currently published"
+                        .to_string(),
+                },
             ));
         }
 
         let live_published = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Published)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Published,
+            )
             .await?;
 
         let now = Utc::now();
@@ -770,7 +839,11 @@ where
 
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Working,
+            )
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -798,7 +871,11 @@ where
     ) -> Result<DocumentInstance, ApplicationError> {
         let mut instance = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Working)
+            .find_by_id(
+                cmd.document_type,
+                cmd.document_instance_id,
+                VersionView::Working,
+            )
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
@@ -834,21 +911,7 @@ where
         let now = Utc::now();
 
         // If in Modified state, require explicit confirmation before overwriting pending working draft edits
-        if matches!(
-            instance.content.publication_state,
-            PublicationState::Modified { .. }
-        ) && !cmd.discard_pending_edits
-        {
-            let draft_version = match instance.content.publication_state {
-                PublicationState::Modified { draft_version, .. } => draft_version,
-                _ => instance.audit.version,
-            };
-            return Err(ApplicationError::draft_overwrite_conflict(
-                instance.id,
-                cmd.revision,
-                draft_version,
-            ));
-        }
+        check_restore_conflict(&instance, &cmd)?;
 
         instance.restore_snapshot(&snapshot, caller.actor.clone(), now)?;
 
@@ -866,7 +929,11 @@ where
         } else {
             let prev_published = self
                 .instance_repo
-                .find_by_id(cmd.document_type, cmd.document_instance_id, VersionView::Published)
+                .find_by_id(
+                    cmd.document_type,
+                    cmd.document_instance_id,
+                    VersionView::Published,
+                )
                 .await?;
             let prev_snapshot = prev_published.and_then(|prev_live| {
                 let prev_rev = match prev_live.content.publication_state {
@@ -952,7 +1019,7 @@ where
                         header.enrich_relational_display(
                             &effective_fields,
                             &rel_def.id,
-                            target_title.clone(),
+                            target_title,
                         );
                     }
                 }
@@ -1006,6 +1073,28 @@ where
                 id: format!("{}:v{}", cmd.document_instance_id, cmd.revision),
             })
     }
+}
+
+fn check_restore_conflict(
+    instance: &DocumentInstance,
+    cmd: &RestoreSnapshotCommand,
+) -> Result<(), ApplicationError> {
+    if matches!(
+        instance.content.publication_state,
+        PublicationState::Modified { .. }
+    ) && !cmd.discard_pending_edits
+    {
+        let draft_version = match instance.content.publication_state {
+            PublicationState::Modified { draft_version, .. } => draft_version,
+            _ => instance.audit.version,
+        };
+        return Err(ApplicationError::draft_overwrite_conflict(
+            instance.id,
+            cmd.revision,
+            draft_version,
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

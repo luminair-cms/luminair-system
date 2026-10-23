@@ -56,6 +56,9 @@ pub enum MigrationStep {
 // ---------------------------------------------------------------------------
 
 /// Computes the difference between the actual live schema and the desired schema AST.
+///
+/// # Errors
+/// Returns [`DiffError`] if schema validation detects an irreconcilable diff violation.
 pub fn compute_diff(
     actual: &DatabaseSchema,
     desired: &DatabaseSchema,
@@ -63,8 +66,8 @@ pub fn compute_diff(
 ) -> Result<Vec<MigrationStep>, DiffError> {
     let mut steps = Vec::new();
 
-    diff_desired_tables(actual, desired, policy, &mut steps)?;
-    diff_removed_tables(actual, desired, policy, &mut steps)?;
+    diff_desired_tables(actual, desired, policy, &mut steps);
+    diff_removed_tables(actual, desired, policy, &mut steps);
 
     Ok(steps)
 }
@@ -78,7 +81,7 @@ fn diff_desired_tables(
     desired: &DatabaseSchema,
     policy: SafetyPolicy,
     steps: &mut Vec<MigrationStep>,
-) -> Result<(), DiffError> {
+) {
     for desired_table in &desired.tables {
         match actual.find_table(&desired_table.name) {
             None => {
@@ -88,12 +91,11 @@ fn diff_desired_tables(
                 }
             }
             Some(actual_table) => {
-                diff_table_columns(actual_table, desired_table, policy, steps)?;
-                diff_table_indexes(actual_table, desired_table, policy, steps)?;
+                diff_table_columns(actual_table, desired_table, policy, steps);
+                diff_table_indexes(actual_table, desired_table, policy, steps);
             }
         }
     }
-    Ok(())
 }
 
 fn diff_table_columns(
@@ -101,7 +103,7 @@ fn diff_table_columns(
     desired_table: &TableDefinition,
     policy: SafetyPolicy,
     steps: &mut Vec<MigrationStep>,
-) -> Result<(), DiffError> {
+) {
     // 1. Add missing columns
     for desired_col in &desired_table.columns {
         if actual_table.find_column(&desired_col.name).is_none() {
@@ -126,8 +128,6 @@ fn diff_table_columns(
             }
         }
     }
-
-    Ok(())
 }
 
 fn diff_table_indexes(
@@ -135,7 +135,7 @@ fn diff_table_indexes(
     desired_table: &TableDefinition,
     policy: SafetyPolicy,
     steps: &mut Vec<MigrationStep>,
-) -> Result<(), DiffError> {
+) {
     // 1. Add missing indexes
     for desired_idx in &desired_table.indexes {
         if actual_table.find_index(&desired_idx.name).is_none() {
@@ -157,8 +157,6 @@ fn diff_table_indexes(
             }
         }
     }
-
-    Ok(())
 }
 
 fn diff_removed_tables(
@@ -166,7 +164,7 @@ fn diff_removed_tables(
     desired: &DatabaseSchema,
     policy: SafetyPolicy,
     steps: &mut Vec<MigrationStep>,
-) -> Result<(), DiffError> {
+) {
     for actual_table in &actual.tables {
         if desired.find_table(&actual_table.name).is_none() {
             match policy {
@@ -180,7 +178,6 @@ fn diff_removed_tables(
             }
         }
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -26,14 +26,10 @@ pub enum SchemaLoaderError {
     },
 
     #[error("missing system-config.json in schema directory '{dir}'")]
-    MissingSystemConfig {
-        dir: PathBuf,
-    },
+    MissingSystemConfig { dir: PathBuf },
 
     #[error("missing document-types directory in schema directory '{dir}'")]
-    MissingDocumentTypesDir {
-        dir: PathBuf,
-    },
+    MissingDocumentTypesDir { dir: PathBuf },
 
     #[error("schema file stem '{file_stem}' does not match singularName '{singular_name}'")]
     FileStemMismatch {
@@ -42,10 +38,7 @@ pub enum SchemaLoaderError {
     },
 
     #[error("reserved SQL keyword '{keyword}' cannot be used as identifier for {context}")]
-    ReservedKeyword {
-        keyword: String,
-        context: String,
-    },
+    ReservedKeyword { keyword: String, context: String },
 
     #[error("domain validation error: {0}")]
     Domain(#[from] domain::errors::DomainError),

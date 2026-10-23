@@ -28,6 +28,10 @@ pub struct SystemConfig {
 }
 
 impl SystemConfig {
+    /// Creates a new `SystemConfig` validating that `default_locale` is present in `available_locales`.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::UnknownLocale`] if `default_locale` is not in `available_locales`.
     pub fn new(
         id: SystemConfigId,
         available_locales: Vec<LocaleId>,
@@ -43,6 +47,7 @@ impl SystemConfig {
         })
     }
 
+    #[must_use]
     pub fn contains_locale(&self, locale: &LocaleId) -> bool {
         self.available_locales.contains(locale)
     }
@@ -51,8 +56,8 @@ impl SystemConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
     use crate::test_support::test_locales;
+    use uuid::Uuid;
 
     fn test_config_id() -> SystemConfigId {
         SystemConfigId::new(Uuid::now_v7())

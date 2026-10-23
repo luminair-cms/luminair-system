@@ -4,7 +4,9 @@ use std::future::Future;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use super::header::{DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader, VersionView};
+use super::header::{
+    DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader, VersionView,
+};
 use super::instance::{DocumentInstance, DocumentInstanceId};
 use super::values::DomainValue;
 use crate::errors::DomainError;
@@ -41,7 +43,7 @@ pub struct FieldFilter {
 }
 
 /// A mapping of relation attribute to a map of parent instance IDs and their related instances:
-/// AttributeId -> (ParentInstanceId -> Vec<RelatedInstance>)
+/// `AttributeId` -> (`ParentInstanceId` -> `Vec<RelatedInstance>`)
 pub type RelationMap = HashMap<AttributeId, HashMap<DocumentInstanceId, Vec<DocumentInstance>>>;
 
 pub trait DocumentInstanceRepository: Send + Sync {
@@ -55,7 +57,7 @@ pub trait DocumentInstanceRepository: Send + Sync {
         view: VersionView,
     ) -> impl Future<Output = Result<Option<DocumentInstance>, DomainError>> + Send;
 
-    /// Visitor query: queries strictly the published wide table (or all instances in legacy/find_by_type).
+    /// Visitor query: queries strictly the published wide table (or all instances in legacy `find_by_type`).
     fn find_by_type(
         &self,
         type_id: &DocumentTypeId,

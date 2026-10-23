@@ -79,13 +79,15 @@ pub const RESERVED_SQL_KEYWORDS: &[&str] = &[
 ];
 
 /// Checks if an identifier is a reserved SQL/PostgreSQL keyword (case-insensitive).
+#[must_use]
 pub fn is_reserved_sql_keyword(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     RESERVED_SQL_KEYWORDS.contains(&lower.as_str())
 }
 
-/// Converts a kebab-case identifier to snake_case.
+/// Converts a kebab-case identifier to `snake_case`.
 /// E.g. `blog-post` -> `blog_post`, `hero-image-url` -> `hero_image_url`.
+#[must_use]
 pub fn kebab_to_snake(s: &str) -> String {
     s.replace('-', "_")
 }

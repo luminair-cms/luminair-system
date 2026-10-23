@@ -86,24 +86,132 @@ fn test_az_authorization_decision_table() {
     };
 
     let cases = vec![
-        Case { id: "AZ-01", target: TargetInstance::Owner(&instance), action: Permission::ReadDocument(Some(article_type.clone())), roles: vec![], expected: true },
-        Case { id: "AZ-02", target: TargetInstance::Owner(&instance), action: Permission::UpdateDocument(Some(article_type.clone())), roles: vec![], expected: true },
-        Case { id: "AZ-03", target: TargetInstance::Owner(&instance), action: Permission::DeleteDocument(Some(article_type.clone())), roles: vec![], expected: true },
-        Case { id: "AZ-04", target: TargetInstance::Owner(&instance), action: Permission::PublishDocument(Some(article_type.clone())), roles: vec![], expected: false },
-        Case { id: "AZ-05", target: TargetInstance::NonOwner(&instance), action: Permission::ReadDocument(Some(article_type.clone())), roles: vec![], expected: false },
-        Case { id: "AZ-06", target: TargetInstance::NonOwner(&instance), action: Permission::UpdateDocument(Some(article_type.clone())), roles: vec![], expected: false },
-        Case { id: "AZ-07", target: TargetInstance::NonOwner(&instance), action: Permission::DeleteDocument(Some(article_type.clone())), roles: vec![], expected: false },
-        Case { id: "AZ-08", target: TargetInstance::NonOwner(&instance), action: Permission::PublishDocument(Some(article_type.clone())), roles: vec![], expected: false },
-        Case { id: "AZ-09", target: TargetInstance::NonOwner(&instance), action: Permission::ReadDocument(Some(article_type.clone())), roles: vec![reader_article_role], expected: true },
-        Case { id: "AZ-10", target: TargetInstance::NonOwner(&instance), action: Permission::ReadDocument(Some(article_type.clone())), roles: vec![reader_news_role], expected: false },
-        Case { id: "AZ-11", target: TargetInstance::NonOwner(&instance), action: Permission::ReadDocument(Some(article_type.clone())), roles: vec![wildcard_reader_role], expected: true },
-        Case { id: "AZ-12", target: TargetInstance::Owner(&instance), action: Permission::PublishDocument(Some(article_type.clone())), roles: vec![publisher_article_role], expected: true },
-        Case { id: "AZ-13", target: TargetInstance::NonOwner(&instance), action: Permission::PublishDocument(Some(article_type.clone())), roles: vec![wildcard_publisher_role], expected: true },
-        Case { id: "AZ-14", target: TargetInstance::None, action: Permission::CreateDocument(Some(article_type.clone())), roles: vec![creator_article_role], expected: true },
-        Case { id: "AZ-15", target: TargetInstance::None, action: Permission::CreateDocument(Some(article_type.clone())), roles: vec![], expected: false },
-        Case { id: "AZ-16", target: TargetInstance::None, action: Permission::ManageSchema, roles: vec![schema_admin_role], expected: true },
-        Case { id: "AZ-17", target: TargetInstance::None, action: Permission::ManageRoles, roles: vec![user_admin_role], expected: false },
-        Case { id: "AZ-18", target: TargetInstance::NonOwner(&instance), action: Permission::DeleteDocument(Some(article_type)), roles: vec![admin_role()], expected: true },
+        Case {
+            id: "AZ-01",
+            target: TargetInstance::Owner(&instance),
+            action: Permission::ReadDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: true,
+        },
+        Case {
+            id: "AZ-02",
+            target: TargetInstance::Owner(&instance),
+            action: Permission::UpdateDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: true,
+        },
+        Case {
+            id: "AZ-03",
+            target: TargetInstance::Owner(&instance),
+            action: Permission::DeleteDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: true,
+        },
+        Case {
+            id: "AZ-04",
+            target: TargetInstance::Owner(&instance),
+            action: Permission::PublishDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: false,
+        },
+        Case {
+            id: "AZ-05",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::ReadDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: false,
+        },
+        Case {
+            id: "AZ-06",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::UpdateDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: false,
+        },
+        Case {
+            id: "AZ-07",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::DeleteDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: false,
+        },
+        Case {
+            id: "AZ-08",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::PublishDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: false,
+        },
+        Case {
+            id: "AZ-09",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::ReadDocument(Some(article_type.clone())),
+            roles: vec![reader_article_role],
+            expected: true,
+        },
+        Case {
+            id: "AZ-10",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::ReadDocument(Some(article_type.clone())),
+            roles: vec![reader_news_role],
+            expected: false,
+        },
+        Case {
+            id: "AZ-11",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::ReadDocument(Some(article_type.clone())),
+            roles: vec![wildcard_reader_role],
+            expected: true,
+        },
+        Case {
+            id: "AZ-12",
+            target: TargetInstance::Owner(&instance),
+            action: Permission::PublishDocument(Some(article_type.clone())),
+            roles: vec![publisher_article_role],
+            expected: true,
+        },
+        Case {
+            id: "AZ-13",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::PublishDocument(Some(article_type.clone())),
+            roles: vec![wildcard_publisher_role],
+            expected: true,
+        },
+        Case {
+            id: "AZ-14",
+            target: TargetInstance::None,
+            action: Permission::CreateDocument(Some(article_type.clone())),
+            roles: vec![creator_article_role],
+            expected: true,
+        },
+        Case {
+            id: "AZ-15",
+            target: TargetInstance::None,
+            action: Permission::CreateDocument(Some(article_type.clone())),
+            roles: vec![],
+            expected: false,
+        },
+        Case {
+            id: "AZ-16",
+            target: TargetInstance::None,
+            action: Permission::ManageSchema,
+            roles: vec![schema_admin_role],
+            expected: true,
+        },
+        Case {
+            id: "AZ-17",
+            target: TargetInstance::None,
+            action: Permission::ManageRoles,
+            roles: vec![user_admin_role],
+            expected: false,
+        },
+        Case {
+            id: "AZ-18",
+            target: TargetInstance::NonOwner(&instance),
+            action: Permission::DeleteDocument(Some(article_type)),
+            roles: vec![admin_role()],
+            expected: true,
+        },
     ];
 
     let mut failures = Vec::new();
@@ -118,11 +226,18 @@ fn test_az_authorization_decision_table() {
         let result = AuthorizationService::can(user, &case.action, inst_opt, &case.roles);
 
         if result != case.expected {
-            failures.push(format!("{}: expected {}, got {}", case.id, case.expected, result));
+            failures.push(format!(
+                "{}: expected {}, got {}",
+                case.id, case.expected, result
+            ));
         }
     }
 
-    assert!(failures.is_empty(), "Failed cases:\n- {}", failures.join("\n- "));
+    assert!(
+        failures.is_empty(),
+        "Failed cases:\n- {}",
+        failures.join("\n- ")
+    );
 }
 
 #[test]
@@ -143,7 +258,10 @@ fn test_az_actor_authorization_rules() {
         Some(&instance),
         &[],
     );
-    assert!(az_19_result, "AZ-19: System actor must bypass all checks unconditionally");
+    assert!(
+        az_19_result,
+        "AZ-19: System actor must bypass all checks unconditionally"
+    );
 
     // "AZ-20": Service actor has no owner privileges on instance with &[], and evaluates RBAC across assigned roles
     let service_actor = ActorId::Service(test_service_id("sync-worker"));
@@ -153,7 +271,10 @@ fn test_az_actor_authorization_rules() {
         Some(&instance),
         &[],
     );
-    assert!(!az_20_denied, "AZ-20: Service actor with no roles must be denied even on existing instance");
+    assert!(
+        !az_20_denied,
+        "AZ-20: Service actor with no roles must be denied even on existing instance"
+    );
 
     let az_20_granted = AuthorizationService::can_actor(
         &service_actor,
@@ -161,5 +282,8 @@ fn test_az_actor_authorization_rules() {
         Some(&instance),
         &[publisher_article_role],
     );
-    assert!(az_20_granted, "AZ-20: Service actor with matching role must be granted access");
+    assert!(
+        az_20_granted,
+        "AZ-20: Service actor with matching role must be granted access"
+    );
 }

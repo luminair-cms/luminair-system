@@ -114,14 +114,12 @@ impl Borrow<AttributeId> for RelationDefinition {
 }
 
 impl FieldConstraint {
+    #[must_use]
     pub fn is_applicable_for(&self, ft: &FieldType) -> bool {
         match self {
-            FieldConstraint::Pattern(_) => matches!(
-                ft,
-                FieldType::Primitive(PrimitiveType::Text | PrimitiveType::Uid)
-                    | FieldType::LocalizedText
-            ),
-            FieldConstraint::MinLength(_) | FieldConstraint::MaxLength(_) => matches!(
+            FieldConstraint::Pattern(_)
+            | FieldConstraint::MinLength(_)
+            | FieldConstraint::MaxLength(_) => matches!(
                 ft,
                 FieldType::Primitive(PrimitiveType::Text | PrimitiveType::Uid)
                     | FieldType::LocalizedText
@@ -137,9 +135,12 @@ impl FieldConstraint {
 }
 
 impl RelationType {
+    #[must_use]
     pub fn is_owning(&self) -> bool {
         matches!(self, RelationType::HasOne | RelationType::HasMany)
     }
+
+    #[must_use]
     pub fn is_inverse(&self) -> bool {
         matches!(
             self,
@@ -182,9 +183,11 @@ mod tests {
         assert!(!pattern.is_applicable_for(&FieldType::Primitive(PrimitiveType::Boolean)));
 
         let min_int = FieldConstraint::MinInteger(0);
-        assert!(min_int.is_applicable_for(&FieldType::Primitive(PrimitiveType::Integer(
-            crate::schema::types::IntegerSize::I32
-        ))));
+        assert!(
+            min_int.is_applicable_for(&FieldType::Primitive(PrimitiveType::Integer(
+                crate::schema::types::IntegerSize::I32
+            )))
+        );
         assert!(!min_int.is_applicable_for(&FieldType::Primitive(PrimitiveType::Text)));
     }
 

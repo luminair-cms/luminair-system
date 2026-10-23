@@ -20,6 +20,9 @@ pub const ROLE_VIEWER_ID: Uuid = uuid!("01920000-0000-7000-8000-000000000003");
 pub const ROLE_WRITER_ID: Uuid = uuid!("01920000-0000-7000-8000-000000000004");
 
 /// Runs all pending static SQL migrations against the target database pool.
+///
+/// # Errors
+/// Returns [`MigrateError`] if applying any migration statement fails.
 pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     MIGRATOR.run(pool).await
 }

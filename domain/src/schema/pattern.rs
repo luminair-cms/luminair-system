@@ -1,7 +1,7 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A validated, pre-compiled regular expression pattern value object.
 /// Equality and hashing are based on the pattern string.
@@ -13,6 +13,9 @@ pub struct RegexPattern {
 
 impl RegexPattern {
     /// Creates a new `RegexPattern` by compiling the pattern string.
+    ///
+    /// # Errors
+    /// Returns [`regex::Error`] if the pattern string fails to compile.
     pub fn try_new(raw: impl Into<String>) -> Result<Self, regex::Error> {
         let raw = raw.into();
         let compiled = Arc::new(regex::Regex::new(&raw)?);
@@ -20,11 +23,13 @@ impl RegexPattern {
     }
 
     /// Checks if the given text matches the regular expression.
+    #[must_use]
     pub fn is_match(&self, text: &str) -> bool {
         self.compiled.is_match(text)
     }
 
     /// Returns the raw pattern string.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.raw
     }

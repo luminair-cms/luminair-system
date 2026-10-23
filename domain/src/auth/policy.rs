@@ -19,10 +19,9 @@ impl AccessRequestPolicy {
     /// 2. **Active Request Check**: A user cannot submit an access request if they already
     ///    have an active (Pending or Approved) request in the system.
     ///
-    /// # Returns:
-    /// - `Ok(())` if the user is eligible to submit a new access request.
-    /// - `Err(DomainError::UserAlreadyEnrolled)` if the user already has role assignments.
-    /// - `Err(DomainError::AccessRequestAlreadyActive)` if an active request already exists.
+    /// # Errors
+    /// - Returns `Err(DomainError::UserAlreadyEnrolled)` if the user already has role assignments.
+    /// - Returns `Err(DomainError::AccessRequestAlreadyActive)` if an active request already exists.
     pub fn validate_can_submit(
         user_id: &UserId,
         existing_assignments: &[UserRoleAssignment],
@@ -47,6 +46,10 @@ impl AccessRequestPolicy {
     /// It enforces that:
     /// 1. The user must not already be enrolled (`existing_assignments` must be empty).
     /// 2. The user must not already have an active (`Pending` or `Approved`) access request.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::UserAlreadyEnrolled`] if already enrolled, or
+    /// [`DomainError::AccessRequestAlreadyActive`] if an active request exists.
     pub fn create_request(
         user_id: UserId,
         email: Option<Email>,
@@ -66,8 +69,8 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
-    use crate::auth::role::{RoleId, UserRoleAssignmentId};
     use crate::auth::AccessRequestStatus;
+    use crate::auth::role::{RoleId, UserRoleAssignmentId};
     use crate::test_support::{fixture_access_request, test_user_id};
 
     fn make_test_assignment(user_id: &UserId) -> UserRoleAssignment {
@@ -199,15 +202,9 @@ mod tests {
         let assignment = make_test_assignment(&user);
         let now = Utc::now();
 
-        let err = AccessRequestPolicy::create_request(
-            user.clone(),
-            None,
-            None,
-            &[assignment],
-            None,
-            now,
-        )
-        .unwrap_err();
+        let err =
+            AccessRequestPolicy::create_request(user.clone(), None, None, &[assignment], None, now)
+                .unwrap_err();
 
         assert!(matches!(err, DomainError::UserAlreadyEnrolled(id) if id == user));
     }

@@ -11,12 +11,19 @@ use crate::errors::ApplicationError;
 /// Port trait defining use cases for schema and document type definitions.
 pub trait SchemaService: Send + Sync + 'static {
     /// Lists all document types that the caller is authorized to view.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError::Unauthorized`] if the caller has no schema permissions.
     fn list_document_types(
         &self,
         caller: &CallerContext,
     ) -> Result<Vec<DocumentType>, ApplicationError>;
 
     /// Fetches a specific document type definition by its unique identifier.
+    ///
+    /// # Errors
+    /// Returns [`ApplicationError::NotFound`] if the document type does not exist,
+    /// or [`ApplicationError::Unauthorized`] if caller lacks permission.
     fn get_document_type(
         &self,
         caller: &CallerContext,
@@ -31,6 +38,7 @@ pub struct SchemaServiceImpl {
 }
 
 impl SchemaServiceImpl {
+    #[must_use]
     pub fn new(context: &'static SystemContext) -> Self {
         Self { context }
     }
@@ -79,10 +87,9 @@ impl SchemaService for SchemaServiceImpl {
             });
         }
 
-        self.context
-            .find_type(type_id)
-            .cloned()
-            .ok_or_else(|| ApplicationError::Domain(DomainError::DocumentTypeNotFound(type_id.clone())))
+        self.context.find_type(type_id).cloned().ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(type_id.clone()))
+        })
     }
 }
 
@@ -91,9 +98,13 @@ mod tests {
     use super::*;
     use domain::auth::{ActorId, Role, RoleId, UserId};
     use domain::schema::SchemaRegistry;
-    use domain::test_support::{fixture_system_config, text_field, DocumentTypeBuilder};
+    use domain::test_support::{DocumentTypeBuilder, fixture_system_config, text_field};
 
-    fn setup_schema_fixture() -> (SchemaServiceImpl, &'static DocumentType, &'static DocumentType) {
+    fn setup_schema_fixture() -> (
+        SchemaServiceImpl,
+        &'static DocumentType,
+        &'static DocumentType,
+    ) {
         let article_type = DocumentTypeBuilder::collection("article")
             .with_title("Articles")
             .with_field(text_field("title"))
@@ -164,7 +175,9 @@ mod tests {
         let res = service.get_document_type(&caller, &unknown_id);
         assert!(matches!(
             res,
-            Err(ApplicationError::Domain(DomainError::DocumentTypeNotFound(_)))
+            Err(ApplicationError::Domain(DomainError::DocumentTypeNotFound(
+                _
+            )))
         ));
     }
 }

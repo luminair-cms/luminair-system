@@ -20,12 +20,14 @@ pub struct DatabaseSchema {
 }
 
 impl DatabaseSchema {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             tables: IndexSet::new(),
         }
     }
 
+    #[must_use]
     pub fn find_table(&self, name: &str) -> Option<&TableDefinition> {
         self.tables.get(name)
     }
@@ -131,18 +133,22 @@ impl TableDefinition {
         }
     }
 
+    #[must_use]
     pub fn is_junction(&self) -> bool {
         self.kind == TableKind::Link
     }
 
+    #[must_use]
     pub fn find_column(&self, name: &str) -> Option<&ColumnDefinition> {
         self.columns.get(name)
     }
 
+    #[must_use]
     pub fn find_index(&self, name: &str) -> Option<&IndexDefinition> {
         self.indexes.get(name)
     }
 
+    #[must_use]
     pub fn find_foreign_key(&self, name: &str) -> Option<&ForeignKeyDefinition> {
         self.foreign_keys.get(name)
     }
@@ -280,6 +286,7 @@ pub enum SqlColumnType {
 
 impl SqlColumnType {
     /// Formats the column type into standard PostgreSQL DDL syntax.
+    #[must_use]
     pub fn to_sql_string(&self) -> String {
         match self {
             SqlColumnType::Uuid => "UUID".to_string(),
@@ -298,6 +305,7 @@ impl SqlColumnType {
     }
 
     /// Parses a data type name from PostgreSQL `information_schema.columns`.
+    #[must_use]
     pub fn from_information_schema(
         data_type: &str,
         char_len: Option<i32>,
@@ -307,7 +315,7 @@ impl SqlColumnType {
         match data_type.to_ascii_lowercase().as_str() {
             "uuid" => Some(SqlColumnType::Uuid),
             "character varying" | "varchar" => {
-                let len = char_len.and_then(|l| if l > 0 { Some(l as usize) } else { None });
+                let len = char_len.and_then(|l| usize::try_from(l).ok().filter(|&x| x > 0));
                 Some(SqlColumnType::Varchar(len))
             }
             "text" => Some(SqlColumnType::Text),
@@ -315,8 +323,12 @@ impl SqlColumnType {
             "integer" => Some(SqlColumnType::Integer),
             "bigint" => Some(SqlColumnType::BigInt),
             "numeric" | "decimal" => {
-                let p = numeric_precision.unwrap_or(10) as u8;
-                let s = numeric_scale.unwrap_or(2) as u8;
+                let p = numeric_precision
+                    .and_then(|val| u8::try_from(val).ok())
+                    .unwrap_or(10);
+                let s = numeric_scale
+                    .and_then(|val| u8::try_from(val).ok())
+                    .unwrap_or(2);
                 Some(SqlColumnType::Decimal(p, s))
             }
             "boolean" => Some(SqlColumnType::Boolean),

@@ -128,16 +128,16 @@ fn test_embedded_migrator_contains_all_migrations() {
     let migrations = &MIGRATOR.migrations;
     assert_eq!(migrations.len(), 4, "Expected exactly 4 static migrations");
 
-    assert_eq!(migrations[0].version, 20260924000001);
+    assert_eq!(migrations[0].version, 20_260_924_000_001);
     assert_eq!(migrations[0].description, "create system tables");
 
-    assert_eq!(migrations[1].version, 20260924000002);
+    assert_eq!(migrations[1].version, 20_260_924_000_002);
     assert_eq!(migrations[1].description, "seed builtin roles");
 
-    assert_eq!(migrations[2].version, 20261010000001);
+    assert_eq!(migrations[2].version, 20_261_010_000_001);
     assert_eq!(migrations[2].description, "create document drafts");
 
-    assert_eq!(migrations[3].version, 20261010000002);
+    assert_eq!(migrations[3].version, 20_261_010_000_002);
     assert_eq!(migrations[3].description, "create document snapshots");
 }
 
@@ -179,11 +179,11 @@ async fn test_db_migrations_execution_and_idempotency_if_database_available() {
 
     // 2. Verify all static tables exist
     let rows: Vec<(String,)> = sqlx::query_as(
-        r#"
+        r"
         SELECT table_name::TEXT
         FROM information_schema.tables
         WHERE table_schema = 'public'
-        "#,
+        ",
     )
     .fetch_all(&pool)
     .await

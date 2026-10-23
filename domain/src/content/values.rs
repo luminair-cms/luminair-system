@@ -40,16 +40,18 @@ pub enum DomainValue {
 }
 
 impl DomainValue {
+    #[must_use]
     pub fn matches_field_type(&self, ft: &FieldType) -> bool {
         match (self, ft) {
             (DomainValue::Primitive(p), FieldType::Primitive(pt)) => p.matches_primitive_type(pt),
-            (DomainValue::Email(_), FieldType::Email) => true,
-            (DomainValue::Url(_), FieldType::Url) => true,
-            (DomainValue::Json(_), FieldType::Json) => true,
+            (DomainValue::Email(_), FieldType::Email)
+            | (DomainValue::Url(_), FieldType::Url)
+            | (DomainValue::Json(_), FieldType::Json) => true,
             _ => false,
         }
     }
 
+    #[must_use]
     pub fn to_display_string(&self) -> Option<String> {
         match self {
             DomainValue::Primitive(p) => Some(p.to_display_string()),
@@ -91,21 +93,25 @@ pub enum PrimitiveValue {
 }
 
 impl PrimitiveValue {
+    #[must_use]
     pub fn matches_primitive_type(&self, pt: &PrimitiveType) -> bool {
         match (self, pt) {
-            (PrimitiveValue::Text(_), PrimitiveType::Text) => true,
-            (PrimitiveValue::Uid(_), PrimitiveType::Uid) => true,
-            (PrimitiveValue::Uuid(_), PrimitiveType::Uuid) => true,
+            (PrimitiveValue::Text(_), PrimitiveType::Text)
+            | (PrimitiveValue::Uid(_), PrimitiveType::Uid)
+            | (PrimitiveValue::Uuid(_), PrimitiveType::Uuid)
+            | (PrimitiveValue::Date(_), PrimitiveType::Date)
+            | (PrimitiveValue::DateTime(_), PrimitiveType::DateTime)
+            | (PrimitiveValue::Boolean(_), PrimitiveType::Boolean) => true,
             (PrimitiveValue::Integer(val), PrimitiveType::Integer(size)) => match size {
-                IntegerSize::I16 => *val >= i16::MIN as i64 && *val <= i16::MAX as i64,
-                IntegerSize::I32 => *val >= i32::MIN as i64 && *val <= i32::MAX as i64,
+                IntegerSize::I16 => (i64::from(i16::MIN)..=i64::from(i16::MAX)).contains(val),
+                IntegerSize::I32 => (i64::from(i32::MIN)..=i64::from(i32::MAX)).contains(val),
                 IntegerSize::I64 => true,
             },
             (PrimitiveValue::Decimal(d), PrimitiveType::Decimal { precision, scale }) => {
                 if *precision == 0 || *scale > *precision {
                     return false;
                 }
-                let actual_scale = d.scale() as u8;
+                let actual_scale = u8::try_from(d.scale()).unwrap_or(u8::MAX);
                 if actual_scale > *scale {
                     return false;
                 }
@@ -114,8 +120,8 @@ impl PrimitiveValue {
                 let num_digits = if mantissa == 0 {
                     1
                 } else {
-                    mantissa.ilog10() + 1
-                } as u8;
+                    u8::try_from(mantissa.ilog10() + 1).unwrap_or(u8::MAX)
+                };
                 let int_digits = if mantissa == 0 {
                     0
                 } else {
@@ -124,17 +130,14 @@ impl PrimitiveValue {
                 let max_int_digits = precision.saturating_sub(*scale);
                 num_digits <= *precision && int_digits <= max_int_digits
             }
-            (PrimitiveValue::Date(_), PrimitiveType::Date) => true,
-            (PrimitiveValue::DateTime(_), PrimitiveType::DateTime) => true,
-            (PrimitiveValue::Boolean(_), PrimitiveType::Boolean) => true,
             _ => false,
         }
     }
 
+    #[must_use]
     pub fn to_display_string(&self) -> String {
         match self {
-            PrimitiveValue::Text(s) => s.clone(),
-            PrimitiveValue::Uid(s) => s.clone(),
+            PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => s.clone(),
             PrimitiveValue::Uuid(u) => u.to_string(),
             PrimitiveValue::Integer(val) => val.to_string(),
             PrimitiveValue::Decimal(d) => d.to_string(),
@@ -150,10 +153,11 @@ impl PrimitiveValue {
 ///
 /// Singular relations declared in `display_fields` are skipped at write time (they are enriched
 /// at read time in CQRS query handlers).
-pub fn extract_display_identity(
+#[must_use]
+pub fn extract_display_identity<S: std::hash::BuildHasher>(
     doc_type: &DocumentType,
     instance_id: DocumentInstanceId,
-    fields: &HashMap<AttributeId, ContentValue>,
+    fields: &HashMap<AttributeId, ContentValue, S>,
     default_locale: &LocaleId,
 ) -> (IndexMap<AttributeId, String>, String) {
     let mut display_values = IndexMap::new();
@@ -198,6 +202,7 @@ pub fn extract_display_identity(
 
 /// Formats an ordered map of display values into a human-readable title joined by `" — "`,
 /// falling back to `fallback_id` when empty and truncating safely on character boundaries to 255 characters.
+#[must_use]
 pub fn format_display_title(
     display_values: &IndexMap<AttributeId, String>,
     fallback_id: DocumentInstanceId,
@@ -309,15 +314,17 @@ mod tests {
         assert!(!scale_overflow.matches_field_type(&ft));
 
         // Precision violation: 1234.56 has 6 digits > 5
-        let prec_overflow: DomainValue = PrimitiveValue::Decimal(Decimal::new(123456, 2)).into();
+        let prec_overflow: DomainValue = PrimitiveValue::Decimal(Decimal::new(123_456, 2)).into();
         assert!(!prec_overflow.matches_field_type(&ft));
 
         // Integer digits violation: 12345 has 5 integer digits > max allowed (5 - 2 = 3)
-        let int_overflow_scale0: DomainValue = PrimitiveValue::Decimal(Decimal::new(12345, 0)).into();
+        let int_overflow_scale0: DomainValue =
+            PrimitiveValue::Decimal(Decimal::new(12345, 0)).into();
         assert!(!int_overflow_scale0.matches_field_type(&ft));
 
         // Integer digits violation: 1234.5 has 4 integer digits > max allowed (5 - 2 = 3)
-        let int_overflow_scale1: DomainValue = PrimitiveValue::Decimal(Decimal::new(12345, 1)).into();
+        let int_overflow_scale1: DomainValue =
+            PrimitiveValue::Decimal(Decimal::new(12345, 1)).into();
         assert!(!int_overflow_scale1.matches_field_type(&ft));
 
         // Valid small fraction: 0.05 has 0 integer digits <= 3, scale 2 <= 2
@@ -401,10 +408,15 @@ mod tests {
 
     #[test]
     fn test_extract_display_identity_single_scalar() {
-        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_locale_id,
+        };
 
-        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
-        let doc_type = DocumentTypeBuilder::collection("article").with_field(f).build();
+        let f =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let doc_type = DocumentTypeBuilder::collection("article")
+            .with_field(f)
+            .build();
         let instance_id = DocumentInstanceId::new(Uuid::now_v7());
         let default_locale = test_locale_id("en");
 
@@ -414,19 +426,31 @@ mod tests {
             ContentValue::Scalar(PrimitiveValue::Text("My Title".into()).into()),
         );
 
-        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        let (values, title) =
+            extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
         assert_eq!(values.len(), 1);
-        assert_eq!(values.get(&test_attr_id("title")), Some(&"My Title".to_string()));
+        assert_eq!(
+            values.get(&test_attr_id("title")),
+            Some(&"My Title".to_string())
+        );
         assert_eq!(title, "My Title");
     }
 
     #[test]
     fn test_extract_display_identity_composite_three_fields() {
-        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_locale_id,
+        };
 
-        let f1 = FieldDefinitionBuilder::new("terminal-id", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f2 = FieldDefinitionBuilder::new("brand-name", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f3 = FieldDefinitionBuilder::new("removing-date", FieldType::Primitive(PrimitiveType::Date)).build();
+        let f1 =
+            FieldDefinitionBuilder::new("terminal-id", FieldType::Primitive(PrimitiveType::Text))
+                .build();
+        let f2 =
+            FieldDefinitionBuilder::new("brand-name", FieldType::Primitive(PrimitiveType::Text))
+                .build();
+        let f3 =
+            FieldDefinitionBuilder::new("removing-date", FieldType::Primitive(PrimitiveType::Date))
+                .build();
 
         let doc_type = DocumentTypeBuilder::collection("terminal")
             .with_field(f1)
@@ -457,7 +481,8 @@ mod tests {
             ContentValue::Scalar(PrimitiveValue::Date(date).into()),
         );
 
-        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        let (values, title) =
+            extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
         let keys: Vec<_> = values.keys().cloned().collect();
         assert_eq!(
             keys,
@@ -472,11 +497,19 @@ mod tests {
 
     #[test]
     fn test_extract_display_identity_omits_null_and_missing_fields() {
-        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_locale_id,
+        };
 
-        let f1 = FieldDefinitionBuilder::new("terminal-id", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f2 = FieldDefinitionBuilder::new("brand-name", FieldType::Primitive(PrimitiveType::Text)).build();
-        let f3 = FieldDefinitionBuilder::new("removing-date", FieldType::Primitive(PrimitiveType::Date)).build();
+        let f1 =
+            FieldDefinitionBuilder::new("terminal-id", FieldType::Primitive(PrimitiveType::Text))
+                .build();
+        let f2 =
+            FieldDefinitionBuilder::new("brand-name", FieldType::Primitive(PrimitiveType::Text))
+                .build();
+        let f3 =
+            FieldDefinitionBuilder::new("removing-date", FieldType::Primitive(PrimitiveType::Date))
+                .build();
 
         let doc_type = DocumentTypeBuilder::collection("terminal")
             .with_field(f1)
@@ -500,18 +533,26 @@ mod tests {
         fields.insert(test_attr_id("brand-name"), ContentValue::Null);
         // removing-date omitted
 
-        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        let (values, title) =
+            extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
         assert_eq!(values.len(), 1);
-        assert_eq!(values.get(&test_attr_id("terminal-id")), Some(&"T-100".to_string()));
+        assert_eq!(
+            values.get(&test_attr_id("terminal-id")),
+            Some(&"T-100".to_string())
+        );
         assert_eq!(title, "T-100");
     }
 
     #[test]
     fn test_extract_display_identity_localized_text_default_and_fallback() {
-        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_locale_id,
+        };
 
         let f = FieldDefinitionBuilder::new("headline", FieldType::LocalizedText).build();
-        let doc_type = DocumentTypeBuilder::collection("news").with_field(f).build();
+        let doc_type = DocumentTypeBuilder::collection("news")
+            .with_field(f)
+            .build();
         let instance_id = DocumentInstanceId::new(Uuid::now_v7());
 
         // Case 1: default locale present
@@ -522,12 +563,8 @@ mod tests {
         let mut fields = HashMap::new();
         fields.insert(test_attr_id("headline"), ContentValue::LocalizedText(map));
 
-        let (_, title_en) = extract_display_identity(
-            &doc_type,
-            instance_id,
-            &fields,
-            &test_locale_id("en"),
-        );
+        let (_, title_en) =
+            extract_display_identity(&doc_type, instance_id, &fields, &test_locale_id("en"));
         assert_eq!(title_en, "Breaking News");
 
         // Case 2: default locale absent -> lexicographically first locale with non-empty string
@@ -538,12 +575,8 @@ mod tests {
         let mut fields2 = HashMap::new();
         fields2.insert(test_attr_id("headline"), ContentValue::LocalizedText(map2));
 
-        let (_, title_fallback) = extract_display_identity(
-            &doc_type,
-            instance_id,
-            &fields2,
-            &test_locale_id("fr"),
-        );
+        let (_, title_fallback) =
+            extract_display_identity(&doc_type, instance_id, &fields2, &test_locale_id("fr"));
         assert_eq!(title_fallback, "Nachrichten");
     }
 
@@ -551,10 +584,12 @@ mod tests {
     fn test_extract_display_identity_skips_singular_relations() {
         use crate::schema::attributes::{RelationDefinition, RelationType};
         use crate::test_support::{
-            test_attr_id, test_doc_type_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder,
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_doc_type_id,
+            test_locale_id,
         };
 
-        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let f =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
         let rel = RelationDefinition {
             id: test_attr_id("author"),
             relation_type: RelationType::HasOne,
@@ -576,34 +611,47 @@ mod tests {
             ContentValue::Scalar(PrimitiveValue::Text("The Great Gatsby".into()).into()),
         );
 
-        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        let (values, title) =
+            extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
         assert_eq!(values.len(), 1);
-        assert_eq!(values.get(&test_attr_id("title")), Some(&"The Great Gatsby".to_string()));
+        assert_eq!(
+            values.get(&test_attr_id("title")),
+            Some(&"The Great Gatsby".to_string())
+        );
         assert!(!values.contains_key(&test_attr_id("author")));
         assert_eq!(title, "The Great Gatsby");
     }
 
     #[test]
     fn test_extract_display_identity_fallback_to_instance_id() {
-        use crate::test_support::{test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_locale_id};
 
-        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
-        let doc_type = DocumentTypeBuilder::collection("article").with_field(f).build();
+        let f =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let doc_type = DocumentTypeBuilder::collection("article")
+            .with_field(f)
+            .build();
         let instance_id = DocumentInstanceId::new(Uuid::now_v7());
         let default_locale = test_locale_id("en");
 
         let fields = HashMap::new(); // no values provided
-        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        let (values, title) =
+            extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
         assert!(values.is_empty());
         assert_eq!(title, instance_id.to_string());
     }
 
     #[test]
     fn test_extract_display_identity_truncation_utf8_safe() {
-        use crate::test_support::{test_attr_id, test_locale_id, DocumentTypeBuilder, FieldDefinitionBuilder};
+        use crate::test_support::{
+            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_locale_id,
+        };
 
-        let f = FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
-        let doc_type = DocumentTypeBuilder::collection("article").with_field(f).build();
+        let f =
+            FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
+        let doc_type = DocumentTypeBuilder::collection("article")
+            .with_field(f)
+            .build();
         let instance_id = DocumentInstanceId::new(Uuid::now_v7());
         let default_locale = test_locale_id("en");
 
@@ -615,7 +663,8 @@ mod tests {
             ContentValue::Scalar(PrimitiveValue::Text(long_cyrillic).into()),
         );
 
-        let (values, title) = extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
+        let (values, title) =
+            extract_display_identity(&doc_type, instance_id, &fields, &default_locale);
         assert_eq!(values.len(), 1);
         assert!(title.len() <= 255);
         // Ensure valid UTF-8 and even number of bytes since "Ж" is 2 bytes: 254 bytes

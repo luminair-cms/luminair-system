@@ -9,9 +9,9 @@ use sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Order, Query, SelectStat
 use uuid::Uuid;
 
 use crate::persistence::naming::{
-    column_name, COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES,
-    COL_HAS_PENDING_DRAFT, COL_ID, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_REVISION,
-    COL_UPDATED_AT, COL_UPDATED_BY,
+    COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES, COL_HAS_PENDING_DRAFT,
+    COL_ID, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_REVISION, COL_UPDATED_AT, COL_UPDATED_BY,
+    column_name,
 };
 
 // ---------------------------------------------------------------------------
@@ -19,11 +19,11 @@ use crate::persistence::naming::{
 // ---------------------------------------------------------------------------
 
 /// Converts a domain value to a Sea-Query SQL parameter value.
+#[must_use]
 pub fn domain_value_to_sea_value(val: &DomainValue) -> sea_query::Value {
     match val {
         DomainValue::Primitive(p) => match p {
-            PrimitiveValue::Text(s) => s.clone().into(),
-            PrimitiveValue::Uid(s) => s.clone().into(),
+            PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => s.clone().into(),
             PrimitiveValue::Uuid(u) => (*u).into(),
             PrimitiveValue::Integer(i) => (*i).into(),
             PrimitiveValue::Decimal(d) => (*d).into(),
@@ -45,8 +45,7 @@ pub fn domain_value_to_sea_value(val: &DomainValue) -> sea_query::Value {
 
 fn primitive_value_to_json(p: &PrimitiveValue) -> serde_json::Value {
     match p {
-        PrimitiveValue::Text(s) => serde_json::Value::String(s.clone()),
-        PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
+        PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
         PrimitiveValue::Uuid(u) => serde_json::Value::String(u.to_string()),
         PrimitiveValue::Integer(i) => serde_json::Value::Number((*i).into()),
         PrimitiveValue::Decimal(d) => serde_json::Value::String(d.to_string()),
@@ -61,6 +60,7 @@ fn primitive_value_to_json(p: &PrimitiveValue) -> serde_json::Value {
 // ---------------------------------------------------------------------------
 
 /// Builds a `SELECT * FROM {table_name} WHERE id = $1` query statement.
+#[must_use]
 pub fn select_by_id_query(table_name: &str, id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(Alias::new(table_name))
@@ -70,11 +70,13 @@ pub fn select_by_id_query(table_name: &str, id: Uuid) -> SelectStatement {
 }
 
 /// Builds a parameterized SQL string for `SELECT * FROM {table_name} WHERE id = $1`.
+#[must_use]
 pub fn select_by_id_sql(table_name: &str) -> String {
     format!("SELECT * FROM {table_name} WHERE {COL_ID} = $1;")
 }
 
 /// Builds a paginated `find_published` query with field equality filters.
+#[must_use]
 pub fn find_published_query(
     table_name: &str,
     filters: &[FieldFilter],
@@ -87,15 +89,18 @@ pub fn find_published_query(
 
     apply_field_filters(&mut stmt, filters);
 
-    let offset = (pagination.page.saturating_sub(1) as u64) * (pagination.page_size as u64);
+    let page_offset = u64::from(pagination.page.saturating_sub(1));
+    let page_size = u64::from(pagination.page_size);
+    let offset = page_offset * page_size;
     stmt.order_by(Alias::new(COL_PUBLISHED_AT), Order::Desc)
-        .limit(pagination.page_size as u64)
+        .limit(page_size)
         .offset(offset);
 
     stmt
 }
 
 /// Builds a `COUNT(*)` query for published rows matching the given filters.
+#[must_use]
 pub fn count_published_query(table_name: &str, filters: &[FieldFilter]) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(Alias::new(table_name))
@@ -107,6 +112,7 @@ pub fn count_published_query(table_name: &str, filters: &[FieldFilter]) -> Selec
 }
 
 /// Builds a batch `SELECT id, display_title FROM {table_name} WHERE id IN (...)` query.
+#[must_use]
 pub fn find_display_titles_by_ids_query(table_name: &str, ids: &[Uuid]) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(Alias::new(table_name))
@@ -116,16 +122,19 @@ pub fn find_display_titles_by_ids_query(table_name: &str, ids: &[Uuid]) -> Selec
 }
 
 /// Builds the SQL string for updating the `has_pending_draft` flag on a wide table row.
+#[must_use]
 pub fn update_has_pending_draft_sql(table_name: &str) -> String {
     format!("UPDATE {table_name} SET {COL_HAS_PENDING_DRAFT} = $1 WHERE {COL_ID} = $2;")
 }
 
 /// Builds the SQL string for deleting a row from a wide table by primary key.
+#[must_use]
 pub fn delete_by_id_sql(table_name: &str) -> String {
     format!("DELETE FROM {table_name} WHERE {COL_ID} = $1;")
 }
 
 /// Builds the SQL string for upserting a published document into its wide table.
+#[must_use]
 pub fn build_upsert_wide_table_sql(table_name: &str, custom_columns: &[String]) -> String {
     let mut columns = vec![
         COL_ID.to_string(),

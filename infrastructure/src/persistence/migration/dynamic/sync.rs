@@ -6,7 +6,7 @@ use domain::schema::{DocumentType, SchemaRegistry};
 use sqlx::PgPool;
 
 use super::builder::{build_desired_schema, build_document_type_tables};
-use super::diff::{compute_diff, DiffError, MigrationStep, SafetyPolicy};
+use super::diff::{DiffError, MigrationStep, SafetyPolicy, compute_diff};
 use super::executor::{execute_migration_plan, step_to_sql};
 use super::introspector::introspect_database_schema;
 use super::model::DatabaseSchema;
@@ -32,6 +32,9 @@ pub struct SchemaSyncResult {
 // ---------------------------------------------------------------------------
 
 /// Synchronizes a live database pool from a directory of schema JSON definitions.
+///
+/// # Errors
+/// Returns [`PersistenceError`] if schema loading, diffing, or DDL execution fails.
 pub async fn sync_dynamic_schemas_from_dir(
     pool: &PgPool,
     schema_dir: &Path,
@@ -48,7 +51,10 @@ pub async fn sync_dynamic_schemas_from_dir(
 /// 2. Introspects current actual database schema from `information_schema`
 /// 3. Computes schema diff adhering to `SafetyPolicy`
 /// 4. Plans migration steps topologically (base entity tables before child link tables)
-/// 5. Executes generated DDL via type-safe SeaQuery statements
+/// 5. Executes generated DDL via type-safe `SeaQuery` statements
+///
+/// # Errors
+/// Returns [`PersistenceError`] if schema introspection, diff computation, or DDL execution fails.
 pub async fn sync_dynamic_schemas(
     pool: &PgPool,
     registry: &SchemaRegistry,
@@ -56,12 +62,11 @@ pub async fn sync_dynamic_schemas(
 ) -> Result<SchemaSyncResult, PersistenceError> {
     let desired = build_desired_schema(registry);
     let actual = introspect_database_schema(pool).await?;
-    let raw_steps = compute_diff(&actual, &desired, policy)
-        .map_err(|e| match e {
-            DiffError::DestructiveOperationBlocked { operation } => {
-                PersistenceError::SafetyViolation(operation)
-            }
-        })?;
+    let raw_steps = compute_diff(&actual, &desired, policy).map_err(|e| match e {
+        DiffError::DestructiveOperationBlocked { operation } => {
+            PersistenceError::SafetyViolation(operation)
+        }
+    })?;
 
     if raw_steps.is_empty() {
         return Ok(SchemaSyncResult::default());
@@ -134,12 +139,12 @@ fn calculate_step_counts(steps: &[MigrationStep]) -> (usize, usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use domain::common::DisplayName;
     use domain::schema::{
         AttributeId, DocumentKind, DocumentTypeId, DocumentTypeInfo, DocumentTypeOptions,
         FieldDefinition, FieldType, IntegerSize, PrimitiveType, RelationDefinition, RelationType,
     };
+    use std::collections::HashSet;
 
     fn make_test_doc_type(
         id: &str,
@@ -202,17 +207,23 @@ mod tests {
             .iter()
             .find(|s| s.contains(r#"CREATE TABLE IF NOT EXISTS "articles""#));
         assert!(create_articles.is_some());
-        assert!(create_articles.unwrap().contains(r#""has_pending_draft" bool NOT NULL DEFAULT FALSE"#));
+        assert!(
+            create_articles
+                .unwrap()
+                .contains(r#""has_pending_draft" bool NOT NULL DEFAULT FALSE"#)
+        );
 
         let create_links = ddl_statements
             .iter()
             .find(|s| s.contains(r#"CREATE TABLE IF NOT EXISTS "articles_tags_links""#));
         assert!(create_links.is_some());
-        assert!(create_links.unwrap().contains(r#"FOREIGN KEY ("source_id") REFERENCES "articles" ("id") ON DELETE CASCADE"#));
+        assert!(create_links.unwrap().contains(
+            r#"FOREIGN KEY ("source_id") REFERENCES "articles" ("id") ON DELETE CASCADE"#
+        ));
 
-        let index_stmt = ddl_statements
-            .iter()
-            .find(|s| s.contains(r#"CREATE INDEX IF NOT EXISTS "idx_articles_tags_links_target_id""#));
+        let index_stmt = ddl_statements.iter().find(|s| {
+            s.contains(r#"CREATE INDEX IF NOT EXISTS "idx_articles_tags_links_target_id""#)
+        });
         assert!(index_stmt.is_some());
     }
 }

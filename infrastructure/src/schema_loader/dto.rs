@@ -213,7 +213,8 @@ mod tests {
             }
         }"#;
 
-        let record: DocumentRecord = serde_json::from_str(json).expect("deserialize DocumentRecord");
+        let record: DocumentRecord =
+            serde_json::from_str(json).expect("deserialize DocumentRecord");
         assert_eq!(record.kind, DocumentKindDto::Collection);
         assert_eq!(record.info.singular_name, "article");
         assert_eq!(record.info.plural_name, "articles");
@@ -257,7 +258,10 @@ mod tests {
         }
 
         // Relation check
-        let category = record.attributes.get("category").expect("category attribute");
+        let category = record
+            .attributes
+            .get("category")
+            .expect("category attribute");
         match category {
             AttributeRecord::Relation {
                 relation_type,
