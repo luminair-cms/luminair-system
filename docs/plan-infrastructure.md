@@ -7,7 +7,7 @@
   - Database Persistence & Adapters: [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md)
   - REST API & Authentication: [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md)
   - Canonical API Reference: [`docs/api.md`](./api.md)
-- **Status**: Ready for Phase 1 Execution
+- **Status**: Phase 1 Complete — Ready for Phase 2 Execution
 - **Last Updated**: 2026-10-23
 
 ---
@@ -18,7 +18,7 @@ The `infrastructure` crate is implemented incrementally across 7 testable phases
 
 ```mermaid
 flowchart TD
-    P1["Phase 1: Schema Loader & SystemContext<br/>(Disk discovery, zero-copy DTOs, validation, registry)"]
+    P1["Phase 1: Schema Loader & SystemContext (Complete)<br/>(Disk discovery, zero-copy DTOs, validation, registry)"]
     P2["Phase 2: Database Persistence Foundation<br/>(Naming engine, static migrations, dynamic DDL sync, Sea-Query, OCC)"]
     P3["Phase 3: Repository Adapters<br/>(SqlxDocumentInstance, Snapshot, Roles, UserRoleAssignments, AccessRequests)"]
     P4["Phase 4: Composition Root & CLI Subsystem<br/>(AppContainer, HealthChecker, runner: Service/Migrate/DryRun)"]
@@ -38,26 +38,26 @@ flowchart TD
 
 ## 2. Phase-by-Phase Implementation Tasks
 
-### Phase 1: Schema Loader & System Context Assembly (Current Phase)
+### Phase 1: Schema Loader & System Context Assembly (Complete)
 
 > **Detailed Specification**: See [`docs/infrastructure/schema-loader.md`](./infrastructure/schema-loader.md) for disk layout, JSON examples (`system-config.json`, `article.json`, `category.json`), and the zero-copy DTO contracts (`AttributeRecord` untagged enum).
 
-- [ ] **Step 1.1: Zero-Copy Borrowed DTOs (`infrastructure/src/schema_loader/dto.rs`)**
+- [x] **Step 1.1: Zero-Copy Borrowed DTOs (`infrastructure/src/schema_loader/dto.rs`)**
   - Implement borrowed Serde records using `#[serde(bound = "'de: 'a")]` and `&'a str`.
   - Implement `AttributeRecord<'a>` as an untagged enum with `Field` and `Relation` variants.
   - Implement `FieldTypeDto<'a>`, `RelationTypeDto`, `ConstraintRecord<'a>`, `DocumentRecord<'a>`, `DocumentInfoRecord<'a>`, `DocumentOptionsRecord`, and `SystemConfigRecord<'a>`.
   - Preserve field ordering using `IndexMap<&'a str, AttributeRecord<'a>>`.
-- [ ] **Step 1.2: Identifier Sanitization & Validation (`infrastructure/src/schema_loader/sanitize.rs`)**
+- [x] **Step 1.2: Identifier Sanitization & Validation (`infrastructure/src/schema_loader/sanitize.rs`)**
   - Verify identifiers against `RESERVED_SQL_KEYWORDS` (e.g. `order`, `table`, `user`).
   - Enforce kebab-case rules matching domain `DocumentTypeId` and `AttributeId`.
-- [ ] **Step 1.3: Schema Loader & Domain Transformation (`infrastructure/src/schema_loader/loader.rs`)**
+- [x] **Step 1.3: Schema Loader & Domain Transformation (`infrastructure/src/schema_loader/loader.rs`)**
   - Walk `config.schema_dir` to load `system-config.json` and all files under `document-types/*.json`.
   - Validate that each file stem matches `info.singularName` (`file_stem == info.singularName == DocumentTypeId`).
   - Partition `attributes` into `IndexSet<FieldDefinition>` and `IndexSet<RelationDefinition>`.
   - Construct `DocumentType` instances and pass to `SchemaRegistry::try_new(types)` for cross-schema graph validation.
   - Parse `system-config.json` into `SystemConfig` (generating internal `SystemConfigId`).
   - Construct `SystemContext` and promote to `'static` via `Box::leak`.
-- [ ] **Step 1.4: Integration Test Suite (`infrastructure/tests/schema_loader_test.rs`)**
+- [x] **Step 1.4: Integration Test Suite (`infrastructure/tests/schema_loader_test.rs`)**
   - Test valid schema loading with fixtures (`article.json`, `category.json`, `system-config.json`).
   - Test rejection of invalid identifiers, unresolvable relation targets, invalid display fields, and incompatible constraints.
 
@@ -154,7 +154,8 @@ flowchart TD
 
 ## 3. Immediate Next Execution Step
 
-Execute **Phase 1, Step 1.1 & Step 1.2**:
-- Create `infrastructure/src/schema_loader/dto.rs` with the zero-copy borrowed Serde records.
-- Adapt `AttributeRecord<'a>` as an untagged enum (`Field` vs `Relation`).
-- Verify via `cargo check` and inline tests.
+Execute **Phase 2: Database Persistence Foundation**:
+- Step 2.1: Implement SQL identifier naming engine (`infrastructure/src/persistence/naming/`).
+- Step 2.2: Add static migrations for `document_drafts` and `document_snapshots`.
+- Step 2.3: Implement dynamic additive schema synchronizer (`dynamic_sync.rs`).
+- Step 2.4: Build Sea-Query wide-table query builders and OCC retry helper (`with_occ_retry`).
