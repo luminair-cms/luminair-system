@@ -130,10 +130,14 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   2. **Static Migrations (`20261010000001` & `20261010000002`)**:
      - Embedded `document_drafts` (composite primary key `(document_type_id, id)`, JSONB `display_values`, `content`, `relations`, status checks) and `document_snapshots` (immutable revision history with `uq_document_snapshots_revision` constraint).
      - Both strictly start with `-- no-transaction` for AWS Aurora DSQL compatibility; no sequences or auto-increment columns; client UUIDv7 keys.
-  3. **Dynamic Additive Schema Synchronizer (`persistence::migration::dynamic_sync`)**:
-     - Idempotent additive DDL compiler (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, B-tree indexes, junction tables with cascading foreign keys).
-     - Standardized wide table creation order: wide tables first, additive columns second, wide table indexes third, junction tables fourth, and junction indexes fifth, preventing foreign key dependency ordering issues.
-     - Utilizes `sqlx::AssertSqlSafe` for executing dynamically assembled DDL safely across SQLx 0.9 driver pools without `'static` lifetime leaks.
+  3. **Dynamic Additive Schema Synchronizer (`persistence::migration::dynamic`)**:
+     - Upgraded from simple string generation to a 5-stage AST-driven migration engine:
+       1. **Typed Model (`model.rs`)**: `DatabaseSchema`, `TableDefinition`, `ColumnDefinition`, `IndexDefinition`, `ForeignKeyDefinition` with $O(1)$ lookups via `Borrow<str>`.
+       2. **Desired Schema Projection (`builder.rs`)**: Projects `SchemaRegistry` into normalized `DatabaseSchema` AST adhering to ADR-004 wide entity and junction table conventions.
+       3. **Actual Schema Introspection (`introspector.rs`)**: Introspects live database state (`information_schema`, `pg_indexes`, constraints) filtering system tables.
+       4. **Drift & Diff Detection (`diff.rs`)**: Compares actual vs desired under `SafetyPolicy` (`AdditiveOnly` vs `AllowDestructive`) emitting `MigrationStep`s.
+       5. **Topological Planner (`planner.rs`)**: Orders DDL execution conforming to dependencies (base tables $\rightarrow$ link tables $\rightarrow$ columns $\rightarrow$ indexes).
+       6. **Sea-Query Typed DDL Generator (`executor.rs`)**: Uses `sea_query::Table`, `Index`, `ColumnDef`, and `ForeignKey` typed statements instead of manual string formatting. Executed standalone via `sqlx::AssertSqlSafe`.
   4. **Query & OCC Subsystem (`persistence::query`)**:
      - Implemented `with_occ_retry` catching SQLSTATE `40001` (`serialization_failure`) with randomized exponential backoff and UUIDv4-derived entropy jitter, exhausting to typed `PersistenceError::OccConflictExhausted`.
      - Parameterized wide-table Sea-Query builders (`wide_table.rs`) for visitor queries (`has_pending_draft = FALSE`), pagination, equality filtering (`FieldFilter`), counts, upserts (`ON CONFLICT (id) DO UPDATE SET ...`), and display title lookups.
