@@ -7,25 +7,13 @@
 
 ---
 
-## 1. Architectural Position in Hexagonal Architecture
+## 1. Architectural Position
 
-In Luminair's Hexagonal Architecture (Ports and Adapters):
-1. **Composition Root (`container.rs` & `main.rs`)**:
-   - `infrastructure` is the single executable composition root of the workspace.
-   - It reads configuration and schema files, instantiates `SystemContext`, configures connection pools, constructs repository adapters, injects them into application services (`DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`), and binds HTTP routes.
-2. **Driving Adapter (Inbound)**:
-   - Axum REST API layer decoding HTTP requests, verifying authentication tokens into `CallerContext`, invoking application services, and formatting responses or RFC 9457 `ProblemDetails` errors.
-3. **Driven Adapter (Outbound)**:
-   - Database persistence targeting AWS Aurora DSQL (production) and PostgreSQL (local / CI) via `sqlx::PgPool`.
-   - Implements repository ports defined in `domain`:
-     - `domain::content::DocumentInstanceRepository`
-     - `domain::content::DocumentSnapshotRepository`
-     - `domain::auth::RoleRepository`
-     - `domain::auth::UserRoleAssignmentRepository`
-     - `domain::auth::AccessRequestRepository`
-4. **Strict Isolation**:
-   - `domain` and `application` contain no I/O, SQL, HTTP, or framework dependencies.
-   - All technology-specific concerns (Axum, SQLx, Sea-Query, JWT, AWS IAM tokens) are confined to `infrastructure`.
+Per [`docs/architecture.md`](../architecture.md), `infrastructure` is the single executable composition root and adapter layer:
+- **Composition Root (`container.rs`, `main.rs`)**: Reads schemas/config into `SystemContext`, configures `sqlx::PgPool`, constructs repository adapters, injects them into application services (`DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`), and binds HTTP routes.
+- **Driving Adapter (`api`, `auth`)**: Axum REST layer decoding HTTP requests, verifying authentication tokens into `CallerContext`, and invoking application services.
+- **Driven Adapter (`persistence`)**: SQL storage targeting Aurora DSQL / PostgreSQL implementing `domain` repository ports (`DocumentInstanceRepository`, `DocumentSnapshotRepository`, `RoleRepository`, `UserRoleAssignmentRepository`, `AccessRequestRepository`).
+- **Strict Isolation**: All framework and driver dependencies (`axum`, `sqlx`, `sea-query`, `aws-sdk-dsql`, JWT) are strictly confined to `infrastructure`.
 
 ---
 

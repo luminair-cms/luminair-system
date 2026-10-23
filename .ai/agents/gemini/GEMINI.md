@@ -1,20 +1,15 @@
 # Gemini Agent — Overrides
 
-> Read `AGENTS.md` at the repo root first. This file contains **Gemini-specific additions only**.
+> Read [`AGENTS.md`](../../AGENTS.md) first. This file contains **Gemini-specific additions only**.
 
-## Context Loading Order (Gemini)
+## Context Loading Order
 
-Gemini automatically indexes the workspace. Still, explicitly load these at session start:
+Gemini automatically indexes the workspace. At session start, ensure loaded:
 1. `AGENTS.md`
 2. `.ai/context/project.md`
-3. The skill relevant to your task
+3. Skill relevant to the task (e.g. [`.ai/skills/clean-code.md`](../skills/clean-code.md))
 
-## MCP / Tool Hints
+## Tool Hints
 
-- Use `run_command` for `cargo clippy`, `cargo test`, `cargo audit` — do not skip these
-- Use `grep_search` to navigate codebase before making edits (prefer search over assumptions)
-- Prefer `replace_file_content` over full-file rewrites for surgical edits
-
-## Memory
-
-After completing a significant task, append a summary entry to `.ai/context/decisions.md`.
+- Prefer surgical edits over full-file rewrites.
+- Use search tools to verify codebase symbols before making edits.

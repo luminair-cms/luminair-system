@@ -26,9 +26,9 @@ Per [`AGENTS.md`](../../AGENTS.md) §0 and [`ADR-001`](../../docs/adr/ADR-001-de
 
 | Behavior Type | Target Format | Spec Location | Test Target |
 |---|---|---|---|
-| State machines, decision matrices, lifecycles | **Option 2 (Case Table)** | `docs/specs/domain/*.md` | `domain/tests/<prefix>_*.rs` |
-| Application use cases, multi-step flows, authorization gates | **Option 3 (Given/When/Then)** | `docs/specs/application/*.md` | `application/tests/<prefix>_*.rs` |
-| Value-object boundaries, regex patterns, invariant laws | **Option 4 (`proptest`)** | `docs/specs/domain/*.md` | `domain/tests/<prefix>_*.rs` |
+| State machines, decision matrices, lifecycles | **Format T (Case Table)** | `docs/specs/domain/*.md` | `domain/tests/<prefix>_*.rs` |
+| Application use cases, multi-step flows, authorization gates | **Format U (Use Case)** | `docs/specs/application/*.md` | `application/tests/<prefix>_*.rs` |
+| Value-object boundaries, regex patterns, invariant laws | **Format P (Property)** | `docs/specs/domain/*.md` | `domain/tests/<prefix>_*.rs` |
 
 ---
 
@@ -72,9 +72,9 @@ When directed to generate tests for **Approved** rules:
      - `domain::test_support` / `application::test_support`.
 2. **Implementation Target**:
    - Create or update the integration test file in `<crate>/tests/<prefix_lowercase>_<topic>.rs`.
-   - Option 2: Table runner executing all cases in one test and reporting all failing IDs.
-   - Option 3: Separate `#[tokio::test]` functions named `<prefix_lowercase>_<num>_<scenario>()`.
-   - Option 4: `proptest!` macro blocks testing invariants across generated inputs.
+   - Format T: Table runner executing all cases in one test and reporting all failing IDs.
+   - Format U: Separate `#[tokio::test]` functions named `<prefix_lowercase>_<num>_<scenario>()`.
+   - Format P: `proptest!` macro blocks testing invariants across generated inputs.
 3. **Traceability**:
    - Ensure the rule ID (`LC-01`) appears in the test name or table case `id`.
    - Verify with `cargo test -p domain --test spec_traceability`.

@@ -10,21 +10,16 @@ Load this skill before writing or modifying any Rust code in this repository.
 
 ## Code Organization & Item Ordering
 
-Every Rust source file must follow consistent top-down organization and dependency ordering ("newspaper style"):
+Every Rust source file follows top-down dependency ordering ("newspaper style"):
+1. **Imports**: `std` → external crates → internal crates.
+2. **Types First**: Constants, statics, type aliases, structs, and enums before `impl`s or functions.
+3. **Implementations**: Inherent `impl`s first, trait `impl`s after.
+4. **Functions**: Public functions first in dependency order (orchestrators first, subroutines after); private helpers follow.
+5. **Tests**: `#[cfg(test)] mod tests { ... }` at the bottom.
 
-1. **Imports & Declarations**:
-   - Module docstrings (`//!`) and `use` imports (grouped: `std` → external crates → internal crates).
-2. **Types First**:
-   - Module-level constants and static items.
-   - Type aliases, structs, and enums (all data models and type definitions appear before any `impl`s or standalone functions).
-3. **Implementations (`impl`)**:
-   - Inherent `impl` blocks for types defined in the file.
-   - Trait `impl` blocks (e.g., `From`, `TryFrom`, `PartialEq`, `Display`).
-4. **Functions**:
-   - **Public functions first, private functions after**.
-   - **Order by dependency ("newspaper style")**: High-level entry points and orchestrators appear first, followed top-down by the functions they invoke, descending to low-level leaf helpers. Readers should understand the high-level workflow at the top of the file without jumping over helper details.
-5. **Tests at the Bottom**:
-   - `#[cfg(test)] mod tests { ... }` always placed at the very end of the file.
+## Clean Code & Function Design
+
+Strictly follow [`.ai/skills/clean-code.md`](clean-code.md): SRP (one responsibility per function), SLAP (orchestrator vs. worker separation), 10–30 line function target, max nesting depth 2, and automatic post-coding review ([`review.md`](review.md)).
 
 ## Error Handling
 
@@ -32,6 +27,18 @@ Every Rust source file must follow consistent top-down organization and dependen
 - Propagate with `?`; convert with `From` impls or `.map_err()`
 - Never use `.unwrap()` or `.expect()` in non-test code; use `?` or handle explicitly
 - In `infrastructure`, map domain/application errors to HTTP status codes in a single place (error middleware)
+
+## Type Conversions & Idioms
+
+- **Implement `From<T>` for Infallible Conversions**: Implementing `From<T>` automatically provides `Into<T>`.
+- **Prefer Explicit `From` over `.into()`**: In calling code, prefer `TargetType::from(x)` over `x.into()` when the target type is not immediately obvious or could become ambiguous during refactoring.
+- **Fallible Conversions**: Implement `TryFrom<T>` returning domain/crate errors.
+- **Zero-Allocation Lookups (`Borrow`)**: Implement `Borrow<IdType>` on types stored in `IndexSet` or `HashSet` to enable lookups by ID reference without cloning.
+
+## Numeric & Collection Types
+
+- **Exact Decimals**: **Always use `rust_decimal::Decimal`** for financial amounts, bounds, and precision numbers. Never use `f32` / `f64` in domain entities.
+- **Deterministic Collections**: Use `indexmap::IndexMap` and `indexmap::IndexSet` when schema, attribute, or insertion order must be preserved.
 
 ## Async
 

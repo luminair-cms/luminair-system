@@ -108,6 +108,10 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
      - Dependency order ("newspaper style"): top-level entry points and orchestrators appear first, followed top-down by the functions they invoke down to leaf helpers.
      - Unit tests (`mod tests`) placed at the very bottom.
      - Reordered `infrastructure/src/schema_loader/loader.rs`, `dto.rs`, and `domain/src/schema/attributes.rs`, `types.rs` to conform.
+  7. **Clean Code & Automatic Post-Coding Review Enforcement**:
+     - Created dedicated skill [`.ai/skills/clean-code.md`](../.ai/skills/clean-code.md) codifying Single Responsibility Principle (SRP), Single Level of Abstraction Principle (SLAP), function size limits (10–30 lines), low nesting (max 2), Hexagonal Architecture, and Anti-Corruption Layer.
+     - Established mandatory mechanics in `AGENTS.md`, `.ai/skills/review.md`, `.ai/agents/gemini/GEMINI.md`, and `.ai/agents/claude/CLAUDE.md` requiring automatic execution of the full review checklist immediately after every coding or refactoring task.
+     - Refactored `load_schemas_from_dir` (from ~100 to 8 lines) and `parse_document_type` (from ~145 to 16 lines) into SLAP/SRP-compliant orchestrators with focused private worker helpers.
 
 
 

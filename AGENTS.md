@@ -26,9 +26,9 @@ Read in this order:
 
 | Task | Skill to load |
 |---|---|
-| Writing or modifying Rust code | [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md) |
+| Writing or modifying Rust code | [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md), [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md) |
 | Writing or modifying tests | [`.ai/skills/testing.md`](.ai/skills/testing.md), [`.ai/skills/spec-testing.md`](.ai/skills/spec-testing.md) |
-| Reviewing a PR / self-reviewing code | [`.ai/skills/review.md`](.ai/skills/review.md) |
+| Reviewing / self-reviewing code | [`.ai/skills/review.md`](.ai/skills/review.md), [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md) |
 | Investigating a topic / drafting an ADR | [`.ai/skills/adr-process.md`](.ai/skills/adr-process.md) |
 
 ## 3. Memory (Persistent Context)
@@ -50,8 +50,10 @@ Read in this order:
 
 ## 4. Mandatory Workflow Rules
 
-- **Before every PR / patch**: run the review checklist in `.ai/skills/review.md`
+- **Automatic Post-Coding Self-Review**: Immediately after modifying, refactoring, or writing any code in *any* session, the agent **must automatically execute the review checklist** in [`.ai/skills/review.md`](.ai/skills/review.md) before concluding the task or presenting results.
+- **Clean Code & SLAP/SRP**: All code must strictly conform to Single Responsibility Principle (SRP) and Single Level of Abstraction Principle (SLAP) as defined in [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md). High-level orchestrators must delegate details to focused helper functions (target 10–30 lines per function, max nesting depth 2).
 - **All code must pass**: `cargo clippy -- -D warnings` and `cargo test --workspace`
+- **Code Organization & Ordering**: Follow "newspaper style" item ordering from [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md): types first, functions/impls after; public functions first in dependency order, private helpers after; tests at the bottom.
 - **New endpoints**: add an entry to `docs/api.md`
 - **Architecture changes**: create a new ADR in `docs/adr/` following [`.ai/skills/adr-process.md`](.ai/skills/adr-process.md) (next free number; structure as in [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md)) and add it to the ADR index above
 - **Generating tests**: never derive expected behavior from the implementation; if a test fails, report it as a spec–code mismatch instead of changing the assertion (see [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md))

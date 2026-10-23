@@ -1,7 +1,6 @@
 # Skill: Code Review Checklist
 
-Run this checklist before finalising any code change or opening a PR.
-Work through each section; fix issues before proceeding.
+> **MANDATORY**: Run this checklist **automatically after every coding session** before concluding the task or presenting results.
 
 ## 1. Automated Gates (must all pass)
 
@@ -11,54 +10,50 @@ cargo test --workspace
 cargo audit
 ```
 
-## 2. Architecture Boundaries
+## 2. Architecture & Design Patterns ([`clean-code.md`](clean-code.md), [`docs/architecture.md`](../../docs/architecture.md))
 
-- [ ] No `infrastructure` imports in `domain` or `application` crates
-- [ ] No `sqlx` / `axum` / HTTP types in `domain`
+- [ ] Hexagonal boundaries: `domain` and `application` contain zero I/O, SQL, or HTTP imports
 - [ ] Repository traits defined in `domain`, implemented only in `infrastructure`
-- [ ] No direct DB calls in `application` (go through repository trait)
+- [ ] Anti-Corruption Layer (ACL): Wire DTOs strictly separated from domain types
 
-## 3. Code Organization & Item Ordering
+## 3. Clean Code (SRP & SLAP) ([`clean-code.md`](clean-code.md))
 
-- [ ] Follows item ordering rules in `.ai/skills/rust-patterns.md`:
-  - Types first (constants, structs, enums) before functions and `impl`s
-  - Public functions/methods first, private helpers after
-  - Ordered by dependency ("newspaper style"): entry points first, followed by functions they call
-  - `#[cfg(test)] mod tests` at the bottom of the file
+- [ ] **SRP**: Each function and struct has one reason to change; auxiliary logic extracted
+- [ ] **SLAP**: Orchestrators only coordinate; workers handle raw I/O, parsing, and loops
+- [ ] **Function Size**: 10–30 lines target (flag > 40 lines), nesting depth $\le 2$, guard clauses fail fast
 
-## 4. Error Handling
+## 4. Item Ordering & Idioms ([`rust-patterns.md`](rust-patterns.md))
 
-- [ ] No `.unwrap()` or `.expect()` outside of tests
-- [ ] All new error variants use `thiserror` and have meaningful messages
-- [ ] HTTP error mapping stays in the infrastructure error middleware (not scattered across handlers)
+- [ ] Types first (constants, structs, enums) before functions and `impl`s
+- [ ] Public functions first in dependency order ("newspaper style"); private helpers after
+- [ ] Explicit conversions: `TargetType::from(x)` used over `.into()` when target type is ambiguous
+- [ ] Exact numbers: `rust_decimal::Decimal` used instead of floats in domain models
+- [ ] `#[cfg(test)] mod tests` at the bottom of the file
 
-## 5. API Surface
+## 5. Error Handling
 
-- [ ] If any endpoint was added/changed/removed → `docs/api.md` is updated
-- [ ] Response envelope matches the standard format (see `docs/api.md`)
-- [ ] Errors return `application/problem+json`
+- [ ] No `.unwrap()` or `.expect()` outside of tests; all errors use `thiserror`
+- [ ] HTTP error mapping centralized in infrastructure middleware
 
-## 6. Data Model
+## 6. API Surface ([`docs/api.md`](../../docs/api.md))
 
-- [ ] New primary keys use `Uuid::now_v7()` — no integer sequences
-- [ ] Migrations in `infrastructure/migrations/` use timestamp prefix
-- [ ] No DDL inside transactions
+- [ ] Any endpoint change reflected in `docs/api.md`
+- [ ] Standard response envelope and RFC 9457 `application/problem+json` returned
 
-## 7. Security
+## 7. Data Model
 
-- [ ] No secrets, tokens, or credentials in committed code or docs
-- [ ] Inputs validated before reaching domain logic
-- [ ] No SQL string interpolation — use `sqlx` query macros or parameterised queries
+- [ ] Primary keys use `Uuid::now_v7()` (no auto-increment/sequences)
+- [ ] Migrations prefixed with timestamp; strictly `-- no-transaction` for Aurora DSQL
 
-## 8. Tests
+## 8. Security
 
-- [ ] New domain logic has unit tests
-- [ ] New use-cases have unit tests with fake repositories
-- [ ] New endpoints have at least one integration or E2E test
-- [ ] See `.ai/skills/testing.md` for conventions
+- [ ] Zero secrets committed; inputs validated before domain logic; no SQL string interpolation
 
-## 9. Documentation
+## 9. Tests ([`testing.md`](testing.md), [`spec-testing.md`](spec-testing.md))
 
-- [ ] Public types and functions have doc comments (`///`)
-- [ ] Architecture changes → new ADR in `docs/adr/`
-- [ ] If a non-obvious decision was made, append to `.ai/context/decisions.md`
+- [ ] Domain logic has unit/property tests; use-cases tested with fakes; endpoints tested via integration tests
+- [ ] Spec-backed tests live in `<crate>/tests/` and pass `spec_traceability`
+
+## 10. Documentation
+
+- [ ] Public items have `///` doc comments; ADR created for architectural decisions; `.ai/context/decisions.md` updated

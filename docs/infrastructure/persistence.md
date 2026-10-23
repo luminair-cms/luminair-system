@@ -10,18 +10,9 @@
 
 ## 1. Relational Persistence Overview
 
-Luminair targets **AWS Aurora DSQL** (distributed, active-active PostgreSQL-compatible SQL engine) while maintaining 100% portability with standard **PostgreSQL** (for local development, Docker, and CI).
+Luminair targets **AWS Aurora DSQL** (distributed, active-active PostgreSQL-compatible SQL engine) while maintaining 100% portability with standard **PostgreSQL** (for local development, Docker, and CI) using a unified `sqlx::PgPool`.
 
-### Portability & Driver Contracts
-
-| Component | Library / Driver | Role & Specifics |
-|---|---|---|
-| **SQL Engine & Pool** | `sqlx` (PostgreSQL driver) | Unified `sqlx::PgPool` for both PostgreSQL and Aurora DSQL |
-| **Query Construction** | Parameterized SQL & `sea-query` | Dynamic query compilation for type-specific wide tables |
-| **Serialization** | `serde_json` | JSONB serialization for `document_drafts` and `document_snapshots` |
-| **Key Generation** | `uuid::Uuid::now_v7()` | Client-side time-ordered UUIDv7 (mandatory for DSQL; no serial/sequences) |
-| **Authentication** | AWS SDK (`aws-sdk-dsql`) | Short-lived IAM token generation (15-min rotation) for Aurora DSQL |
-| **Concurrency Control** | Infrastructure OCC Retry Loop | Automatic retry with exponential backoff on SQLSTATE `40001` (serialization failure) |
+Client-side `Uuid::now_v7()` primary keys, JSONB serialization for drafts/snapshots, parameterized queries via `sea-query`, and an OCC retry loop (`SQLSTATE 40001`) ensure active-active high concurrency. See [`docs/design-infrastructure-persistence.md`](../design-infrastructure-persistence.md) §1 for technology stack details and driver contracts.
 
 ---
 

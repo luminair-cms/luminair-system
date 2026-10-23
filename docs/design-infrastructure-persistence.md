@@ -230,16 +230,7 @@ LIMIT $1 OFFSET $2;
 
 #### Path B: For Draft-Enabled Types (`draft_and_publish: true`)
 
-Because a document can exist in `document_drafts`, in the wide table `[type]`, or in **both** simultaneously (when in `'modified'` state), here is where each document state physically lives and which branch of the `UNION ALL` selects it:
-
-| Document State | In `document_drafts`? | In Wide Table `[type]`? | Selected by Branch | Why |
-|---|---|---|---|---|
-| **1. `'draft'`** *(never published)* | **Yes** (`status = 'draft'`) | No | **Branch 1** (`document_drafts`) | Only exists in `document_drafts`. |
-| **2. `'unpublished'`** *(taken offline)* | **Yes** (`status = 'unpublished'`) | No *(deleted on unpublish)* | **Branch 1** (`document_drafts`) | Only exists in `document_drafts`. |
-| **3. `'modified'`** *(live + pending edits)* | **Yes** (`status = 'modified'`) | **Yes** (`has_pending_draft = TRUE`) | **Branch 1** (`document_drafts`) | Exists in **both** tables. Branch 1 selects the working copy (with the latest edited `display_title`, `updated_at`, and `version`), while Branch 2 skips it via `WHERE has_pending_draft = FALSE` so the document is **not duplicated**. |
-| **4. `'published'`** *(live, no pending edits)* | No *(deleted on publish / discard)* | **Yes** (`has_pending_draft = FALSE`) | **Branch 2** (`[type]`) | Only exists in `[type]` with `has_pending_draft = FALSE`. |
-
-To avoid cross-shard distributed `FULL OUTER JOIN` operations in AWS Aurora DSQL, `list_admin_headers` executes this two-branch `UNION ALL`:
+Because documents can exist in `document_drafts`, wide table `[type]`, or both simultaneously (when `modified`), `list_admin_headers` executes a two-branch `UNION ALL` to avoid cross-shard distributed `FULL OUTER JOIN` operations in AWS Aurora DSQL (see [`docs/content-lifecycle.md`](./content-lifecycle.md) §1 for physical state mapping):
 ```sql
 WITH combined AS (
     -- 1. Working copies in document_drafts ('draft', 'modified', 'unpublished')
