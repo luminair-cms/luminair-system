@@ -67,19 +67,19 @@ flowchart TD
 
 > **Detailed Specification**: See [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md) and [`docs/design-infrastructure-persistence.md`](./design-infrastructure-persistence.md).
 
-- [ ] **Step 2.1: SQL Identifier Naming Engine (`infrastructure/src/persistence/naming/`)**
+- [x] **Step 2.1: SQL Identifier Naming Engine (`infrastructure/src/persistence/naming/`)**
   - Implement `sanitize.rs` for `kebab_to_snake`, `is_reserved_sql_keyword`, and `RESERVED_SQL_KEYWORDS` (complete).
   - Map `DocumentTypeId` to snake_case pluralized table names (`article` -> `articles`).
   - Map relations to junction link table names (`articles_tags_links`).
   - Map `AttributeId` to column names with keyword escaping where required.
-- [ ] **Step 2.2: Static System Migrations (`infrastructure/migrations/`)**
+- [x] **Step 2.2: Static System Migrations (`infrastructure/migrations/`)**
   - Add `20261010000001_create_document_drafts.sql` (`document_drafts` table).
   - Add `20261010000002_create_document_snapshots.sql` (`document_snapshots` table).
   - Ensure all migration files begin with `-- no-transaction` and use client UUIDv7.
-- [ ] **Step 2.3: Dynamic Schema Synchronizer (`infrastructure/src/persistence/migration/dynamic_sync.rs`)**
+- [x] **Step 2.3: Dynamic Schema Synchronizer (`infrastructure/src/persistence/migration/dynamic_sync.rs`)**
   - Generate additive DDL from `SchemaRegistry` (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
   - Provision relational junction tables and B-tree indexes.
-- [ ] **Step 2.4: Query Construction & OCC Engine (`infrastructure/src/persistence/query/`)**
+- [x] **Step 2.4: Query Construction & OCC Engine (`infrastructure/src/persistence/query/`)**
   - Sea-Query dynamic wide table and junction table queries.
   - Implement `with_occ_retry` handling SQLSTATE `40001` (serialization failure) with exponential backoff.
 
@@ -155,8 +155,7 @@ flowchart TD
 
 ## 3. Immediate Next Execution Step
 
-Execute **Phase 2: Database Persistence Foundation**:
-- Step 2.1: Implement SQL identifier naming engine (`infrastructure/src/persistence/naming/`).
-- Step 2.2: Add static migrations for `document_drafts` and `document_snapshots`.
-- Step 2.3: Implement dynamic additive schema synchronizer (`dynamic_sync.rs`).
-- Step 2.4: Build Sea-Query wide-table query builders and OCC retry helper (`with_occ_retry`).
+Execute **Phase 3: Repository Adapters**:
+- Step 3.1: Implement `SqlxDocumentInstanceRepository` and `SqlxDocumentSnapshotRepository` in `infrastructure/src/persistence/repositories/`.
+- Step 3.2: Implement `SqlxRoleRepository`, `SqlxUserRoleAssignmentRepository`, and `SqlxAccessRequestRepository`.
+- Step 3.3: Integration test suite (`infrastructure/tests/persistence_test.rs`).

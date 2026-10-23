@@ -14,6 +14,8 @@ const MIGRATIONS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations");
 fn test_migration_files_exist_and_readable() {
     let m1 = Path::new(MIGRATIONS_DIR).join("20260924000001_create_system_tables.sql");
     let m2 = Path::new(MIGRATIONS_DIR).join("20260924000002_seed_builtin_roles.sql");
+    let m3 = Path::new(MIGRATIONS_DIR).join("20261010000001_create_document_drafts.sql");
+    let m4 = Path::new(MIGRATIONS_DIR).join("20261010000002_create_document_snapshots.sql");
 
     assert!(
         m1.exists(),
@@ -23,12 +25,24 @@ fn test_migration_files_exist_and_readable() {
         m2.exists(),
         "20260924000002_seed_builtin_roles.sql must exist"
     );
+    assert!(
+        m3.exists(),
+        "20261010000001_create_document_drafts.sql must exist"
+    );
+    assert!(
+        m4.exists(),
+        "20261010000002_create_document_snapshots.sql must exist"
+    );
 
     let content_m1 = fs::read_to_string(&m1).expect("readable m1");
     let content_m2 = fs::read_to_string(&m2).expect("readable m2");
+    let content_m3 = fs::read_to_string(&m3).expect("readable m3");
+    let content_m4 = fs::read_to_string(&m4).expect("readable m4");
 
     assert!(!content_m1.trim().is_empty(), "m1 must not be empty");
     assert!(!content_m2.trim().is_empty(), "m2 must not be empty");
+    assert!(!content_m3.trim().is_empty(), "m3 must not be empty");
+    assert!(!content_m4.trim().is_empty(), "m4 must not be empty");
 }
 
 #[test]
@@ -112,13 +126,19 @@ fn test_ddl_and_seed_idempotency_patterns() {
 #[test]
 fn test_embedded_migrator_contains_all_migrations() {
     let migrations = &MIGRATOR.migrations;
-    assert_eq!(migrations.len(), 2, "Expected exactly 2 static migrations");
+    assert_eq!(migrations.len(), 4, "Expected exactly 4 static migrations");
 
     assert_eq!(migrations[0].version, 20260924000001);
     assert_eq!(migrations[0].description, "create system tables");
 
     assert_eq!(migrations[1].version, 20260924000002);
     assert_eq!(migrations[1].description, "seed builtin roles");
+
+    assert_eq!(migrations[2].version, 20261010000001);
+    assert_eq!(migrations[2].description, "create document drafts");
+
+    assert_eq!(migrations[3].version, 20261010000002);
+    assert_eq!(migrations[3].description, "create document snapshots");
 }
 
 #[test]
@@ -171,10 +191,8 @@ async fn test_db_migrations_execution_and_idempotency_if_database_available() {
 
     let table_names: Vec<String> = rows.into_iter().map(|r| r.0).collect();
 
-    assert!(
-        !table_names.contains(&"document_snapshots".to_string()),
-        "document_snapshots table has been replaced by per-type published mirror tables"
-    );
+    assert!(table_names.contains(&"document_drafts".to_string()));
+    assert!(table_names.contains(&"document_snapshots".to_string()));
     assert!(table_names.contains(&"roles".to_string()));
     assert!(table_names.contains(&"role_permissions".to_string()));
     assert!(table_names.contains(&"user_role_assignments".to_string()));

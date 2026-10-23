@@ -617,6 +617,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::mutable_key_type)]
     fn test_parse_constraints_with_aliases() {
         let json = r#"[
             { "minLength": 3 },

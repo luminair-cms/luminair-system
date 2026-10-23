@@ -117,3 +117,24 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
 
 
 
+---
+
+### 2026-10-23 — Phase 2: Database Persistence Foundation Complete
+
+- **Context**: Implementing Phase 2 of the Infrastructure Implementation Plan (`docs/plan-infrastructure.md`). Provisioning SQL identifier mapping, static system migrations, dynamic additive schema synchronizer, Sea-Query builders, and OCC concurrency retry machinery for AWS Aurora DSQL and PostgreSQL portability.
+- **Decisions**:
+  1. **SQL Identifier Naming Engine (`persistence::naming::identifiers`)**:
+     - Standardized lifecycle column constants (`id`, `revision`, `has_pending_draft`, `display_values`, `display_title`, etc.) and system table names.
+     - Singletons resolve to `singular_name` in snake_case; collections resolve to `plural_name` in snake_case (`table_name_for_document_type`).
+     - Junction tables resolve uniformly to `[source_table]_[rel_attr]_links` with `source_id UUID`, `target_id UUID`, `order_index INT`.
+  2. **Static Migrations (`20261010000001` & `20261010000002`)**:
+     - Embedded `document_drafts` (composite primary key `(document_type_id, id)`, JSONB `display_values`, `content`, `relations`, status checks) and `document_snapshots` (immutable revision history with `uq_document_snapshots_revision` constraint).
+     - Both strictly start with `-- no-transaction` for AWS Aurora DSQL compatibility; no sequences or auto-increment columns; client UUIDv7 keys.
+  3. **Dynamic Additive Schema Synchronizer (`persistence::migration::dynamic_sync`)**:
+     - Idempotent additive DDL compiler (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, B-tree indexes, junction tables with cascading foreign keys).
+     - Standardized wide table creation order: wide tables first, additive columns second, wide table indexes third, junction tables fourth, and junction indexes fifth, preventing foreign key dependency ordering issues.
+     - Utilizes `sqlx::AssertSqlSafe` for executing dynamically assembled DDL safely across SQLx 0.9 driver pools without `'static` lifetime leaks.
+  4. **Query & OCC Subsystem (`persistence::query`)**:
+     - Implemented `with_occ_retry` catching SQLSTATE `40001` (`serialization_failure`) with randomized exponential backoff and UUIDv4-derived entropy jitter, exhausting to typed `PersistenceError::OccConflictExhausted`.
+     - Parameterized wide-table Sea-Query builders (`wide_table.rs`) for visitor queries (`has_pending_draft = FALSE`), pagination, equality filtering (`FieldFilter`), counts, upserts (`ON CONFLICT (id) DO UPDATE SET ...`), and display title lookups.
+     - Junction query builders (`junction.rs`) for link inserts (`ON CONFLICT (source_id, target_id) DO UPDATE SET order_index`), deletions, and two-phase batch relation lookups.
