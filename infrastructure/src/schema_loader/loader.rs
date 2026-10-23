@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::str::FromStr;
 
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use rust_decimal::Decimal;
 
 use domain::common::DisplayName;
@@ -16,7 +16,8 @@ use domain::schema::{
 use domain::system::{LocaleId, SystemConfig, SystemConfigId, SystemContext};
 
 use super::dto::{
-    AttributeRecord, ConstraintRecord, DocumentRecord, FieldTypeDto, SystemConfigRecord,
+    AttributeRecord, ConstraintRecord, DocumentInfoRecord, DocumentOptionsRecord, DocumentRecord,
+    FieldTypeDto, RelationTypeDto, SystemConfigRecord,
 };
 use super::error::SchemaLoaderError;
 use crate::persistence::naming::is_reserved_sql_keyword;
@@ -36,98 +37,10 @@ pub fn load_system_context_from_dir(
 pub fn load_schemas_from_dir(
     schema_dir: &Path,
 ) -> Result<(SystemConfig, SchemaRegistry), SchemaLoaderError> {
-    if !schema_dir.exists() {
-        return Err(SchemaLoaderError::Io {
-            path: schema_dir.to_path_buf(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("schema directory '{}' not found", schema_dir.display()),
-            ),
-        });
-    }
+    ensure_schema_dir_exists(schema_dir)?;
 
-    // 1. Read and parse system-config.json
-    let config_path = schema_dir.join("system-config.json");
-    if !config_path.exists() {
-        return Err(SchemaLoaderError::MissingSystemConfig {
-            dir: schema_dir.to_path_buf(),
-        });
-    }
-
-    let config_content = std::fs::read_to_string(&config_path).map_err(|e| {
-        SchemaLoaderError::Io {
-            path: config_path.clone(),
-            source: e,
-        }
-    })?;
-
-    let system_config = parse_system_config(&config_content).map_err(|e| match e {
-        SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
-            path: config_path.clone(),
-            source,
-        },
-        other => other,
-    })?;
-
-    // 2. Discover document-types/
-    let types_dir = schema_dir.join("document-types");
-    if !types_dir.is_dir() {
-        return Err(SchemaLoaderError::MissingDocumentTypesDir {
-            dir: schema_dir.to_path_buf(),
-        });
-    }
-
-    let entries = std::fs::read_dir(&types_dir).map_err(|e| SchemaLoaderError::Io {
-        path: types_dir.clone(),
-        source: e,
-    })?;
-
-    let mut doc_types = Vec::new();
-    let mut entries_vec = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| SchemaLoaderError::Io {
-            path: types_dir.clone(),
-            source: e,
-        })?;
-        entries_vec.push(entry);
-    }
-
-    // Sort entries deterministically by file name
-    entries_vec.sort_by_key(|e| e.file_name());
-
-    for entry in entries_vec {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-            let file_stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| {
-                    SchemaLoaderError::Validation(format!(
-                        "invalid file stem for schema file '{}'",
-                        path.display()
-                    ))
-                })?;
-
-            let content = std::fs::read_to_string(&path).map_err(|e| {
-                SchemaLoaderError::Io {
-                    path: path.clone(),
-                    source: e,
-                }
-            })?;
-
-            let doc_type = parse_document_type(&content, file_stem).map_err(|e| match e {
-                SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
-                    path: path.clone(),
-                    source,
-                },
-                other => other,
-            })?;
-
-            doc_types.push(doc_type);
-        }
-    }
-
-    // 3. Construct and validate SchemaRegistry
+    let system_config = load_system_config_file(schema_dir)?;
+    let doc_types = load_document_types_from_dir(schema_dir)?;
     let registry = SchemaRegistry::try_new(doc_types)?;
 
     Ok((system_config, registry))
@@ -136,7 +49,7 @@ pub fn load_schemas_from_dir(
 /// Parses the system configuration from a `system-config.json` string content (no `id` required).
 pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
     let record: SystemConfigRecord =
-        serde_json::from_str(content).map_err(|e| SchemaLoaderError::JsonInline { source: e })?;
+        serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
 
     let default_locale = LocaleId::try_new(record.default_locale).map_err(|e| {
         SchemaLoaderError::Validation(format!(
@@ -164,140 +77,17 @@ pub fn parse_document_type(
     content: &str,
     file_stem: &str,
 ) -> Result<DocumentType, SchemaLoaderError> {
-    if is_reserved_sql_keyword(file_stem) {
-        return Err(SchemaLoaderError::ReservedKeyword {
-            keyword: file_stem.to_string(),
-            context: "document type file stem".into(),
-        });
-    }
+    validate_file_stem(file_stem)?;
 
-    let record: DocumentRecord =
-        serde_json::from_str(content).map_err(|e| SchemaLoaderError::JsonInline { source: e })?;
+    let record: DocumentRecord = serde_json::from_str(content)
+        .map_err(|source| SchemaLoaderError::JsonInline { source })?;
 
-    if record.info.singular_name != file_stem {
-        return Err(SchemaLoaderError::FileStemMismatch {
-            file_stem: file_stem.to_string(),
-            singular_name: record.info.singular_name.to_string(),
-        });
-    }
-
-    let id = domain::schema::DocumentTypeId::try_new(file_stem).map_err(|e| {
-        SchemaLoaderError::Validation(format!("invalid document type id '{file_stem}': {e}"))
-    })?;
-
-    if is_reserved_sql_keyword(record.info.plural_name) {
-        return Err(SchemaLoaderError::ReservedKeyword {
-            keyword: record.info.plural_name.to_string(),
-            context: "pluralName".into(),
-        });
-    }
-
-    let plural_name =
-        domain::schema::DocumentTypeId::try_new(record.info.plural_name).map_err(|e| {
-            SchemaLoaderError::Validation(format!(
-                "invalid pluralName '{}': {e}",
-                record.info.plural_name
-            ))
-        })?;
-
-    let title = DisplayName::try_new(record.info.display_name).map_err(|e| {
-        SchemaLoaderError::Validation(format!(
-            "invalid displayName '{}': {e}",
-            record.info.display_name
-        ))
-    })?;
-
-    let description = if let Some(desc) = record.info.description {
-        Some(DisplayName::try_new(desc).map_err(|e| {
-            SchemaLoaderError::Validation(format!("invalid description '{desc}': {e}"))
-        })?)
-    } else {
-        None
-    };
-
-    let mut display_fields = Vec::with_capacity(record.info.display_fields.len());
-    for df in &record.info.display_fields {
-        let attr_id = AttributeId::try_new(*df).map_err(|e| {
-            SchemaLoaderError::Validation(format!("invalid displayField '{df}': {e}"))
-        })?;
-        display_fields.push(attr_id);
-    }
-
-    let info = DocumentTypeInfo {
-        title,
-        singular_name: id.clone(),
-        plural_name,
-        description,
-        display_fields,
-    };
-
-    let options = DocumentTypeOptions {
-        draft_and_publish: record.options.map(|o| o.draft_and_publish).unwrap_or(false),
-    };
-
-    let mut fields = IndexSet::new();
-    let mut relations = IndexSet::new();
-
-    for (attr_name, attr_record) in record.attributes {
-        if is_reserved_sql_keyword(attr_name) {
-            return Err(SchemaLoaderError::ReservedKeyword {
-                keyword: attr_name.to_string(),
-                context: format!("attribute '{attr_name}' on document type '{file_stem}'"),
-            });
-        }
-
-        let attr_id = AttributeId::try_new(attr_name).map_err(|e| {
-            SchemaLoaderError::Validation(format!("invalid attribute name '{attr_name}': {e}"))
-        })?;
-
-        match attr_record {
-            AttributeRecord::Field {
-                field_type: raw_ft,
-                unique,
-                required,
-                constraints: raw_constraints,
-            } => {
-                let ft = parse_field_type(&raw_ft)?;
-                let constraints = parse_constraints(&raw_constraints, &ft)?;
-                let field_def = FieldDefinition {
-                    id: attr_id.clone(),
-                    field_type: ft,
-                    unique,
-                    required,
-                    constraints,
-                };
-                if !fields.insert(field_def) {
-                    return Err(SchemaLoaderError::Validation(format!(
-                        "duplicate field attribute '{attr_id}' on document type '{file_stem}'"
-                    )));
-                }
-            }
-            AttributeRecord::Relation {
-                relation_type,
-                target,
-            } => {
-                let target_id =
-                    domain::schema::DocumentTypeId::try_new(target).map_err(|e| {
-                        SchemaLoaderError::Validation(format!(
-                            "invalid relation target '{target}' for attribute '{attr_id}': {e}"
-                        ))
-                    })?;
-                let rel_def = RelationDefinition {
-                    id: attr_id.clone(),
-                    relation_type: relation_type.into(),
-                    target: target_id,
-                };
-                if !relations.insert(rel_def) {
-                    return Err(SchemaLoaderError::Validation(format!(
-                        "duplicate relation attribute '{attr_id}' on document type '{file_stem}'"
-                    )));
-                }
-            }
-        }
-    }
+    let info = parse_document_info(&record.info, file_stem)?;
+    let options = parse_document_options(record.options);
+    let (fields, relations) = parse_attributes(record.attributes, file_stem)?;
 
     Ok(DocumentType {
-        id,
+        id: info.singular_name.clone(),
         kind: record.kind.into(),
         info,
         options,
@@ -413,6 +203,291 @@ pub fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
         ))),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Private Helpers for `load_schemas_from_dir`
+// ---------------------------------------------------------------------------
+
+/// Ensures that the schema directory exists on disk.
+fn ensure_schema_dir_exists(schema_dir: &Path) -> Result<(), SchemaLoaderError> {
+    if !schema_dir.exists() {
+        return Err(SchemaLoaderError::Io {
+            path: schema_dir.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("schema directory '{}' not found", schema_dir.display()),
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Reads and parses `system-config.json` within `schema_dir`.
+fn load_system_config_file(schema_dir: &Path) -> Result<SystemConfig, SchemaLoaderError> {
+    let config_path = schema_dir.join("system-config.json");
+    if !config_path.exists() {
+        return Err(SchemaLoaderError::MissingSystemConfig {
+            dir: schema_dir.to_path_buf(),
+        });
+    }
+
+    let config_content = std::fs::read_to_string(&config_path).map_err(|source| {
+        SchemaLoaderError::Io {
+            path: config_path.clone(),
+            source,
+        }
+    })?;
+
+    parse_system_config(&config_content).map_err(|err| match err {
+        SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
+            path: config_path,
+            source,
+        },
+        other => other,
+    })
+}
+
+/// Discovers, reads, and parses all `document-types/*.json` definitions within `schema_dir`.
+fn load_document_types_from_dir(schema_dir: &Path) -> Result<Vec<DocumentType>, SchemaLoaderError> {
+    let types_dir = schema_dir.join("document-types");
+    if !types_dir.is_dir() {
+        return Err(SchemaLoaderError::MissingDocumentTypesDir {
+            dir: schema_dir.to_path_buf(),
+        });
+    }
+
+    let entries = std::fs::read_dir(&types_dir).map_err(|source| SchemaLoaderError::Io {
+        path: types_dir.clone(),
+        source,
+    })?;
+
+    let mut entries_vec = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| SchemaLoaderError::Io {
+            path: types_dir.clone(),
+            source,
+        })?;
+        entries_vec.push(entry);
+    }
+
+    // Sort entries deterministically by file name
+    entries_vec.sort_by_key(|e| e.file_name());
+
+    let mut doc_types = Vec::with_capacity(entries_vec.len());
+    for entry in entries_vec {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            let doc_type = load_document_type_file(&path)?;
+            doc_types.push(doc_type);
+        }
+    }
+
+    Ok(doc_types)
+}
+
+/// Loads and parses a single document type definition file from disk.
+fn load_document_type_file(path: &Path) -> Result<DocumentType, SchemaLoaderError> {
+    let file_stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| {
+            SchemaLoaderError::Validation(format!(
+                "invalid file stem for schema file '{}'",
+                path.display()
+            ))
+        })?;
+
+    let content = std::fs::read_to_string(path).map_err(|source| SchemaLoaderError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    parse_document_type(&content, file_stem).map_err(|err| match err {
+        SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
+            path: path.to_path_buf(),
+            source,
+        },
+        other => other,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Private Helpers for `parse_document_type`
+// ---------------------------------------------------------------------------
+
+/// Validates that a file stem is not a reserved SQL keyword.
+fn validate_file_stem(file_stem: &str) -> Result<(), SchemaLoaderError> {
+    if is_reserved_sql_keyword(file_stem) {
+        return Err(SchemaLoaderError::ReservedKeyword {
+            keyword: file_stem.to_string(),
+            context: "document type file stem".into(),
+        });
+    }
+    Ok(())
+}
+
+/// Parses and validates `DocumentTypeInfo` from record metadata and file stem.
+fn parse_document_info(
+    info: &DocumentInfoRecord<'_>,
+    file_stem: &str,
+) -> Result<DocumentTypeInfo, SchemaLoaderError> {
+    if info.singular_name != file_stem {
+        return Err(SchemaLoaderError::FileStemMismatch {
+            file_stem: file_stem.to_string(),
+            singular_name: info.singular_name.to_string(),
+        });
+    }
+
+    let singular_name = domain::schema::DocumentTypeId::try_new(file_stem).map_err(|e| {
+        SchemaLoaderError::Validation(format!("invalid document type id '{file_stem}': {e}"))
+    })?;
+
+    if is_reserved_sql_keyword(info.plural_name) {
+        return Err(SchemaLoaderError::ReservedKeyword {
+            keyword: info.plural_name.to_string(),
+            context: "pluralName".into(),
+        });
+    }
+
+    let plural_name = domain::schema::DocumentTypeId::try_new(info.plural_name).map_err(|e| {
+        SchemaLoaderError::Validation(format!("invalid pluralName '{}': {e}", info.plural_name))
+    })?;
+
+    let title = DisplayName::try_new(info.display_name).map_err(|e| {
+        SchemaLoaderError::Validation(format!("invalid displayName '{}': {e}", info.display_name))
+    })?;
+
+    let description = if let Some(desc) = info.description {
+        Some(DisplayName::try_new(desc).map_err(|e| {
+            SchemaLoaderError::Validation(format!("invalid description '{desc}': {e}"))
+        })?)
+    } else {
+        None
+    };
+
+    let mut display_fields = Vec::with_capacity(info.display_fields.len());
+    for df in &info.display_fields {
+        let attr_id = AttributeId::try_new(*df).map_err(|e| {
+            SchemaLoaderError::Validation(format!("invalid displayField '{df}': {e}"))
+        })?;
+        display_fields.push(attr_id);
+    }
+
+    Ok(DocumentTypeInfo {
+        title,
+        singular_name,
+        plural_name,
+        description,
+        display_fields,
+    })
+}
+
+/// Maps document options record to domain `DocumentTypeOptions`.
+fn parse_document_options(options: Option<DocumentOptionsRecord>) -> DocumentTypeOptions {
+    DocumentTypeOptions {
+        draft_and_publish: options.map(|o| o.draft_and_publish).unwrap_or(false),
+    }
+}
+
+/// Parses the attributes map, segregating fields and relations with keyword and duplicate validation.
+#[allow(clippy::mutable_key_type)]
+fn parse_attributes(
+    attributes: IndexMap<&str, AttributeRecord<'_>>,
+    file_stem: &str,
+) -> Result<(IndexSet<FieldDefinition>, IndexSet<RelationDefinition>), SchemaLoaderError> {
+    let mut fields = IndexSet::new();
+    let mut relations = IndexSet::new();
+
+    for (attr_name, attr_record) in attributes {
+        if is_reserved_sql_keyword(attr_name) {
+            return Err(SchemaLoaderError::ReservedKeyword {
+                keyword: attr_name.to_string(),
+                context: format!("attribute '{attr_name}' on document type '{file_stem}'"),
+            });
+        }
+
+        let attr_id = AttributeId::try_new(attr_name).map_err(|e| {
+            SchemaLoaderError::Validation(format!("invalid attribute name '{attr_name}': {e}"))
+        })?;
+
+        match attr_record {
+            AttributeRecord::Field {
+                field_type: raw_ft,
+                unique,
+                required,
+                constraints: raw_constraints,
+            } => {
+                let field_def = parse_field_attribute(
+                    attr_id.clone(),
+                    &raw_ft,
+                    unique,
+                    required,
+                    &raw_constraints,
+                )?;
+                if !fields.insert(field_def) {
+                    return Err(SchemaLoaderError::Validation(format!(
+                        "duplicate field attribute '{attr_id}' on document type '{file_stem}'"
+                    )));
+                }
+            }
+            AttributeRecord::Relation {
+                relation_type,
+                target,
+            } => {
+                let rel_def = parse_relation_attribute(attr_id.clone(), relation_type, target)?;
+                if !relations.insert(rel_def) {
+                    return Err(SchemaLoaderError::Validation(format!(
+                        "duplicate relation attribute '{attr_id}' on document type '{file_stem}'"
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok((fields, relations))
+}
+
+/// Parses a scalar field definition with type and constraints.
+#[allow(clippy::mutable_key_type)]
+fn parse_field_attribute(
+    attr_id: AttributeId,
+    raw_ft: &FieldTypeDto<'_>,
+    unique: bool,
+    required: bool,
+    raw_constraints: &[ConstraintRecord<'_>],
+) -> Result<FieldDefinition, SchemaLoaderError> {
+    let field_type = parse_field_type(raw_ft)?;
+    let constraints = parse_constraints(raw_constraints, &field_type)?;
+    Ok(FieldDefinition {
+        id: attr_id,
+        field_type,
+        unique,
+        required,
+        constraints,
+    })
+}
+
+/// Parses a relation definition with cardinality and target document type identifier.
+fn parse_relation_attribute(
+    attr_id: AttributeId,
+    relation_type: RelationTypeDto,
+    target: &str,
+) -> Result<RelationDefinition, SchemaLoaderError> {
+    let target_id = domain::schema::DocumentTypeId::try_new(target).map_err(|e| {
+        SchemaLoaderError::Validation(format!(
+            "invalid relation target '{target}' for attribute '{attr_id}': {e}"
+        ))
+    })?;
+    Ok(RelationDefinition {
+        id: attr_id,
+        relation_type: relation_type.into(),
+        target: target_id,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Private Helpers for `parse_constraints`
+// ---------------------------------------------------------------------------
 
 /// Helper to parse a numeric bound from JSON into integer or decimal constraint values.
 fn parse_numeric_bound(
