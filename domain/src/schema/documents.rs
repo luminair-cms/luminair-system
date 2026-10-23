@@ -48,9 +48,10 @@ pub struct DocumentType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum DocumentKind {
     Collection,
-    SingleType,
+    Singleton,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

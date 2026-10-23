@@ -18,38 +18,46 @@ cargo audit
 - [ ] Repository traits defined in `domain`, implemented only in `infrastructure`
 - [ ] No direct DB calls in `application` (go through repository trait)
 
-## 3. Error Handling
+## 3. Code Organization & Item Ordering
+
+- [ ] Follows item ordering rules in `.ai/skills/rust-patterns.md`:
+  - Types first (constants, structs, enums) before functions and `impl`s
+  - Public functions/methods first, private helpers after
+  - Ordered by dependency ("newspaper style"): entry points first, followed by functions they call
+  - `#[cfg(test)] mod tests` at the bottom of the file
+
+## 4. Error Handling
 
 - [ ] No `.unwrap()` or `.expect()` outside of tests
 - [ ] All new error variants use `thiserror` and have meaningful messages
 - [ ] HTTP error mapping stays in the infrastructure error middleware (not scattered across handlers)
 
-## 4. API Surface
+## 5. API Surface
 
 - [ ] If any endpoint was added/changed/removed → `docs/api.md` is updated
 - [ ] Response envelope matches the standard format (see `docs/api.md`)
 - [ ] Errors return `application/problem+json`
 
-## 5. Data Model
+## 6. Data Model
 
 - [ ] New primary keys use `Uuid::now_v7()` — no integer sequences
 - [ ] Migrations in `infrastructure/migrations/` use timestamp prefix
 - [ ] No DDL inside transactions
 
-## 6. Security
+## 7. Security
 
 - [ ] No secrets, tokens, or credentials in committed code or docs
 - [ ] Inputs validated before reaching domain logic
 - [ ] No SQL string interpolation — use `sqlx` query macros or parameterised queries
 
-## 7. Tests
+## 8. Tests
 
 - [ ] New domain logic has unit tests
 - [ ] New use-cases have unit tests with fake repositories
 - [ ] New endpoints have at least one integration or E2E test
 - [ ] See `.ai/skills/testing.md` for conventions
 
-## 8. Documentation
+## 9. Documentation
 
 - [ ] Public types and functions have doc comments (`///`)
 - [ ] Architecture changes → new ADR in `docs/adr/`

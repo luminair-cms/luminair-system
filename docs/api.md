@@ -89,7 +89,7 @@ Conflict errors occur when the requested command is valid in isolation but confl
 | `already_published` | Calling `publish` on a clean `Published` document that has no pending working draft edits (`DS-17`). | `{"document_id": UUID}` | Do not re-publish. The document is already live with identical content. |
 | `draft_and_publish_disabled` | Calling `publish` or `unpublish` on a document type with `draft_and_publish: false` (`DS-07`). | `{"document_type": string}` | Single-lifecycle documents are updated directly via `PUT /api/v1/content/:type/:id` without explicit publication. |
 | `version_mismatch` | Optimistic Concurrency Control failure: document version in database does not match `expected_version`. | `{"expected_version": int, "found_version": int}` | Re-fetch the latest document state (`GET ...?view=working`), resolve diffs, and retry. |
-| `single_type_already_exists` | Calling `create` on a `SingleType` document type when an instance already exists. | `{"document_type_id": string}` | Use `PUT` to update the existing singleton instance. |
+| `single_type_already_exists` | Calling `create` on a `Singleton` document type when an instance already exists. | `{"document_type_id": string}` | Use `PUT` to update the existing singleton instance. |
 | `access_request_already_active` | User submitted an access request while an active request is already pending. | `{"user_id": string}` | Await review of the existing pending request. |
 | `user_already_enrolled` | User submitted an access request but already has active roles in the system. | `{"user_id": string}` | Log in directly; user is already provisioned. |
 

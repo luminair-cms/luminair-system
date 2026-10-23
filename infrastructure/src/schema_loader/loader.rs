@@ -19,176 +19,143 @@ use super::dto::{
     AttributeRecord, ConstraintRecord, DocumentRecord, FieldTypeDto, SystemConfigRecord,
 };
 use super::error::SchemaLoaderError;
-use super::sanitize::is_reserved_sql_keyword;
+use crate::persistence::naming::is_reserved_sql_keyword;
 
-/// Parses a `FieldTypeDto` into a domain `FieldType`.
-pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoaderError> {
-    match dto {
-        FieldTypeDto::Simple(s) => {
-            let lower = s.to_ascii_lowercase();
-            match lower.as_str() {
-                "text" | "string" => Ok(FieldType::Primitive(PrimitiveType::Text)),
-                "localizedtext" | "localized_text" => Ok(FieldType::LocalizedText),
-                "boolean" | "bool" => Ok(FieldType::Primitive(PrimitiveType::Boolean)),
-                "date" => Ok(FieldType::Primitive(PrimitiveType::Date)),
-                "datetime" | "date_time" => Ok(FieldType::Primitive(PrimitiveType::DateTime)),
-                "email" => Ok(FieldType::Email),
-                "url" => Ok(FieldType::Url),
-                "json" => Ok(FieldType::Json),
-                "uid" => Ok(FieldType::Primitive(PrimitiveType::Uid)),
-                "uuid" => Ok(FieldType::Primitive(PrimitiveType::Uuid)),
-                "integer" | "int" | "int32" => {
-                    Ok(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32)))
-                }
-                "int16" | "short" => {
-                    Ok(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I16)))
-                }
-                "int64" | "long" | "bigint" => {
-                    Ok(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I64)))
-                }
-                "decimal" => Ok(FieldType::Primitive(PrimitiveType::Decimal {
-                    precision: 10,
-                    scale: 2,
-                })),
-                unknown => Err(SchemaLoaderError::Validation(format!(
-                    "unrecognized field type '{unknown}'"
-                ))),
-            }
-        }
-        FieldTypeDto::Integer { integer } => {
-            let lower = integer.to_ascii_lowercase();
-            match lower.as_str() {
-                "int16" | "i16" | "short" => {
-                    Ok(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I16)))
-                }
-                "int32" | "i32" | "integer" | "int" => {
-                    Ok(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32)))
-                }
-                "int64" | "i64" | "long" | "bigint" => {
-                    Ok(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I64)))
-                }
-                unknown => Err(SchemaLoaderError::Validation(format!(
-                    "unrecognized integer size '{unknown}'"
-                ))),
-            }
-        }
-        FieldTypeDto::Decimal { decimal } => {
-            if decimal.precision == 0
-                || decimal.precision > 38
-                || decimal.scale > decimal.precision
-            {
-                return Err(SchemaLoaderError::Validation(format!(
-                    "invalid decimal bounds: precision {} (must be in 1..=38) and scale {} (must be <= precision)",
-                    decimal.precision, decimal.scale
-                )));
-            }
-            Ok(FieldType::Primitive(PrimitiveType::Decimal {
-                precision: decimal.precision,
-                scale: decimal.scale,
-            }))
-        }
-    }
+/// Loads schemas and system config from `schema_dir`, validates them,
+/// assembles `SystemContext`, and promotes it to `'static` lifetime via `Box::leak`.
+pub fn load_system_context_from_dir(
+    schema_dir: &Path,
+) -> Result<&'static SystemContext, SchemaLoaderError> {
+    let (config, registry) = load_schemas_from_dir(schema_dir)?;
+    let ctx = SystemContext::new(registry, config);
+    Ok(Box::leak(Box::new(ctx)))
 }
 
-/// Parses constraint records into domain `FieldConstraint` variants.
-#[allow(clippy::mutable_key_type)]
-pub fn parse_constraints(
-    records: &[ConstraintRecord<'_>],
-    field_type: &FieldType,
-) -> Result<HashSet<FieldConstraint>, SchemaLoaderError> {
-    let mut constraints = HashSet::new();
+/// Walks `schema_dir`, loads `system-config.json` and all `document-types/*.json`,
+/// validates all cross-schema invariants, and returns `(SystemConfig, SchemaRegistry)`.
+pub fn load_schemas_from_dir(
+    schema_dir: &Path,
+) -> Result<(SystemConfig, SchemaRegistry), SchemaLoaderError> {
+    if !schema_dir.exists() {
+        return Err(SchemaLoaderError::Io {
+            path: schema_dir.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("schema directory '{}' not found", schema_dir.display()),
+            ),
+        });
+    }
 
-    for c in records {
-        if let Some(min_len) = c.min_length.or(c.min_len_alias) {
-            constraints.insert(FieldConstraint::MinLength(min_len));
+    // 1. Read and parse system-config.json
+    let config_path = schema_dir.join("system-config.json");
+    if !config_path.exists() {
+        return Err(SchemaLoaderError::MissingSystemConfig {
+            dir: schema_dir.to_path_buf(),
+        });
+    }
+
+    let config_content = std::fs::read_to_string(&config_path).map_err(|e| {
+        SchemaLoaderError::Io {
+            path: config_path.clone(),
+            source: e,
         }
-        if let Some(max_len) = c.max_length.or(c.max_len_alias) {
-            constraints.insert(FieldConstraint::MaxLength(max_len));
-        }
-        if let Some(pat) = c.pattern.or(c.regex) {
-            let pattern = RegexPattern::try_new(pat).map_err(|e| {
-                SchemaLoaderError::Validation(format!("invalid regex pattern '{pat}': {e}"))
+    })?;
+
+    let system_config = parse_system_config(&config_content).map_err(|e| match e {
+        SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
+            path: config_path.clone(),
+            source,
+        },
+        other => other,
+    })?;
+
+    // 2. Discover document-types/
+    let types_dir = schema_dir.join("document-types");
+    if !types_dir.is_dir() {
+        return Err(SchemaLoaderError::MissingDocumentTypesDir {
+            dir: schema_dir.to_path_buf(),
+        });
+    }
+
+    let entries = std::fs::read_dir(&types_dir).map_err(|e| SchemaLoaderError::Io {
+        path: types_dir.clone(),
+        source: e,
+    })?;
+
+    let mut doc_types = Vec::new();
+    let mut entries_vec = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| SchemaLoaderError::Io {
+            path: types_dir.clone(),
+            source: e,
+        })?;
+        entries_vec.push(entry);
+    }
+
+    // Sort entries deterministically by file name
+    entries_vec.sort_by_key(|e| e.file_name());
+
+    for entry in entries_vec {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            let file_stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| {
+                    SchemaLoaderError::Validation(format!(
+                        "invalid file stem for schema file '{}'",
+                        path.display()
+                    ))
+                })?;
+
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                SchemaLoaderError::Io {
+                    path: path.clone(),
+                    source: e,
+                }
             })?;
-            constraints.insert(FieldConstraint::Pattern(pattern));
-        }
-        if let Some(min_int) = c.min_integer {
-            constraints.insert(FieldConstraint::MinInteger(min_int));
-        }
-        if let Some(max_int) = c.max_integer {
-            constraints.insert(FieldConstraint::MaxInteger(max_int));
-        }
-        if let Some(min_dec_str) = c.min_decimal {
-            let dec = Decimal::from_str(min_dec_str).map_err(|e| {
-                SchemaLoaderError::Validation(format!("invalid minDecimal '{min_dec_str}': {e}"))
+
+            let doc_type = parse_document_type(&content, file_stem).map_err(|e| match e {
+                SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
+                    path: path.clone(),
+                    source,
+                },
+                other => other,
             })?;
-            constraints.insert(FieldConstraint::MinDecimal(dec));
-        }
-        if let Some(max_dec_str) = c.max_decimal {
-            let dec = Decimal::from_str(max_dec_str).map_err(|e| {
-                SchemaLoaderError::Validation(format!("invalid maxDecimal '{max_dec_str}': {e}"))
-            })?;
-            constraints.insert(FieldConstraint::MaxDecimal(dec));
-        }
-        // Generic min / max
-        if let Some(ref val) = c.min {
-            match val {
-                serde_json::Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        if matches!(field_type, FieldType::Primitive(PrimitiveType::Decimal { .. }))
-                        {
-                            constraints.insert(FieldConstraint::MinDecimal(Decimal::from(i)));
-                        } else {
-                            constraints.insert(FieldConstraint::MinInteger(i));
-                        }
-                    } else if let Some(f) = n.as_f64() {
-                        let dec = Decimal::from_str(&f.to_string()).map_err(|e| {
-                            SchemaLoaderError::Validation(format!("invalid min number '{f}': {e}"))
-                        })?;
-                        constraints.insert(FieldConstraint::MinDecimal(dec));
-                    }
-                }
-                serde_json::Value::String(s) => {
-                    let dec = Decimal::from_str(s).map_err(|e| {
-                        SchemaLoaderError::Validation(format!(
-                            "invalid min decimal string '{s}': {e}"
-                        ))
-                    })?;
-                    constraints.insert(FieldConstraint::MinDecimal(dec));
-                }
-                _ => {}
-            }
-        }
-        if let Some(ref val) = c.max {
-            match val {
-                serde_json::Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        if matches!(field_type, FieldType::Primitive(PrimitiveType::Decimal { .. }))
-                        {
-                            constraints.insert(FieldConstraint::MaxDecimal(Decimal::from(i)));
-                        } else {
-                            constraints.insert(FieldConstraint::MaxInteger(i));
-                        }
-                    } else if let Some(f) = n.as_f64() {
-                        let dec = Decimal::from_str(&f.to_string()).map_err(|e| {
-                            SchemaLoaderError::Validation(format!("invalid max number '{f}': {e}"))
-                        })?;
-                        constraints.insert(FieldConstraint::MaxDecimal(dec));
-                    }
-                }
-                serde_json::Value::String(s) => {
-                    let dec = Decimal::from_str(s).map_err(|e| {
-                        SchemaLoaderError::Validation(format!(
-                            "invalid max decimal string '{s}': {e}"
-                        ))
-                    })?;
-                    constraints.insert(FieldConstraint::MaxDecimal(dec));
-                }
-                _ => {}
-            }
+
+            doc_types.push(doc_type);
         }
     }
 
-    Ok(constraints)
+    // 3. Construct and validate SchemaRegistry
+    let registry = SchemaRegistry::try_new(doc_types)?;
+
+    Ok((system_config, registry))
+}
+
+/// Parses the system configuration from a `system-config.json` string content (no `id` required).
+pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
+    let record: SystemConfigRecord =
+        serde_json::from_str(content).map_err(|e| SchemaLoaderError::JsonInline { source: e })?;
+
+    let default_locale = LocaleId::try_new(record.default_locale).map_err(|e| {
+        SchemaLoaderError::Validation(format!(
+            "invalid defaultLocale '{}': {e}",
+            record.default_locale
+        ))
+    })?;
+
+    let mut available_locales = Vec::with_capacity(record.available_locales.len());
+    for loc in record.available_locales {
+        let loc_id = LocaleId::try_new(loc).map_err(|e| {
+            SchemaLoaderError::Validation(format!("invalid availableLocale '{loc}': {e}"))
+        })?;
+        available_locales.push(loc_id);
+    }
+
+    let id = SystemConfigId::new(uuid::Uuid::now_v7());
+    let config = SystemConfig::new(id, available_locales, default_locale)?;
+    Ok(config)
 }
 
 /// Parses a single document type definition from JSON string content.
@@ -339,141 +306,145 @@ pub fn parse_document_type(
     })
 }
 
-/// Parses the system configuration from a `system-config.json` string content (no `id` required).
-pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
-    let record: SystemConfigRecord =
-        serde_json::from_str(content).map_err(|e| SchemaLoaderError::JsonInline { source: e })?;
-
-    let default_locale = LocaleId::try_new(record.default_locale).map_err(|e| {
-        SchemaLoaderError::Validation(format!(
-            "invalid defaultLocale '{}': {e}",
-            record.default_locale
-        ))
-    })?;
-
-    let mut available_locales = Vec::with_capacity(record.available_locales.len());
-    for loc in record.available_locales {
-        let loc_id = LocaleId::try_new(loc).map_err(|e| {
-            SchemaLoaderError::Validation(format!("invalid availableLocale '{loc}': {e}"))
-        })?;
-        available_locales.push(loc_id);
-    }
-
-    let id = SystemConfigId::new(uuid::Uuid::now_v7());
-    let config = SystemConfig::new(id, available_locales, default_locale)?;
-    Ok(config)
-}
-
-/// Walks `schema_dir`, loads `system-config.json` and all `document-types/*.json`,
-/// validates all cross-schema invariants, and returns `(SystemConfig, SchemaRegistry)`.
-pub fn load_schemas_from_dir(
-    schema_dir: &Path,
-) -> Result<(SystemConfig, SchemaRegistry), SchemaLoaderError> {
-    if !schema_dir.exists() {
-        return Err(SchemaLoaderError::Io {
-            path: schema_dir.to_path_buf(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("schema directory '{}' not found", schema_dir.display()),
-            ),
-        });
-    }
-
-    // 1. Read and parse system-config.json
-    let config_path = schema_dir.join("system-config.json");
-    if !config_path.exists() {
-        return Err(SchemaLoaderError::MissingSystemConfig {
-            dir: schema_dir.to_path_buf(),
-        });
-    }
-
-    let config_content = std::fs::read_to_string(&config_path).map_err(|e| {
-        SchemaLoaderError::Io {
-            path: config_path.clone(),
-            source: e,
-        }
-    })?;
-
-    let system_config = parse_system_config(&config_content).map_err(|e| match e {
-        SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
-            path: config_path.clone(),
-            source,
-        },
-        other => other,
-    })?;
-
-    // 2. Discover document-types/
-    let types_dir = schema_dir.join("document-types");
-    if !types_dir.is_dir() {
-        return Err(SchemaLoaderError::MissingDocumentTypesDir {
-            dir: schema_dir.to_path_buf(),
-        });
-    }
-
-    let entries = std::fs::read_dir(&types_dir).map_err(|e| SchemaLoaderError::Io {
-        path: types_dir.clone(),
-        source: e,
-    })?;
-
-    let mut doc_types = Vec::new();
-    let mut entries_vec = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| SchemaLoaderError::Io {
-            path: types_dir.clone(),
-            source: e,
-        })?;
-        entries_vec.push(entry);
-    }
-
-    // Sort entries deterministically by file name
-    entries_vec.sort_by_key(|e| e.file_name());
-
-    for entry in entries_vec {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-            let file_stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .ok_or_else(|| {
-                    SchemaLoaderError::Validation(format!(
-                        "invalid file stem for schema file '{}'",
-                        path.display()
-                    ))
-                })?;
-
-            let content = std::fs::read_to_string(&path).map_err(|e| {
-                SchemaLoaderError::Io {
-                    path: path.clone(),
-                    source: e,
+/// Parses a `FieldTypeDto` into a domain `FieldType`.
+pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoaderError> {
+    match dto {
+        FieldTypeDto::Simple(s) => {
+            let lower = s.to_ascii_lowercase();
+            match lower.as_str() {
+                "text" | "string" => Ok(FieldType::Primitive(PrimitiveType::Text)),
+                "localizedtext" | "localized_text" => Ok(FieldType::LocalizedText),
+                "boolean" | "bool" => Ok(FieldType::Primitive(PrimitiveType::Boolean)),
+                "date" => Ok(FieldType::Primitive(PrimitiveType::Date)),
+                "datetime" | "date_time" => Ok(FieldType::Primitive(PrimitiveType::DateTime)),
+                "email" => Ok(FieldType::Email),
+                "url" => Ok(FieldType::Url),
+                "json" => Ok(FieldType::Json),
+                "uid" => Ok(FieldType::Primitive(PrimitiveType::Uid)),
+                "uuid" => Ok(FieldType::Primitive(PrimitiveType::Uuid)),
+                "int16" | "short" | "int32" | "integer" | "int64" | "long" => {
+                    let size = parse_integer_size(&lower)?;
+                    Ok(FieldType::Primitive(PrimitiveType::Integer(size)))
                 }
-            })?;
+                "decimal" => Ok(FieldType::Primitive(PrimitiveType::Decimal {
+                    precision: 10,
+                    scale: 2,
+                })),
+                unknown => Err(SchemaLoaderError::Validation(format!(
+                    "unrecognized field type '{unknown}'"
+                ))),
+            }
+        }
+        FieldTypeDto::Integer { integer } => {
+            let size = parse_integer_size(integer)?;
+            Ok(FieldType::Primitive(PrimitiveType::Integer(size)))
+        }
+        FieldTypeDto::Decimal { decimal } => {
+            if decimal.precision == 0
+                || decimal.precision > 38
+                || decimal.scale > decimal.precision
+            {
+                return Err(SchemaLoaderError::Validation(format!(
+                    "invalid decimal bounds: precision {} (must be in 1..=38) and scale {} (must be <= precision)",
+                    decimal.precision, decimal.scale
+                )));
+            }
+            Ok(FieldType::Primitive(PrimitiveType::Decimal {
+                precision: decimal.precision,
+                scale: decimal.scale,
+            }))
+        }
+    }
+}
 
-            let doc_type = parse_document_type(&content, file_stem).map_err(|e| match e {
-                SchemaLoaderError::JsonInline { source } => SchemaLoaderError::Json {
-                    path: path.clone(),
-                    source,
-                },
-                other => other,
-            })?;
+/// Parses constraint records into domain `FieldConstraint` variants.
+#[allow(clippy::mutable_key_type)]
+pub fn parse_constraints(
+    records: &[ConstraintRecord<'_>],
+    field_type: &FieldType,
+) -> Result<HashSet<FieldConstraint>, SchemaLoaderError> {
+    let mut constraints = HashSet::new();
 
-            doc_types.push(doc_type);
+    for c in records {
+        if let Some(min_len) = c.min_length {
+            constraints.insert(FieldConstraint::MinLength(min_len));
+        }
+        if let Some(max_len) = c.max_length {
+            constraints.insert(FieldConstraint::MaxLength(max_len));
+        }
+        if let Some(pat) = c.pattern {
+            let pattern = RegexPattern::try_new(pat).map_err(|e| {
+                SchemaLoaderError::Validation(format!("invalid regex pattern '{pat}': {e}"))
+            })?;
+            constraints.insert(FieldConstraint::Pattern(pattern));
+        }
+        if let Some(ref val) = c.min {
+            let (int_val, dec_val) = parse_numeric_bound(val, field_type, "min")?;
+            if let Some(i) = int_val {
+                constraints.insert(FieldConstraint::MinInteger(i));
+            }
+            if let Some(d) = dec_val {
+                constraints.insert(FieldConstraint::MinDecimal(d));
+            }
+        }
+        if let Some(ref val) = c.max {
+            let (int_val, dec_val) = parse_numeric_bound(val, field_type, "max")?;
+            if let Some(i) = int_val {
+                constraints.insert(FieldConstraint::MaxInteger(i));
+            }
+            if let Some(d) = dec_val {
+                constraints.insert(FieldConstraint::MaxDecimal(d));
+            }
         }
     }
 
-    // 3. Construct and validate SchemaRegistry
-    let registry = SchemaRegistry::try_new(doc_types)?;
-
-    Ok((system_config, registry))
+    Ok(constraints)
 }
 
-/// Loads schemas and system config from `schema_dir`, validates them,
-/// assembles `SystemContext`, and promotes it to `'static` lifetime via `Box::leak`.
-pub fn load_system_context_from_dir(
-    schema_dir: &Path,
-) -> Result<&'static SystemContext, SchemaLoaderError> {
-    let (config, registry) = load_schemas_from_dir(schema_dir)?;
-    let ctx = SystemContext::new(registry, config);
-    Ok(Box::leak(Box::new(ctx)))
+/// Parses an integer size identifier into a domain `IntegerSize`.
+/// Supported pairs: `int16`/`short`, `int32`/`integer`, `int64`/`long`.
+pub fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
+    match s.to_ascii_lowercase().as_str() {
+        "int16" | "short" => Ok(IntegerSize::I16),
+        "int32" | "integer" => Ok(IntegerSize::I32),
+        "int64" | "long" => Ok(IntegerSize::I64),
+        unknown => Err(SchemaLoaderError::Validation(format!(
+            "unrecognized integer size '{unknown}'"
+        ))),
+    }
+}
+
+/// Helper to parse a numeric bound from JSON into integer or decimal constraint values.
+fn parse_numeric_bound(
+    val: &serde_json::Value,
+    field_type: &FieldType,
+    bound_name: &str,
+) -> Result<(Option<i64>, Option<Decimal>), SchemaLoaderError> {
+    match val {
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                if matches!(field_type, FieldType::Primitive(PrimitiveType::Decimal { .. })) {
+                    Ok((None, Some(Decimal::from(i))))
+                } else {
+                    Ok((Some(i), None))
+                }
+            } else if let Some(f) = n.as_f64() {
+                let dec = Decimal::from_str(&f.to_string()).map_err(|e| {
+                    SchemaLoaderError::Validation(format!("invalid {bound_name} number '{f}': {e}"))
+                })?;
+                Ok((None, Some(dec)))
+            } else {
+                Ok((None, None))
+            }
+        }
+        serde_json::Value::String(s) => {
+            let dec = Decimal::from_str(s).map_err(|e| {
+                SchemaLoaderError::Validation(format!("invalid {bound_name} decimal string '{s}': {e}"))
+            })?;
+            Ok((None, Some(dec)))
+        }
+        _ => Ok((None, None)),
+    }
 }
 
 #[cfg(test)]
@@ -568,5 +539,106 @@ mod tests {
 
         let res = parse_document_type(json, "user");
         assert!(matches!(res, Err(SchemaLoaderError::ReservedKeyword { .. })));
+    }
+
+    #[test]
+    fn test_parse_constraints_with_aliases() {
+        let json = r#"[
+            { "minLength": 3 },
+            { "maxLength": 50 },
+            { "regex": "^[a-z]+$" },
+            { "minInteger": 10 },
+            { "maxInteger": 100 }
+        ]"#;
+
+        let records: Vec<ConstraintRecord> = serde_json::from_str(json).unwrap();
+        let field_type_text = FieldType::Primitive(PrimitiveType::Text);
+        let constraints = parse_constraints(&records, &field_type_text).unwrap();
+
+        assert!(constraints.contains(&FieldConstraint::MinLength(3)));
+        assert!(constraints.contains(&FieldConstraint::MaxLength(50)));
+        assert!(constraints.contains(&FieldConstraint::Pattern(
+            RegexPattern::try_new("^[a-z]+$").unwrap()
+        )));
+        assert!(constraints.contains(&FieldConstraint::MinInteger(10)));
+        assert!(constraints.contains(&FieldConstraint::MaxInteger(100)));
+
+        // Test decimal field with minimum / maximum and minDecimal / maxDecimal aliases
+        let json_decimal = r#"[
+            { "minDecimal": "9.99" },
+            { "maxDecimal": "99.95" }
+        ]"#;
+        let records_dec: Vec<ConstraintRecord> = serde_json::from_str(json_decimal).unwrap();
+        let field_type_dec = FieldType::Primitive(PrimitiveType::Decimal {
+            precision: 10,
+            scale: 2,
+        });
+        let constraints_dec = parse_constraints(&records_dec, &field_type_dec).unwrap();
+
+        assert!(constraints_dec.contains(&FieldConstraint::MinDecimal(Decimal::from_str("9.99").unwrap())));
+        assert!(constraints_dec.contains(&FieldConstraint::MaxDecimal(Decimal::from_str("99.95").unwrap())));
+
+        // Test min & max with minimum & maximum aliases
+        let json_min_max = r#"[
+            { "minimum": 5 },
+            { "maximum": 25 }
+        ]"#;
+        let records_min_max: Vec<ConstraintRecord> = serde_json::from_str(json_min_max).unwrap();
+        let constraints_int = parse_constraints(&records_min_max, &field_type_text).unwrap();
+        assert!(constraints_int.contains(&FieldConstraint::MinInteger(5)));
+        assert!(constraints_int.contains(&FieldConstraint::MaxInteger(25)));
+    }
+
+    #[test]
+    fn test_parse_integer_sizes() {
+        assert_eq!(parse_integer_size("int16").unwrap(), IntegerSize::I16);
+        assert_eq!(parse_integer_size("short").unwrap(), IntegerSize::I16);
+        assert_eq!(parse_integer_size("int32").unwrap(), IntegerSize::I32);
+        assert_eq!(parse_integer_size("integer").unwrap(), IntegerSize::I32);
+        assert_eq!(parse_integer_size("int64").unwrap(), IntegerSize::I64);
+        assert_eq!(parse_integer_size("long").unwrap(), IntegerSize::I64);
+
+        assert!(parse_integer_size("i32").is_err());
+        assert!(parse_integer_size("bigint").is_err());
+
+        // Test in FieldTypeDto::Simple
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Simple("int16")).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I16))
+        );
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Simple("short")).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I16))
+        );
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Simple("int32")).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32))
+        );
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Simple("integer")).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32))
+        );
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Simple("int64")).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I64))
+        );
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Simple("long")).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I64))
+        );
+
+        // Test in FieldTypeDto::Integer
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Integer { integer: "short" }).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I16))
+        );
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Integer { integer: "int32" }).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32))
+        );
+        assert_eq!(
+            parse_field_type(&FieldTypeDto::Integer { integer: "long" }).unwrap(),
+            FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I64))
+        );
     }
 }

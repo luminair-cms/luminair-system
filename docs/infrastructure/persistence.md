@@ -27,8 +27,11 @@ Luminair targets **AWS Aurora DSQL** (distributed, active-active PostgreSQL-comp
 
 ## 2. Naming Engine (`persistence::naming`)
 
-The naming engine provides deterministic mapping from schema identifiers to SQL database identifiers conforming to PostgreSQL and Aurora DSQL length limits (max 63 bytes) and reserved keyword rules:
+The naming engine provides deterministic mapping from schema identifiers to SQL database identifiers conforming to PostgreSQL and Aurora DSQL length limits (max 63 bytes) and reserved keyword rules (`persistence::naming::sanitize`):
 
+- **Sanitization & Keyword Defense (`sanitize.rs`)**:
+  - `RESERVED_SQL_KEYWORDS` & `is_reserved_sql_keyword(name)`: Prevents collision with ANSI and PostgreSQL reserved keywords (e.g. `user`, `order`, `table`, `select`). Also consumed by `schema_loader` during startup validation.
+  - `kebab_to_snake(name)`: Converts kebab-case identifiers to database snake_case.
 - **Document Wide Table**: `[type_id]` converted to snake_case and pluralized (e.g. `article` -> `articles`, `blog-post` -> `blog_posts`).
 - **Junction Link Table**: `[source_table]_[rel_attr]_links` (e.g. `articles_tags_links`, `articles_category_links`).
 - **Column Identifiers**: `[attr_id]` converted from kebab-case to snake-case (e.g. `hero-image-url` -> `hero_image_url`).

@@ -91,6 +91,25 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   2. **Step-by-Step Strategy**: Adopted a 7-phase incremental implementation plan starting with Phase 1 (`schema_loader` & JSON schema design) to provide a working, offline-testable `SystemContext` before connecting database and HTTP layers.
   3. **See**: [`docs/plan-infrastructure.md`](../docs/plan-infrastructure.md).
 
+---
+
+### 2026-10-23 — DocumentKind Singleton Alignment & Schema Loader DTO Decoupling
+
+- **Context**: Decoupling domain types from infrastructure wire records and standardizing terminology for single-instance document types.
+- **Decisions**:
+  1. **Ubiquitous Language (`Singleton`)**: Renamed variant `DocumentKind::SingleType` to `DocumentKind::Singleton` in `domain::schema::DocumentKind` and `infrastructure::schema_loader::dto::DocumentKindDto`. Added `DocumentTypeBuilder::singleton` in test builders (retaining `single` as alias).
+  2. **DTO Isolation & Deserialization Aliases**: Retained dedicated `DocumentKindDto` in `infrastructure::schema_loader::dto` to conform to Hexagonal/DDD Anti-Corruption Layer boundaries. Variant `Singleton` deserializes as `"singleton"`, with Serde aliases for `"singleType"` and `"singleton"` (`#[serde(alias = "singleton", alias = "singleType")]`).
+  3. **Constraint Key Harmonization (`min*`)**: Standardized on canonical `min*` / `max*` prefixing (`minLength`, `maxLength`, `min`, `max`) and eliminated contradictory `minimalLength` / `maximalLength` keys. Supported aliases are `minInteger` / `maxInteger`, `minDecimal` / `maxDecimal`, `minimum` / `maximum`, and `regex` (for `pattern`).
+  4. **Database Naming & Sanitization Relocation (`persistence::naming`)**: Moved `sanitize.rs` (`kebab_to_snake`, `RESERVED_SQL_KEYWORDS`, `is_reserved_sql_keyword`) from `schema_loader` to its architectural home in `infrastructure::persistence::naming`. `schema_loader::loader` now consumes it as an early boot-time validation dependency.
+  5. **Integer Type Name Harmonization**: Unified integer field type descriptors across shorthand and structured formats into consistent fixed-width / descriptive pairs: `int16` / `short`, `int32` / `integer`, and `int64` / `long`. Removed arbitrary aliases (`i16`, `i32`, `i64`, `int`, `bigint`).
+  6. **Code Organization & Item Ordering ("Newspaper Style")**: Adopted repository-wide Rust item ordering rules codified in `.ai/skills/rust-patterns.md` and enforced in `.ai/skills/review.md`:
+     - Types first (constants, structs, enums) before functions and `impl` blocks.
+     - Public functions/methods first, private helper functions after.
+     - Dependency order ("newspaper style"): top-level entry points and orchestrators appear first, followed top-down by the functions they invoke down to leaf helpers.
+     - Unit tests (`mod tests`) placed at the very bottom.
+     - Reordered `infrastructure/src/schema_loader/loader.rs`, `dto.rs`, and `domain/src/schema/attributes.rs`, `types.rs` to conform.
+
+
 
 
 

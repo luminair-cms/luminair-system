@@ -55,7 +55,7 @@ Global system configuration specifies internationalization locales and default i
 
 ### 2.2 `document-types/<id>.json`
 
-Each file defines document kind (`collection` vs `singleType`), human-readable info, lifecycle options (`draftAndPublish`), typed scalar fields, relations, constraints, and composite display fields.
+Each file defines document kind (`collection` vs `singleton`), human-readable info, lifecycle options (`draftAndPublish`), typed scalar fields, relations, constraints, and composite display fields.
 
 #### Example 1: `document-types/article.json` (Collection Type with Localized Text & Relations)
 
@@ -167,6 +167,38 @@ Each file defines document kind (`collection` vs `singleType`), human-readable i
 }
 ```
 
+#### Example 3: `document-types/site-settings.json` (Singleton Type with Draft & Publish)
+
+```json
+{
+  "kind": "singleton",
+  "info": {
+    "singularName": "site-settings",
+    "pluralName": "site-settings",
+    "displayName": "Global Site Settings",
+    "description": "Global website configuration singleton",
+    "displayFields": ["siteName"]
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "attributes": {
+    "siteName": {
+      "type": "text",
+      "required": true,
+      "constraints": [
+        { "minLength": 2 },
+        { "maxLength": 50 }
+      ]
+    },
+    "maintenanceMode": {
+      "type": "boolean",
+      "required": false
+    }
+  }
+}
+```
+
 ---
 
 ## 3. Zero-Copy Borrowed References DTO Architecture (`schema_loader::dto`)
@@ -200,8 +232,8 @@ pub struct DocumentRecord<'a> {
 #[serde(rename_all = "camelCase")]
 pub enum DocumentKindDto {
     Collection,
-    #[serde(alias = "single")]
-    SingleType,
+    #[serde(alias = "singleType")]
+    Singleton,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -253,9 +285,9 @@ pub enum AttributeRecord<'a> {
 #[serde(bound = "'de: 'a")]
 #[serde(untagged)]
 pub enum FieldTypeDto<'a> {
-    /// String shorthand: "text", "localizedText", "boolean", "date", "dateTime", "email", "url", "json", "uid", "uuid".
+    /// String shorthand: "text", "localizedText", "boolean", "date", "dateTime", "email", "url", "json", "uid", "uuid", "int32", "integer".
     Simple(&'a str),
-    /// Structured integer: {"integer": "int16" | "int32" | "int64"}.
+    /// Structured integer: {"integer": "int16" | "int32" | "int64" | "short" | "integer" | "long"}.
     Integer { integer: &'a str },
     /// Structured decimal with precision and scale: {"decimal": {"precision": 10, "scale": 2}}.
     Decimal { decimal: DecimalBoundsDto },
@@ -283,15 +315,12 @@ pub enum RelationTypeDto {
 #[serde(rename_all = "camelCase")]
 pub struct ConstraintRecord<'a> {
     pub min_length: Option<usize>,
-    #[serde(alias = "minimalLength")]
-    pub min_len_alias: Option<usize>,
     pub max_length: Option<usize>,
+    #[serde(alias = "minimum", alias = "minInteger", alias = "minDecimal")]
     pub min: Option<serde_json::Value>,
+    #[serde(alias = "maximum", alias = "maxInteger", alias = "maxDecimal")]
     pub max: Option<serde_json::Value>,
-    pub min_integer: Option<i64>,
-    pub max_integer: Option<i64>,
-    pub min_decimal: Option<&'a str>,
-    pub max_decimal: Option<&'a str>,
+    #[serde(alias = "regex")]
     pub pattern: Option<&'a str>,
 }
 
@@ -356,3 +385,10 @@ flowchart TD
 4. **Target Existence & Constraint Applicability**:
    - `SchemaRegistry::try_new` verifies that every relation's `target` exists in the registered types list.
    - Verifies that `MinInteger` / `MaxInteger` are only attached to `Integer` fields, `MinDecimal` / `MaxDecimal` only to `Decimal` fields, and `MinLength` / `MaxLength` / `Pattern` only to text or localized text fields.
+5. **Constraint Mapping & Normalization**:
+   - `minLength` / `maxLength`: maps directly to `FieldConstraint::MinLength` / `MaxLength`.
+   - `min` / `max`: accepts numbers or strings (with aliases `minimum` / `maximum`, `minInteger` / `maxInteger`, `minDecimal` / `maxDecimal`). Mapped dynamically to `FieldConstraint::MinInteger` / `MaxInteger` or `FieldConstraint::MinDecimal` / `MaxDecimal` depending on target `field_type`.
+   - `pattern`: regex pattern string (alias: `regex`), validated via `RegexPattern::try_new` and mapped to `FieldConstraint::Pattern`.
+6. **Document Kind Invariants**:
+   - `collection`: allows multiple document instances; `singularName` and `pluralName` must differ.
+   - `singleton`: allows at most 1 document instance system-wide; `singularName` and `pluralName` must match. Deserializes from `"singleton"` (canonical) or `"singleType"` (compatibility alias).

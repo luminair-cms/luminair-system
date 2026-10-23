@@ -47,7 +47,7 @@ flowchart TD
   - Implement `AttributeRecord<'a>` as an untagged enum with `Field` and `Relation` variants.
   - Implement `FieldTypeDto<'a>`, `RelationTypeDto`, `ConstraintRecord<'a>`, `DocumentRecord<'a>`, `DocumentInfoRecord<'a>`, `DocumentOptionsRecord`, and `SystemConfigRecord<'a>`.
   - Preserve field ordering using `IndexMap<&'a str, AttributeRecord<'a>>`.
-- [x] **Step 1.2: Identifier Sanitization & Validation (`infrastructure/src/schema_loader/sanitize.rs`)**
+- [x] **Step 1.2: Identifier Sanitization & Validation (`infrastructure/src/persistence/naming/sanitize.rs`)**
   - Verify identifiers against `RESERVED_SQL_KEYWORDS` (e.g. `order`, `table`, `user`).
   - Enforce kebab-case rules matching domain `DocumentTypeId` and `AttributeId`.
 - [x] **Step 1.3: Schema Loader & Domain Transformation (`infrastructure/src/schema_loader/loader.rs`)**
@@ -68,6 +68,7 @@ flowchart TD
 > **Detailed Specification**: See [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md) and [`docs/design-infrastructure-persistence.md`](./design-infrastructure-persistence.md).
 
 - [ ] **Step 2.1: SQL Identifier Naming Engine (`infrastructure/src/persistence/naming/`)**
+  - Implement `sanitize.rs` for `kebab_to_snake`, `is_reserved_sql_keyword`, and `RESERVED_SQL_KEYWORDS` (complete).
   - Map `DocumentTypeId` to snake_case pluralized table names (`article` -> `articles`).
   - Map relations to junction link table names (`articles_tags_links`).
   - Map `AttributeId` to column names with keyword escaping where required.

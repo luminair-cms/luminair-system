@@ -50,7 +50,7 @@ fn test_load_schemas_from_dir_success() {
                 "type": "localizedText",
                 "required": true,
                 "constraints": [
-                    { "minimalLength": 10 }
+                    { "minLength": 10 }
                 ]
             },
             "priority": {

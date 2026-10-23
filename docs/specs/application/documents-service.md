@@ -12,7 +12,7 @@
 
 | Term | Meaning / API symbol | Concrete representation |
 |---|---|---|
-| `SingleType` | Document type with `DocumentKind::SingleType` | Maximum 1 instance permitted |
+| `Singleton` (SingleType) | Document type with `DocumentKind::Singleton` | Maximum 1 instance permitted |
 | `Collection` | Document type with `DocumentKind::Collection` | Arbitrary number of instances |
 | `DraftPublishOn` | Document type with `draft_and_publish: true` | Publish & unpublish enabled |
 | `DraftPublishOff` | Document type with `draft_and_publish: false` | Publish & unpublish rejected |
@@ -36,7 +36,7 @@
 ### DS-02 — Create Blocked for Second SingleType Instance
 - **Status**: `Approved`
 - **Origin**: `adr:002` (SingleType Guard Option C)
-- **Given**: A single-type document type in schema registry, and an existing instance already saved in the repository.
+- **Given**: A singleton document type in schema registry, and an existing instance already saved in the repository.
 - **When**: Any caller invokes `service.create(&caller, CreateDocumentCommand::new(type_id, valid_fields)).await`.
 - **Then**: Returns `Err(ApplicationError::Domain(DomainError::SingleTypeAlreadyExists(type_id)))`.
 

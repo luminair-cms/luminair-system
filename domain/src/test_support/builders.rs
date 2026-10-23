@@ -41,11 +41,11 @@ impl DocumentTypeBuilder {
         }
     }
 
-    /// Creates a single-type DocumentType.
-    pub fn single(id: &str) -> Self {
+    /// Creates a singleton DocumentType.
+    pub fn singleton(id: &str) -> Self {
         Self {
             id: test_doc_type_id(id),
-            kind: DocumentKind::SingleType,
+            kind: DocumentKind::Singleton,
             title: id.to_string(),
             singular: test_doc_type_id(id),
             plural: test_doc_type_id(id),
@@ -54,6 +54,11 @@ impl DocumentTypeBuilder {
             fields: IndexSet::new(),
             relations: IndexSet::new(),
         }
+    }
+
+    /// Creates a single-type DocumentType (alias for `singleton`).
+    pub fn single(id: &str) -> Self {
+        Self::singleton(id)
     }
 
     pub fn with_title(mut self, title: impl Into<String>) -> Self {

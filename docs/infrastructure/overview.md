@@ -54,14 +54,14 @@ infrastructure/
     ├── schema_loader/                        # Schema file discovery, Serde DTOs, validation & SystemContext assembly
     │   ├── mod.rs
     │   ├── dto.rs                            # Zero-copy borrowed Serde DTOs (AttributeRecord untagged enum)
-    │   ├── sanitize.rs                       # Identifier sanitization and reserved SQL keywords
-    │   ├── validator.rs                      # Schema validation before domain construction
+    │   ├── error.rs                          # Schema loader error definitions
     │   └── loader.rs                         # Directory walking and SystemContext assembly
     │
     ├── persistence/                          # Database storage engine
     │   ├── mod.rs
     │   ├── naming/                           # SQL naming conventions (tables, junction, columns)
     │   │   ├── mod.rs
+    │   │   ├── sanitize.rs                   # Identifier sanitization, kebab_to_snake, and reserved SQL keywords
     │   │   └── identifiers.rs
     │   ├── migration/                        # Static and dynamic schema migrations
     │   │   ├── mod.rs

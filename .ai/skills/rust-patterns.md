@@ -8,6 +8,24 @@ Load this skill before writing or modifying any Rust code in this repository.
 - `use` imports: group as `std` → external crates → internal crates, separated by blank lines
 - Prefer `pub(crate)` over `pub` for intra-crate items; only expose what crosses crate boundaries
 
+## Code Organization & Item Ordering
+
+Every Rust source file must follow consistent top-down organization and dependency ordering ("newspaper style"):
+
+1. **Imports & Declarations**:
+   - Module docstrings (`//!`) and `use` imports (grouped: `std` → external crates → internal crates).
+2. **Types First**:
+   - Module-level constants and static items.
+   - Type aliases, structs, and enums (all data models and type definitions appear before any `impl`s or standalone functions).
+3. **Implementations (`impl`)**:
+   - Inherent `impl` blocks for types defined in the file.
+   - Trait `impl` blocks (e.g., `From`, `TryFrom`, `PartialEq`, `Display`).
+4. **Functions**:
+   - **Public functions first, private functions after**.
+   - **Order by dependency ("newspaper style")**: High-level entry points and orchestrators appear first, followed top-down by the functions they invoke, descending to low-level leaf helpers. Readers should understand the high-level workflow at the top of the file without jumping over helper details.
+5. **Tests at the Bottom**:
+   - `#[cfg(test)] mod tests { ... }` always placed at the very end of the file.
+
 ## Error Handling
 
 - Use `thiserror` for all error types; one `Error` enum per crate

@@ -53,6 +53,28 @@ pub struct RelationDefinition {
     pub target: DocumentTypeId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FieldConstraint {
+    Pattern(RegexPattern),
+    MinLength(usize),
+    MaxLength(usize),
+    MinInteger(i64),
+    MaxInteger(i64),
+    MinDecimal(Decimal),
+    MaxDecimal(Decimal),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RelationType {
+    // owning side
+    HasOne,
+    HasMany,
+    // inverse side
+    BelongsToOne,
+    BelongsToMany,
+}
+
 impl PartialEq for FieldDefinition {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -89,28 +111,6 @@ impl Borrow<AttributeId> for RelationDefinition {
     fn borrow(&self) -> &AttributeId {
         &self.id
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FieldConstraint {
-    Pattern(RegexPattern),
-    MinLength(usize),
-    MaxLength(usize),
-    MinInteger(i64),
-    MaxInteger(i64),
-    MinDecimal(Decimal),
-    MaxDecimal(Decimal),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RelationType {
-    // owning side
-    HasOne,
-    HasMany,
-    // inverse side
-    BelongsToOne,
-    BelongsToMany,
 }
 
 impl FieldConstraint {

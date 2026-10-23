@@ -347,7 +347,7 @@ where
         })?;
 
         // Singleton Guard (ADR-002 Option C)
-        if doc_type.kind == DocumentKind::SingleType
+        if doc_type.kind == DocumentKind::Singleton
             && self
                 .instance_repo
                 .exists_for_type(cmd.document_type)
@@ -1035,7 +1035,7 @@ mod tests {
         let title_attr = AttributeId::try_new("title").unwrap();
         let builder = match kind {
             DocumentKind::Collection => DocumentTypeBuilder::collection("article"),
-            DocumentKind::SingleType => DocumentTypeBuilder::single("article"),
+            DocumentKind::Singleton => DocumentTypeBuilder::singleton("article"),
         };
         let doc_type = builder
             .with_title("Articles")
@@ -1096,7 +1096,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_single_type_guard_blocks_duplicate() {
-        let (service, doc_type, caller, title_attr) = make_test_fixture(DocumentKind::SingleType);
+        let (service, doc_type, caller, title_attr) = make_test_fixture(DocumentKind::Singleton);
 
         let mut fields = HashMap::new();
         fields.insert(

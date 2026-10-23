@@ -9,12 +9,6 @@ pub enum FieldType {
     Json,
 }
 
-impl From<PrimitiveType> for FieldType {
-    fn from(p: PrimitiveType) -> Self {
-        FieldType::Primitive(p)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrimitiveType {
     Uid,
@@ -32,6 +26,12 @@ pub enum IntegerSize {
     I16,
     I32,
     I64,
+}
+
+impl From<PrimitiveType> for FieldType {
+    fn from(p: PrimitiveType) -> Self {
+        FieldType::Primitive(p)
+    }
 }
 
 #[cfg(test)]

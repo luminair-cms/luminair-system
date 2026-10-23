@@ -24,17 +24,8 @@ pub struct DocumentRecord<'a> {
 #[serde(rename_all = "camelCase")]
 pub enum DocumentKindDto {
     Collection,
-    #[serde(alias = "single")]
-    SingleType,
-}
-
-impl From<DocumentKindDto> for domain::schema::DocumentKind {
-    fn from(dto: DocumentKindDto) -> Self {
-        match dto {
-            DocumentKindDto::Collection => domain::schema::DocumentKind::Collection,
-            DocumentKindDto::SingleType => domain::schema::DocumentKind::SingleType,
-        }
-    }
+    #[serde(alias = "singleType")]
+    Singleton,
 }
 
 /// Metadata describing the document type and composite display fields.
@@ -89,9 +80,9 @@ pub enum AttributeRecord<'a> {
 #[serde(bound = "'de: 'a")]
 #[serde(untagged)]
 pub enum FieldTypeDto<'a> {
-    /// String shorthand (e.g. "text", "localizedText", "boolean", "date", "dateTime", "email", "url", "json", "uid", "uuid").
+    /// String shorthand (e.g. "text", "localizedText", "boolean", "date", "dateTime", "email", "url", "json", "uid", "uuid", "int32", "integer").
     Simple(&'a str),
-    /// Structured integer (e.g. {"integer": "int16" | "int32" | "int64"}).
+    /// Structured integer (e.g. {"integer": "int16" | "int32" | "int64" | "short" | "integer" | "long"}).
     Integer { integer: &'a str },
     /// Structured decimal with precision and scale (e.g. {"decimal": {"precision": 10, "scale": 2}}).
     Decimal { decimal: DecimalBoundsDto },
@@ -114,36 +105,19 @@ pub enum RelationTypeDto {
     BelongsToMany,
 }
 
-impl From<RelationTypeDto> for domain::schema::RelationType {
-    fn from(dto: RelationTypeDto) -> Self {
-        match dto {
-            RelationTypeDto::HasOne => domain::schema::RelationType::HasOne,
-            RelationTypeDto::HasMany => domain::schema::RelationType::HasMany,
-            RelationTypeDto::BelongsToOne => domain::schema::RelationType::BelongsToOne,
-            RelationTypeDto::BelongsToMany => domain::schema::RelationType::BelongsToMany,
-        }
-    }
-}
-
 /// Attribute constraint DTO supporting standard keys and aliases.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(bound = "'de: 'a")]
 #[serde(rename_all = "camelCase")]
 pub struct ConstraintRecord<'a> {
     pub min_length: Option<usize>,
-    #[serde(alias = "minimalLength")]
-    pub min_len_alias: Option<usize>,
     pub max_length: Option<usize>,
-    #[serde(alias = "maximalLength")]
-    pub max_len_alias: Option<usize>,
+    #[serde(alias = "minimum", alias = "minInteger", alias = "minDecimal")]
     pub min: Option<serde_json::Value>,
+    #[serde(alias = "maximum", alias = "maxInteger", alias = "maxDecimal")]
     pub max: Option<serde_json::Value>,
-    pub min_integer: Option<i64>,
-    pub max_integer: Option<i64>,
-    pub min_decimal: Option<&'a str>,
-    pub max_decimal: Option<&'a str>,
+    #[serde(alias = "regex")]
     pub pattern: Option<&'a str>,
-    pub regex: Option<&'a str>,
 }
 
 /// Root DTO for `system-config.json` (no `id` required).
@@ -155,6 +129,26 @@ pub struct SystemConfigRecord<'a> {
     pub available_locales: Vec<&'a str>,
     #[serde(default)]
     pub instance_name: Option<&'a str>,
+}
+
+impl From<DocumentKindDto> for domain::schema::DocumentKind {
+    fn from(dto: DocumentKindDto) -> Self {
+        match dto {
+            DocumentKindDto::Collection => domain::schema::DocumentKind::Collection,
+            DocumentKindDto::Singleton => domain::schema::DocumentKind::Singleton,
+        }
+    }
+}
+
+impl From<RelationTypeDto> for domain::schema::RelationType {
+    fn from(dto: RelationTypeDto) -> Self {
+        match dto {
+            RelationTypeDto::HasOne => domain::schema::RelationType::HasOne,
+            RelationTypeDto::HasMany => domain::schema::RelationType::HasMany,
+            RelationTypeDto::BelongsToOne => domain::schema::RelationType::BelongsToOne,
+            RelationTypeDto::BelongsToMany => domain::schema::RelationType::BelongsToMany,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -188,7 +182,7 @@ mod tests {
                     "type": "localizedText",
                     "required": true,
                     "constraints": [
-                        { "minimalLength": 10 }
+                        { "minLength": 10 }
                     ]
                 },
                 "priority": {
@@ -257,7 +251,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*field_type, FieldTypeDto::Simple("localizedText"));
-                assert_eq!(constraints[0].min_len_alias, Some(10));
+                assert_eq!(constraints[0].min_length, Some(10));
             }
             _ => panic!("expected field"),
         }
@@ -301,5 +295,33 @@ mod tests {
         assert_eq!(record.default_locale, "en");
         assert_eq!(record.available_locales, vec!["en", "uk", "fr", "de"]);
         assert_eq!(record.instance_name, Some("Luminair Production"));
+    }
+
+    #[test]
+    fn test_deserialize_document_kind_singleton_and_aliases() {
+        #[derive(Deserialize)]
+        struct KindWrapper {
+            kind: DocumentKindDto,
+        }
+
+        let json_singleton = r#"{ "kind": "singleton" }"#;
+        let w: KindWrapper = serde_json::from_str(json_singleton).unwrap();
+        assert_eq!(w.kind, DocumentKindDto::Singleton);
+        assert_eq!(
+            domain::schema::DocumentKind::from(w.kind),
+            domain::schema::DocumentKind::Singleton
+        );
+
+        let json_single_type = r#"{ "kind": "singleType" }"#;
+        let w2: KindWrapper = serde_json::from_str(json_single_type).unwrap();
+        assert_eq!(w2.kind, DocumentKindDto::Singleton);
+
+        let json_collection = r#"{ "kind": "collection" }"#;
+        let w3: KindWrapper = serde_json::from_str(json_collection).unwrap();
+        assert_eq!(w3.kind, DocumentKindDto::Collection);
+        assert_eq!(
+            domain::schema::DocumentKind::from(w3.kind),
+            domain::schema::DocumentKind::Collection
+        );
     }
 }

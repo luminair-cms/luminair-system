@@ -20,7 +20,7 @@ impl SchemaRegistry {
         let mut by_name = HashMap::new();
         for dt in types.iter() {
             let api_id = match dt.kind {
-                DocumentKind::SingleType => dt.info.singular_name.as_ref().to_string(),
+                DocumentKind::Singleton => dt.info.singular_name.as_ref().to_string(),
                 DocumentKind::Collection => dt.info.plural_name.as_ref().to_string(),
             };
             by_name.insert(api_id, dt.id.clone());
