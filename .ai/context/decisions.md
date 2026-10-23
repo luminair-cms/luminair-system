@@ -81,6 +81,16 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   5. **Standardized Error Codes & Canonical RFC 9457 Problem Details Schema**: Replaced unstructured string conflicts with typed `ConflictCode` and structured metadata payload on `ApplicationError::Conflict`. Implemented RFC 9457 `ProblemDetails` (`type`, `title`, `status`, `code`, `detail`, `details`, `invalid_params`) and published `docs/api.md` with complete error code catalog, third-party developer guide, and Admin Studio UI bilingual localization mapping.
   6. **Hexagonal Boundary for HTTP Error Machinery**: Documented in `docs/architecture.md` and `application/src/errors.rs` that `ProblemDetails` and HTTP status mapping are transport concerns temporarily located in `application::errors` as a bridge; they will be moved to `infrastructure` (the HTTP driving adapter) when the Axum REST endpoints are implemented, leaving `application` completely transport-agnostic.
 
+---
+
+### 2026-10-23 — Infrastructure Crate Structure & Step-by-Step Implementation Plan
+
+- **Context**: Transitioning from domain/application purity to infrastructure implementation. Defining the composition root, driving/driven adapters, and CLI entry point.
+- **Decisions**:
+  1. **Infrastructure Layout**: Organized `infrastructure` into `api` (Axum REST driving adapter), `auth` (OIDC JWT & Service tokens), `cli` (runner: Service, Migrate, DryRun), `persistence` (naming, migration, query, repositories), `schema_loader` (JSON file loader, DTOs, sanitization, validation), and `container.rs` (`AppContainer` composition root).
+  2. **Step-by-Step Strategy**: Adopted a 7-phase incremental implementation plan starting with Phase 1 (`schema_loader` & JSON schema design) to provide a working, offline-testable `SystemContext` before connecting database and HTTP layers.
+  3. **See**: [`docs/plan-infrastructure.md`](../docs/plan-infrastructure.md).
+
 
 
 

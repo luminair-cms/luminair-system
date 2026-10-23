@@ -64,7 +64,7 @@ pub trait DocumentsService: Send + Sync + 'static {
         cmd: PublishDocumentCommand,
     ) -> impl Future<Output = Result<DocumentInstance, ApplicationError>> + Send;
 
-    /// Reverts a published document instance back to draft state.
+    /// Reverts a published document instance back to draft state (not visible for public use).
     fn unpublish(
         &self,
         caller: &CallerContext,
