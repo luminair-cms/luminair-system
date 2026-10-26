@@ -29,19 +29,13 @@ use crate::persistence::naming::{
 #[must_use]
 pub fn build_desired_schema(registry: &SchemaRegistry) -> DatabaseSchema {
     let mut schema = DatabaseSchema::new();
-    let mut link_tables = Vec::new();
 
     for doc_type in registry.iterate() {
-        let entity_table = build_entity_table(doc_type);
+        let (entity_table, link_tables) = build_document_type_tables(doc_type, registry);
         schema.insert_table(entity_table);
-
-        for link_table in build_link_tables(doc_type, registry) {
-            link_tables.push(link_table);
+        for link_table in link_tables {
+            schema.insert_table(link_table);
         }
-    }
-
-    for link_table in link_tables {
-        schema.insert_table(link_table);
     }
 
     schema

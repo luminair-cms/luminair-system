@@ -7,11 +7,13 @@ use sqlx::PgPool;
 use domain::schema::{DocumentType, SchemaRegistry};
 
 use super::builder::{build_desired_schema, build_document_type_tables};
-use super::diff::{DiffError, MigrationStep, SafetyPolicy, compute_diff};
-use super::executor::{execute_migration_plan, step_to_sql};
+use super::ddl::step_to_sql;
+use super::diff::{DiffError, compute_diff};
+use super::executor::execute_migration_plan;
 use super::introspector::introspect_database_schema;
 use super::model::DatabaseSchema;
-use super::planner::plan_migrations;
+use super::planner::{PlannerError, plan_migrations};
+use super::step::{MigrationStep, SafetyPolicy};
 use crate::persistence::error::PersistenceError;
 use crate::schema_loader::load_schemas_from_dir;
 
@@ -73,7 +75,11 @@ pub async fn sync_dynamic_schemas(
         return Ok(SchemaSyncResult::default());
     }
 
-    let plan = plan_migrations(raw_steps);
+    let plan = plan_migrations(raw_steps).map_err(|e| match e {
+        PlannerError::CircularDependency(tables) => {
+            PersistenceError::DependencyCycle(tables.join(", "))
+        }
+    })?;
     let summary = execute_migration_plan(pool, &plan).await?;
     let counts = calculate_step_counts(&plan.steps);
 
@@ -107,7 +113,7 @@ pub fn generate_ddl_for_registry(registry: &SchemaRegistry) -> Vec<String> {
     let desired = build_desired_schema(registry);
     let actual = DatabaseSchema::new();
     let raw_steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap_or_default();
-    let plan = plan_migrations(raw_steps);
+    let plan = plan_migrations(raw_steps).unwrap_or_default();
     plan.steps.iter().map(step_to_sql).collect()
 }
 
@@ -125,7 +131,7 @@ pub fn generate_ddl_for_document_type(
 
     let actual = DatabaseSchema::new();
     let raw_steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap_or_default();
-    let plan = plan_migrations(raw_steps);
+    let plan = plan_migrations(raw_steps).unwrap_or_default();
     plan.steps.iter().map(step_to_sql).collect()
 }
 

@@ -23,6 +23,9 @@ pub enum PersistenceError {
     #[error("schema synchronizer safety policy violation: {0}")]
     SafetyViolation(String),
 
+    #[error("schema dependency cycle detected: {0}")]
+    DependencyCycle(String),
+
     #[error("persistence validation error: {0}")]
     Validation(String),
 

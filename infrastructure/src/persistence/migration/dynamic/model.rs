@@ -4,6 +4,7 @@
 //! identifier strings for map keys. Enables O(1) lookups via `.get("name")`.
 
 use std::borrow::Borrow;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
 use indexmap::IndexSet;
@@ -228,6 +229,25 @@ impl TableDefinition {
     #[must_use]
     pub fn is_junction(&self) -> bool {
         self.kind == TableKind::Link
+    }
+
+    /// Returns the column names that constitute this table's primary key.
+    #[must_use]
+    pub fn primary_key_columns(&self) -> Vec<&str> {
+        self.columns
+            .iter()
+            .filter(|c| c.is_primary_key)
+            .map(|c| c.name.as_str())
+            .collect()
+    }
+
+    /// Returns the set of referenced table names across all foreign keys on this table.
+    #[must_use]
+    pub fn referenced_table_names(&self) -> HashSet<&str> {
+        self.foreign_keys
+            .iter()
+            .map(|fk| fk.referenced_table.as_str())
+            .collect()
     }
 
     #[must_use]

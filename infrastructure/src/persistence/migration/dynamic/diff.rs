@@ -3,52 +3,19 @@
 //! Compares `ActualSchema` against `DesiredSchema` and generates a list of `MigrationStep`s.
 //! Enforces `SafetyPolicy` (`AdditiveOnly` vs `AllowDestructive`).
 
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::model::{ColumnDefinition, DatabaseSchema, IndexDefinition, TableDefinition, TableKind};
+use super::model::{DatabaseSchema, TableDefinition};
+use super::step::{MigrationStep, SafetyPolicy};
 
 // ---------------------------------------------------------------------------
-// Safety Policy & Diff Errors
+// Diff Errors
 // ---------------------------------------------------------------------------
-
-/// Safety policy governing schema migration step generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum SafetyPolicy {
-    /// Non-destructive changes only: provisions missing tables, columns, and indexes.
-    #[default]
-    AdditiveOnly,
-    /// Allows dropping unmanaged tables, columns, or indexes (for test tear-down or local resets).
-    AllowDestructive,
-}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DiffError {
     #[error("destructive operation blocked by SafetyPolicy::AdditiveOnly: {operation}")]
     DestructiveOperationBlocked { operation: String },
-}
-
-/// A discrete DDL migration operation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MigrationStep {
-    CreateTable(TableDefinition),
-    DropTable {
-        name: String,
-        kind: TableKind,
-    },
-    AddColumn {
-        table: String,
-        column: ColumnDefinition,
-    },
-    DropColumn {
-        table: String,
-        column: String,
-    },
-    CreateIndex(IndexDefinition),
-    DropIndex {
-        name: String,
-        table: String,
-    },
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +154,9 @@ fn diff_removed_tables(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persistence::migration::dynamic::model::{ColumnDefinition, SqlColumnType};
+    use crate::persistence::migration::dynamic::model::{
+        ColumnDefinition, SqlColumnType, TableKind,
+    };
 
     #[test]
     fn test_compute_diff_creates_table_when_missing() {

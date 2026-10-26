@@ -153,3 +153,19 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   1. **Strict Step-Down Narrative Ordering**: Reorganized 29 files across `domain`, `application`, and `infrastructure` (including `loader.rs`, `executor.rs`, `builder.rs`, `sync.rs`, and `wide_table.rs`) so that callers are immediately followed by their direct callee helpers, reading like a newspaper from highest level of abstraction to lowest level.
   2. **Renamed Test ID Constructors**: Renamed test ID helpers in `domain::test_support::ids` to `create_*` (`create_actor_user`, `create_user_id`, `create_service_id`, `create_doc_type_id`, `create_attr_id`, `create_locales`, `create_locale_id`) reflecting their constructor nature while avoiding naming collisions with `#[test]` test runners.
   3. **Backward Compatibility**: Re-exported `pub use create_* as test_*;` in `domain/src/test_support/ids.rs` for backward compatibility while migrating all internal references across the repository to `create_*`.
+
+
+---
+
+### 2026-10-26 — Dynamic Schema Migration Engine: Role-Based Clean Architecture Refactoring
+
+- **Context**: Code review of `infrastructure::persistence::migration::dynamic` revealed that `executor.rs` mixed DDL compilation with DB execution, `build_create_table_sql` contained leaky branching for junction tables (`table.is_junction()`), `MigrationStep` was misplaced in `diff.rs`, and table ordering used coarse category bucketing rather than a true dependency graph.
+- **Decisions**:
+  1. **Role-Based Architecture**:
+     - `step.rs`: Pure AST for `MigrationStep` and `SafetyPolicy` (zero external DB/SQL dependencies).
+     - `ddl.rs`: Pure compiler translating `MigrationStep` to SQL strings via `sea-query` (zero I/O).
+     - `executor.rs`: Pure runtime driver executing statements on `PgPool` outside transactions.
+     - `diff.rs`: Pure differ comparing actual vs desired `DatabaseSchema`.
+  2. **Generic Primary Key Generation**: Replaced `is_junction()` branching in `build_create_table_sql` with generic table-level `PRIMARY KEY` compilation derived from `is_primary_key` columns. Works uniformly for single-column PKs and composite PKs.
+  3. **Streamlined Projection**: Refactored `build_desired_schema` in `builder.rs` into a single loop delegating to `build_document_type_tables`, removing redundant intermediate allocations.
+  4. **Kahn's Topological Sort Dependency Graph**: Upgraded `planner.rs` with `DependencyGraph` and Kahn's algorithm sorting `CreateTable` steps by foreign key dependencies (parent before child) and detecting cycles (`PlannerError::CircularDependency`).
