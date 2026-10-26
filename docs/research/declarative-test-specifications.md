@@ -320,7 +320,7 @@ use serde::Deserialize;
 
 use domain::content::{DocumentInstance, PublicationState};
 use domain::errors::DomainError;
-use domain::test_support::{fixture_document_instance, test_user_id};
+use domain::test_support::{fixture_document_instance, create_user_id};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]           // typos in specs fail loudly
@@ -359,7 +359,7 @@ fn run(s: &Scenario) -> Result<(), Failed> {
     let before = doc.clone();
 
     let result: Result<Option<u32>, DomainError> = match s.when.action.as_str() {
-        "publish"   => doc.publish(s.when.by.as_deref().map(test_user_id), clock.at(&s.when.at)).map(Some),
+        "publish"   => doc.publish(s.when.by.as_deref().map(create_user_id), clock.at(&s.when.at)).map(Some),
         "unpublish" => doc.unpublish(clock.at(&s.when.at)).map(|_| None),
         other       => return Err(format!("unknown action '{other}'").into()),
     };
@@ -562,7 +562,7 @@ The output is plain Rust that uses `test_support`; the only new information it c
 // domain/src/content/instance.rs — #[cfg(test)] mod spec_lifecycle
 use super::*;
 use chrono::{Duration, Utc};
-use crate::test_support::{fixture_document_instance, test_user_id};
+use crate::test_support::{fixture_document_instance, create_user_id};
 
 /// LC-03 Revision sequence survives unpublishing
 #[test]
@@ -570,7 +570,7 @@ fn lc_03_revision_sequence_survives_unpublishing() {
     let mut doc = fixture_document_instance("article", Some("alice"));
     doc.content.publication_state = PublicationState::Draft { last_published_revision: Some(3) };
 
-    let rev = doc.publish(Some(test_user_id("bob")), Utc::now()).unwrap();
+    let rev = doc.publish(Some(create_user_id("bob")), Utc::now()).unwrap();
 
     assert_eq!(rev, 4);
     assert!(matches!(doc.content.publication_state, PublicationState::Published { revision: 4, .. }));
@@ -594,9 +594,9 @@ fn lc_05_draft_cannot_be_unpublished() {
 /// AZ-02 Владелец не может сам опубликовать документ
 #[test]
 fn az_02_owner_cannot_self_publish() {
-    let alice = test_user_id("alice");
+    let alice = create_user_id("alice");
     let doc = fixture_document_instance("article", Some("alice"));
-    let article = test_doc_type_id("article");
+    let article = create_doc_type_id("article");
 
     let action = Permission::PublishDocument(Some(article));
     assert!(!AuthorizationService::can(&alice, &action, Some(&doc), &[]));
@@ -605,9 +605,9 @@ fn az_02_owner_cannot_self_publish() {
 /// AZ-03 Владелец может удалить свой документ без ролей
 #[test]
 fn az_03_owner_can_delete_own_document() {
-    let alice = test_user_id("alice");
+    let alice = create_user_id("alice");
     let doc = fixture_document_instance("article", Some("alice"));
-    let article = test_doc_type_id("article");
+    let article = create_doc_type_id("article");
 
     let action = Permission::DeleteDocument(Some(article));
     assert!(AuthorizationService::can(&alice, &action, Some(&doc), &[]));

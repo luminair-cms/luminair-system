@@ -8,96 +8,86 @@ use crate::schema::{AttributeId, DocumentType, FieldConstraint};
 use crate::system::LocaleId;
 use crate::system::config::SystemConfig;
 
-/// Evaluates string constraints (`MinLength`, `MaxLength`, `Pattern`) against a string value.
-/// If `locale` is provided, includes it in the error reason.
-fn evaluate_str_constraint(
-    attr_id: &AttributeId,
-    constraint: &FieldConstraint,
-    s: &str,
-    locale: Option<&LocaleId>,
-) -> Option<DomainError> {
-    let prefix = match locale {
-        Some(loc) => format!("locale '{}': ", loc.as_ref()),
-        None => String::new(),
-    };
-    let violated = |reason: String| -> Option<DomainError> {
-        Some(DomainError::InvalidFieldValue {
-            attribute_id: attr_id.clone(),
-            reason: format!("{prefix}{reason}"),
-        })
-    };
-
-    match constraint {
-        FieldConstraint::MinLength(min) => {
-            let len = s.chars().count();
-            if len < *min {
-                return violated(format!("length {len} is below minimum {min}"));
-            }
-        }
-        FieldConstraint::MaxLength(max) => {
-            let len = s.chars().count();
-            if len > *max {
-                return violated(format!("length {len} exceeds maximum {max}"));
-            }
-        }
-        FieldConstraint::Pattern(pattern) if !pattern.is_match(s) => {
-            return violated(format!(
-                "value '{s}' does not match pattern '{}'",
-                pattern.as_str()
-            ));
-        }
-        _ => {}
-    }
-    None
+/// Validates document instance content for draft saving (lenient: skips required checks for missing/null).
+///
+/// # Errors
+/// Returns a collection of [`DomainError`] if any field value violates constraint or type rules.
+pub fn validate_draft_content(
+    doc_type: &DocumentType,
+    content: &DocumentContent,
+    system_config: &SystemConfig,
+) -> Result<(), Vec<DomainError>> {
+    validate_content_with_mode(doc_type, content, system_config, false)
 }
 
-/// Evaluates a single `FieldConstraint` against a scalar `DomainValue`.
-/// Returns `Some(DomainError)` if the constraint is violated, `None` if satisfied.
-fn evaluate_constraint(
-    attr_id: &AttributeId,
-    constraint: &FieldConstraint,
-    value: &DomainValue,
-) -> Option<DomainError> {
-    let violated = |reason: String| -> Option<DomainError> {
-        Some(DomainError::InvalidFieldValue {
-            attribute_id: attr_id.clone(),
-            reason,
-        })
-    };
+/// Validates document instance content against strict schema rules for publication.
+///
+/// # Errors
+/// Returns a collection of [`DomainError`] if required fields are missing or constraint/type rules fail.
+pub fn validate_publish_content(
+    doc_type: &DocumentType,
+    content: &DocumentContent,
+    system_config: &SystemConfig,
+) -> Result<(), Vec<DomainError>> {
+    validate_content_with_mode(doc_type, content, system_config, true)
+}
 
-    match (constraint, value) {
-        (
-            FieldConstraint::MinLength(_)
-            | FieldConstraint::MaxLength(_)
-            | FieldConstraint::Pattern(_),
-            DomainValue::Primitive(PrimitiveValue::Text(s) | PrimitiveValue::Uid(s)),
-        ) => evaluate_str_constraint(attr_id, constraint, s, None),
-        (FieldConstraint::MinInteger(min), DomainValue::Primitive(PrimitiveValue::Integer(n))) => {
-            if *n < *min {
-                return violated(format!("value {n} is below minimum {min}"));
+/// Backward-compatible alias delegating to `validate_publish_content`.
+///
+/// # Errors
+/// Returns a collection of [`DomainError`] if validation fails.
+pub fn validate_content(
+    doc_type: &DocumentType,
+    content: &DocumentContent,
+    system_config: &SystemConfig,
+) -> Result<(), Vec<DomainError>> {
+    validate_publish_content(doc_type, content, system_config)
+}
+
+fn validate_content_with_mode(
+    doc_type: &DocumentType,
+    content: &DocumentContent,
+    system_config: &SystemConfig,
+    strict: bool,
+) -> Result<(), Vec<DomainError>> {
+    let mut errors = Vec::new();
+
+    // 1. Validate declared fields
+    for field_def in &doc_type.fields {
+        let attr_id = &field_def.id;
+        match content.get_field(attr_id) {
+            None | Some(ContentValue::Null) => {
+                if strict && field_def.required {
+                    errors.push(DomainError::InvalidFieldValue {
+                        attribute_id: attr_id.clone(),
+                        reason: "field is required but missing or null".to_string(),
+                    });
+                }
             }
-            None
-        }
-        (FieldConstraint::MaxInteger(max), DomainValue::Primitive(PrimitiveValue::Integer(n))) => {
-            if *n > *max {
-                return violated(format!("value {n} exceeds maximum {max}"));
+            Some(val) => {
+                validate_field_value(
+                    attr_id,
+                    field_def.field_type,
+                    &field_def.constraints,
+                    val,
+                    system_config,
+                    &mut errors,
+                );
             }
-            None
         }
-        (FieldConstraint::MinDecimal(min), DomainValue::Primitive(PrimitiveValue::Decimal(d))) => {
-            if d < min {
-                return violated(format!("value {d} is below minimum {min}"));
-            }
-            None
+    }
+
+    // 2. Reject undeclared fields
+    for attr_id in content.fields().keys() {
+        if !doc_type.fields.contains(attr_id) {
+            errors.push(DomainError::UnknownAttribute(attr_id.clone()));
         }
-        (FieldConstraint::MaxDecimal(max), DomainValue::Primitive(PrimitiveValue::Decimal(d))) => {
-            if d > max {
-                return violated(format!("value {d} exceeds maximum {max}"));
-            }
-            None
-        }
-        // Constraint not applicable to this value type — silently skip (type validation catches mismatches)
-        _ => None,
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }
 
@@ -157,87 +147,97 @@ fn validate_field_value(
     }
 }
 
-fn validate_content_with_mode(
-    doc_type: &DocumentType,
-    content: &DocumentContent,
-    system_config: &SystemConfig,
-    strict: bool,
-) -> Result<(), Vec<DomainError>> {
-    let mut errors = Vec::new();
+/// Evaluates a single `FieldConstraint` against a scalar `DomainValue`.
+/// Returns `Some(DomainError)` if the constraint is violated, `None` if satisfied.
+fn evaluate_constraint(
+    attr_id: &AttributeId,
+    constraint: &FieldConstraint,
+    value: &DomainValue,
+) -> Option<DomainError> {
+    let violated = |reason: String| -> Option<DomainError> {
+        Some(DomainError::InvalidFieldValue {
+            attribute_id: attr_id.clone(),
+            reason,
+        })
+    };
 
-    // 1. Validate declared fields
-    for field_def in &doc_type.fields {
-        let attr_id = &field_def.id;
-        match content.get_field(attr_id) {
-            None | Some(ContentValue::Null) => {
-                if strict && field_def.required {
-                    errors.push(DomainError::InvalidFieldValue {
-                        attribute_id: attr_id.clone(),
-                        reason: "field is required but missing or null".to_string(),
-                    });
-                }
+    match (constraint, value) {
+        (
+            FieldConstraint::MinLength(_)
+            | FieldConstraint::MaxLength(_)
+            | FieldConstraint::Pattern(_),
+            DomainValue::Primitive(PrimitiveValue::Text(s) | PrimitiveValue::Uid(s)),
+        ) => evaluate_str_constraint(attr_id, constraint, s, None),
+        (FieldConstraint::MinInteger(min), DomainValue::Primitive(PrimitiveValue::Integer(n))) => {
+            if *n < *min {
+                return violated(format!("value {n} is below minimum {min}"));
             }
-            Some(val) => {
-                validate_field_value(
-                    attr_id,
-                    field_def.field_type,
-                    &field_def.constraints,
-                    val,
-                    system_config,
-                    &mut errors,
-                );
+            None
+        }
+        (FieldConstraint::MaxInteger(max), DomainValue::Primitive(PrimitiveValue::Integer(n))) => {
+            if *n > *max {
+                return violated(format!("value {n} exceeds maximum {max}"));
+            }
+            None
+        }
+        (FieldConstraint::MinDecimal(min), DomainValue::Primitive(PrimitiveValue::Decimal(d))) => {
+            if d < min {
+                return violated(format!("value {d} is below minimum {min}"));
+            }
+            None
+        }
+        (FieldConstraint::MaxDecimal(max), DomainValue::Primitive(PrimitiveValue::Decimal(d))) => {
+            if d > max {
+                return violated(format!("value {d} exceeds maximum {max}"));
+            }
+            None
+        }
+        // Constraint not applicable to this value type — silently skip (type validation catches mismatches)
+        _ => None,
+    }
+}
+
+/// Evaluates string constraints (`MinLength`, `MaxLength`, `Pattern`) against a string value.
+/// If `locale` is provided, includes it in the error reason.
+fn evaluate_str_constraint(
+    attr_id: &AttributeId,
+    constraint: &FieldConstraint,
+    s: &str,
+    locale: Option<&LocaleId>,
+) -> Option<DomainError> {
+    let prefix = match locale {
+        Some(loc) => format!("locale '{}': ", loc.as_ref()),
+        None => String::new(),
+    };
+    let violated = |reason: String| -> Option<DomainError> {
+        Some(DomainError::InvalidFieldValue {
+            attribute_id: attr_id.clone(),
+            reason: format!("{prefix}{reason}"),
+        })
+    };
+
+    match constraint {
+        FieldConstraint::MinLength(min) => {
+            let len = s.chars().count();
+            if len < *min {
+                return violated(format!("length {len} is below minimum {min}"));
             }
         }
-    }
-
-    // 2. Reject undeclared fields
-    for attr_id in content.fields().keys() {
-        if !doc_type.fields.contains(attr_id) {
-            errors.push(DomainError::UnknownAttribute(attr_id.clone()));
+        FieldConstraint::MaxLength(max) => {
+            let len = s.chars().count();
+            if len > *max {
+                return violated(format!("length {len} exceeds maximum {max}"));
+            }
         }
+        FieldConstraint::Pattern(pattern) if !pattern.is_match(s) => {
+            return violated(format!(
+                "value '{s}' does not match pattern '{}'",
+                pattern.as_str()
+            ));
+        }
+        _ => {}
     }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
-}
-
-/// Validates document instance content for draft saving (lenient: skips required checks for missing/null).
-///
-/// # Errors
-/// Returns a collection of [`DomainError`] if any field value violates constraint or type rules.
-pub fn validate_draft_content(
-    doc_type: &DocumentType,
-    content: &DocumentContent,
-    system_config: &SystemConfig,
-) -> Result<(), Vec<DomainError>> {
-    validate_content_with_mode(doc_type, content, system_config, false)
-}
-
-/// Validates document instance content against strict schema rules for publication.
-///
-/// # Errors
-/// Returns a collection of [`DomainError`] if required fields are missing or constraint/type rules fail.
-pub fn validate_publish_content(
-    doc_type: &DocumentType,
-    content: &DocumentContent,
-    system_config: &SystemConfig,
-) -> Result<(), Vec<DomainError>> {
-    validate_content_with_mode(doc_type, content, system_config, true)
-}
-
-/// Backward-compatible alias delegating to `validate_publish_content`.
-///
-/// # Errors
-/// Returns a collection of [`DomainError`] if validation fails.
-pub fn validate_content(
-    doc_type: &DocumentType,
-    content: &DocumentContent,
-    system_config: &SystemConfig,
-) -> Result<(), Vec<DomainError>> {
-    validate_publish_content(doc_type, content, system_config)
+    None
 }
 
 #[cfg(test)]
@@ -249,12 +249,12 @@ mod tests {
     use crate::schema::pattern::RegexPattern;
     use crate::schema::types::IntegerSize;
     use crate::test_support::{
-        DocumentTypeBuilder, decimal_field, draft_content, fixture_system_config, integer_field,
-        localized_field, test_attr_id, test_locales, text_field,
+        DocumentTypeBuilder, create_attr_id, create_locales, decimal_field, draft_content,
+        fixture_system_config, integer_field, localized_field, text_field,
     };
 
     fn make_test_setup() -> (DocumentType, SystemConfig, AttributeId) {
-        let title_attr = test_attr_id("title");
+        let title_attr = create_attr_id("title");
         let doc_type = DocumentTypeBuilder::collection("article")
             .with_field(text_field("title").required(true))
             .build();
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_validate_content_optional_field_absent_or_null_passes() {
-        let title_attr = test_attr_id("title");
+        let title_attr = create_attr_id("title");
         let doc_type = DocumentTypeBuilder::collection("article")
             .with_field(text_field("title").required(false))
             .build();
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_validate_content_string_length_and_pattern_constraints() {
-        let title_attr = test_attr_id("title");
+        let title_attr = create_attr_id("title");
         let pattern = RegexPattern::try_new(r"^[A-Z][a-z]+$").unwrap();
         let doc_type = DocumentTypeBuilder::collection("article")
             .with_field(text_field("title").min_len(3).max_len(10).pattern(pattern))
@@ -373,8 +373,8 @@ mod tests {
 
     #[test]
     fn test_validate_content_numeric_constraints() {
-        let count_attr = test_attr_id("count");
-        let price_attr = test_attr_id("price");
+        let count_attr = create_attr_id("count");
+        let price_attr = create_attr_id("price");
 
         let doc_type = DocumentTypeBuilder::collection("product")
             .with_field(
@@ -423,12 +423,12 @@ mod tests {
 
     #[test]
     fn test_validate_content_localized_text_validation() {
-        let desc_attr = test_attr_id("description");
+        let desc_attr = create_attr_id("description");
         let doc_type = DocumentTypeBuilder::collection("article")
             .with_field(localized_field("description").min_len(4))
             .build();
         let config = fixture_system_config();
-        let (en, uk, de) = test_locales(); // de is not in fixture_system_config (which has en, uk)
+        let (en, uk, de) = create_locales(); // de is not in fixture_system_config (which has en, uk)
 
         // Valid localized text
         let mut valid_locales = HashMap::new();
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn test_validate_content_rejects_unknown_attribute() {
         let (doc_type, config, title_attr) = make_test_setup();
-        let extra_attr = test_attr_id("non-existent");
+        let extra_attr = create_attr_id("non-existent");
 
         let mut fields = HashMap::new();
         fields.insert(
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn test_two_tier_validation_draft_vs_publish() {
         let (doc_type, config, title_attr) = make_test_setup();
-        let (_, _, de) = test_locales();
+        let (_, _, de) = create_locales();
 
         // 1. Missing required field: Draft succeeds, Publish fails
         let empty_content = draft_content(HashMap::new());
@@ -527,7 +527,7 @@ mod tests {
         de_loc_map.insert(de.clone(), "Hallo".to_string());
         let mut loc_fields = HashMap::new();
         loc_fields.insert(
-            test_attr_id("summary"),
+            create_attr_id("summary"),
             ContentValue::LocalizedText(de_loc_map),
         );
         let loc_content = draft_content(loc_fields);
@@ -539,7 +539,7 @@ mod tests {
         // 5. Unknown attribute: Both Draft and Publish fail
         let mut unknown_attr_fields = HashMap::new();
         unknown_attr_fields.insert(
-            test_attr_id("unregistered-attr"),
+            create_attr_id("unregistered-attr"),
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("test".into()))),
         );
         let unknown_attr_content = draft_content(unknown_attr_fields);
@@ -554,7 +554,7 @@ mod tests {
             .build();
         let mut short_fields = HashMap::new();
         short_fields.insert(
-            test_attr_id("title"),
+            create_attr_id("title"),
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Hi".into()))),
         );
         let short_content = draft_content(short_fields);

@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn test_display_fields_valid_up_to_three_fields_including_one_relation() {
         use crate::test_support::{
-            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_doc_type_id,
+            DocumentTypeBuilder, FieldDefinitionBuilder, create_attr_id, create_doc_type_id,
         };
 
         let f1 =
@@ -242,9 +242,9 @@ mod tests {
         )
         .build();
         let rel = RelationDefinition {
-            id: test_attr_id("author"),
+            id: create_attr_id("author"),
             relation_type: RelationType::HasOne,
-            target: test_doc_type_id("author"),
+            target: create_doc_type_id("author"),
         };
 
         let doc_type = DocumentTypeBuilder::collection("book")
@@ -252,9 +252,9 @@ mod tests {
             .with_field(f2)
             .with_relation(rel)
             .with_display_fields(vec![
-                test_attr_id("title"),
-                test_attr_id("year"),
-                test_attr_id("author"),
+                create_attr_id("title"),
+                create_attr_id("year"),
+                create_attr_id("author"),
             ])
             .build();
 
@@ -262,20 +262,20 @@ mod tests {
         assert_eq!(
             doc_type.effective_display_fields(),
             vec![
-                test_attr_id("title"),
-                test_attr_id("year"),
-                test_attr_id("author")
+                create_attr_id("title"),
+                create_attr_id("year"),
+                create_attr_id("author")
             ]
         );
         assert_eq!(
             doc_type.relational_display_field().map(|r| r.id.clone()),
-            Some(test_attr_id("author"))
+            Some(create_attr_id("author"))
         );
     }
 
     #[test]
     fn test_display_fields_rejects_more_than_three() {
-        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, create_attr_id};
 
         let f1 =
             FieldDefinitionBuilder::new("f1", FieldType::Primitive(PrimitiveType::Text)).build();
@@ -292,10 +292,10 @@ mod tests {
             .with_field(f3)
             .with_field(f4)
             .with_display_fields(vec![
-                test_attr_id("f1"),
-                test_attr_id("f2"),
-                test_attr_id("f3"),
-                test_attr_id("f4"),
+                create_attr_id("f1"),
+                create_attr_id("f2"),
+                create_attr_id("f3"),
+                create_attr_id("f4"),
             ])
             .build();
 
@@ -306,14 +306,14 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_duplicates() {
-        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, create_attr_id};
 
         let f1 =
             FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
 
         let doc_type = DocumentTypeBuilder::collection("test-doc")
             .with_field(f1)
-            .with_display_fields(vec![test_attr_id("title"), test_attr_id("title")])
+            .with_display_fields(vec![create_attr_id("title"), create_attr_id("title")])
             .build();
 
         let err = doc_type.validate_display_fields().unwrap_err();
@@ -324,20 +324,20 @@ mod tests {
     #[test]
     fn test_display_fields_rejects_more_than_one_relation() {
         use crate::test_support::{
-            DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_doc_type_id,
+            DocumentTypeBuilder, FieldDefinitionBuilder, create_attr_id, create_doc_type_id,
         };
 
         let f1 =
             FieldDefinitionBuilder::new("title", FieldType::Primitive(PrimitiveType::Text)).build();
         let rel1 = RelationDefinition {
-            id: test_attr_id("author"),
+            id: create_attr_id("author"),
             relation_type: RelationType::HasOne,
-            target: test_doc_type_id("author"),
+            target: create_doc_type_id("author"),
         };
         let rel2 = RelationDefinition {
-            id: test_attr_id("publisher"),
+            id: create_attr_id("publisher"),
             relation_type: RelationType::BelongsToOne,
-            target: test_doc_type_id("publisher"),
+            target: create_doc_type_id("publisher"),
         };
 
         let doc_type = DocumentTypeBuilder::collection("book")
@@ -345,9 +345,9 @@ mod tests {
             .with_relation(rel1)
             .with_relation(rel2)
             .with_display_fields(vec![
-                test_attr_id("title"),
-                test_attr_id("author"),
-                test_attr_id("publisher"),
+                create_attr_id("title"),
+                create_attr_id("author"),
+                create_attr_id("publisher"),
             ])
             .build();
 
@@ -361,17 +361,17 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_multi_cardinality_relations() {
-        use crate::test_support::{DocumentTypeBuilder, test_attr_id, test_doc_type_id};
+        use crate::test_support::{DocumentTypeBuilder, create_attr_id, create_doc_type_id};
 
         let rel_many = RelationDefinition {
-            id: test_attr_id("tags"),
+            id: create_attr_id("tags"),
             relation_type: RelationType::HasMany,
-            target: test_doc_type_id("tag"),
+            target: create_doc_type_id("tag"),
         };
 
         let doc_type = DocumentTypeBuilder::collection("article")
             .with_relation(rel_many)
-            .with_display_fields(vec![test_attr_id("tags")])
+            .with_display_fields(vec![create_attr_id("tags")])
             .build();
 
         let err = doc_type.validate_display_fields().unwrap_err();
@@ -381,13 +381,13 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_json_field() {
-        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, create_attr_id};
 
         let f_json = FieldDefinitionBuilder::new("metadata", FieldType::Json).build();
 
         let doc_type = DocumentTypeBuilder::collection("record")
             .with_field(f_json)
-            .with_display_fields(vec![test_attr_id("metadata")])
+            .with_display_fields(vec![create_attr_id("metadata")])
             .build();
 
         let err = doc_type.validate_display_fields().unwrap_err();
@@ -397,10 +397,10 @@ mod tests {
 
     #[test]
     fn test_display_fields_rejects_undeclared_attribute() {
-        use crate::test_support::{DocumentTypeBuilder, test_attr_id};
+        use crate::test_support::{DocumentTypeBuilder, create_attr_id};
 
         let doc_type = DocumentTypeBuilder::collection("record")
-            .with_display_fields(vec![test_attr_id("missing")])
+            .with_display_fields(vec![create_attr_id("missing")])
             .build();
 
         let err = doc_type.validate_display_fields().unwrap_err();
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_effective_display_fields_fallback() {
-        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id};
+        use crate::test_support::{DocumentTypeBuilder, FieldDefinitionBuilder, create_attr_id};
 
         // Fallback to first text field when display_fields is empty
         let f_int = FieldDefinitionBuilder::new(
@@ -430,7 +430,7 @@ mod tests {
 
         assert_eq!(
             doc_type.effective_display_fields(),
-            vec![test_attr_id("title")]
+            vec![create_attr_id("title")]
         );
         assert!(doc_type.relational_display_field().is_none());
 
@@ -441,7 +441,7 @@ mod tests {
             .build();
         assert_eq!(
             doc_loc.effective_display_fields(),
-            vec![test_attr_id("heading")]
+            vec![create_attr_id("heading")]
         );
 
         // No eligible text field -> empty vec

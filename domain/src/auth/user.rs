@@ -51,28 +51,6 @@ pub enum ActorId {
     System,
 }
 
-impl From<UserId> for ActorId {
-    fn from(user_id: UserId) -> Self {
-        ActorId::User(user_id)
-    }
-}
-
-impl From<ServiceId> for ActorId {
-    fn from(service_id: ServiceId) -> Self {
-        ActorId::Service(service_id)
-    }
-}
-
-impl fmt::Display for ActorId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ActorId::User(u) => write!(f, "user:{u}"),
-            ActorId::Service(s) => write!(f, "service:{s}"),
-            ActorId::System => write!(f, "system"),
-        }
-    }
-}
-
 impl ActorId {
     #[must_use]
     pub fn to_urn(&self) -> String {
@@ -120,6 +98,28 @@ impl ActorId {
     #[must_use]
     pub fn is_system(&self) -> bool {
         matches!(self, ActorId::System)
+    }
+}
+
+impl From<UserId> for ActorId {
+    fn from(user_id: UserId) -> Self {
+        ActorId::User(user_id)
+    }
+}
+
+impl From<ServiceId> for ActorId {
+    fn from(service_id: ServiceId) -> Self {
+        ActorId::Service(service_id)
+    }
+}
+
+impl fmt::Display for ActorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActorId::User(u) => write!(f, "user:{u}"),
+            ActorId::Service(s) => write!(f, "service:{s}"),
+            ActorId::System => write!(f, "system"),
+        }
     }
 }
 

@@ -13,7 +13,7 @@ use domain::errors::DomainError;
 use domain::schema::{DocumentType, RelationDefinition, RelationType, SchemaRegistry};
 use domain::system::SystemContext;
 use domain::test_support::{
-    DocumentTypeBuilder, fixture_system_config, test_attr_id, test_user_id, text_field,
+    DocumentTypeBuilder, fixture_system_config, create_attr_id, create_user_id, text_field,
 };
 
 fn setup_service_fixture(
@@ -56,7 +56,7 @@ async fn ds_01_create_collection_draft_success() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Hello CMS".into(),
         ))),
@@ -81,7 +81,7 @@ async fn ds_02_create_blocked_for_second_singletype_instance() {
     let (service, doc_type, caller) = setup_service_fixture(true, true);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Initial".into(),
         ))),
@@ -125,7 +125,7 @@ async fn ds_04_update_bumps_version_and_touches_audit_trail() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("V1".into()))),
     );
     let inst = service
@@ -135,7 +135,7 @@ async fn ds_04_update_bumps_version_and_touches_audit_trail() {
 
     let mut update_fields = HashMap::new();
     update_fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("V2".into()))),
     );
 
@@ -156,7 +156,7 @@ async fn ds_05_update_retains_unmentioned_fields() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Persistent Title".into(),
         ))),
@@ -175,7 +175,7 @@ async fn ds_05_update_retains_unmentioned_fields() {
         .await
         .unwrap();
 
-    assert!(updated.fields().contains_key(&test_attr_id("title")));
+    assert!(updated.fields().contains_key(&create_attr_id("title")));
 }
 
 #[tokio::test]
@@ -183,7 +183,7 @@ async fn ds_06_publish_advances_revision_on_draftpublish_enabled_type() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Publishable".into(),
         ))),
@@ -209,7 +209,7 @@ async fn ds_17_publish_rejects_already_published_document_without_pending_change
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Clean Published".into(),
         ))),
@@ -265,7 +265,7 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
     let (service, doc_type, caller) = setup_service_fixture(false, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Static".into(),
         ))),
@@ -298,7 +298,7 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
 
     let mut update_fields = HashMap::new();
     update_fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Updated Static".into(),
         ))),
@@ -326,7 +326,7 @@ async fn ds_08_unpublish_transitions_to_draft_with_last_revision() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Lifecycle".into(),
         ))),
@@ -386,7 +386,7 @@ async fn ds_09_unpublish_rejects_already_draft_instance() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft".into()))),
     );
     let inst = service
@@ -414,7 +414,7 @@ async fn ds_10_delete_removes_instance() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Disposable".into(),
         ))),
@@ -451,7 +451,7 @@ async fn ds_11_find_applies_filters_and_returns_total_count() {
     for title in ["alpha", "beta", "alpha"] {
         let mut fields = HashMap::new();
         fields.insert(
-            test_attr_id("title"),
+            create_attr_id("title"),
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(title.into()))),
         );
         service
@@ -461,7 +461,7 @@ async fn ds_11_find_applies_filters_and_returns_total_count() {
     }
 
     let filter = FieldFilter {
-        attribute_id: test_attr_id("title"),
+        attribute_id: create_attr_id("title"),
         value: DomainValue::Primitive(PrimitiveValue::Text("alpha".into())),
     };
 
@@ -483,7 +483,7 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
     let (service, doc_type, admin) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Secret".into(),
         ))),
@@ -493,7 +493,7 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
         .await
         .unwrap();
 
-    let stranger = CallerContext::new(test_user_id("stranger"), vec![]);
+    let stranger = CallerContext::new(create_user_id("stranger"), vec![]);
 
     let update_res = service
         .update(
@@ -542,7 +542,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
     let mut fields = HashMap::new();
     fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Original Published".into(),
         ))),
@@ -577,7 +577,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
     // 2. Edit draft -> transitions to Modified state
     let mut update_fields = HashMap::new();
     update_fields.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Draft Modifications".into(),
         ))),
@@ -598,7 +598,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
         }
     ));
     assert_eq!(
-        modified.get_field(&test_attr_id("title")),
+        modified.get_field(&create_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("Draft Modifications".into())
         )))
@@ -615,7 +615,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
         PublicationState::Published { revision: 1, .. }
     ));
     assert_eq!(
-        restored.get_field(&test_attr_id("title")),
+        restored.get_field(&create_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("Original Published".into())
         )))
@@ -628,7 +628,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
         .unwrap()
         .expect("found");
     assert_eq!(
-        fetched.get_field(&test_attr_id("title")),
+        fetched.get_field(&create_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("Original Published".into())
         )))
@@ -642,7 +642,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     // 1. Create Revision 1
     let mut fields_v1 = HashMap::new();
     fields_v1.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "V1 Title".into(),
         ))),
@@ -664,7 +664,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     // 2. Update and Publish Revision 2
     let mut fields_v2 = HashMap::new();
     fields_v2.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "V2 Title".into(),
         ))),
@@ -699,7 +699,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     // Edit working draft to create in-progress changes (Modified state)
     let mut fields_v3 = HashMap::new();
     fields_v3.insert(
-        test_attr_id("title"),
+        create_attr_id("title"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "V3 In-Progress Draft".into(),
         ))),
@@ -756,7 +756,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         }
     ));
     assert_eq!(
-        restored.get_field(&test_attr_id("title")),
+        restored.get_field(&create_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("V1 Title".into())
         )))
@@ -782,7 +782,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         PublicationState::Published { revision: 2, .. }
     ));
     assert_eq!(
-        published_view.get_field(&test_attr_id("title")),
+        published_view.get_field(&create_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("V2 Title".into())
         )))
@@ -805,7 +805,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         }
     ));
     assert_eq!(
-        working_view.get_field(&test_attr_id("title")),
+        working_view.get_field(&create_attr_id("title")),
         Some(&ContentValue::Scalar(DomainValue::Primitive(
             PrimitiveValue::Text("V1 Title".into())
         )))
@@ -815,7 +815,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
 #[tokio::test]
 async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
-    let title_attr = test_attr_id("title");
+    let title_attr = create_attr_id("title");
 
     // --- Case A: Unpublish with KeepDraft (default) ---
     let mut fields_a1 = HashMap::new();
@@ -995,8 +995,8 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
         .build();
 
     let author_type_id = author_type.id.clone();
-    let author_attr = test_attr_id("author");
-    let title_attr = test_attr_id("title");
+    let author_attr = create_attr_id("author");
+    let title_attr = create_attr_id("title");
 
     let article_type = DocumentTypeBuilder::collection("article")
         .with_title("Articles")
@@ -1026,7 +1026,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     // 1. Create Author "Ada Lovelace"
     let mut author_fields = HashMap::new();
     author_fields.insert(
-        test_attr_id("name"),
+        create_attr_id("name"),
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
             "Ada Lovelace".into(),
         ))),
@@ -1152,7 +1152,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
 #[tokio::test]
 async fn test_version_views_across_all_four_document_states() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
-    let title_attr = test_attr_id("title");
+    let title_attr = create_attr_id("title");
 
     // 1. State: Draft
     let mut draft_fields = HashMap::new();
@@ -1337,7 +1337,7 @@ async fn test_version_views_across_all_four_document_states() {
 #[tokio::test]
 async fn ds_18_get_snapshot_returns_historical_revision() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
-    let title_attr = test_attr_id("title");
+    let title_attr = create_attr_id("title");
 
     // 1. Create and publish revision 1
     let mut f1 = HashMap::new();
@@ -1406,7 +1406,7 @@ async fn ds_18_get_snapshot_returns_historical_revision() {
 #[tokio::test]
 async fn test_update_occ_version_mismatch_conflict() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
-    let title_attr = test_attr_id("title");
+    let title_attr = create_attr_id("title");
 
     let mut fields = HashMap::new();
     fields.insert(
@@ -1462,7 +1462,7 @@ async fn test_update_occ_version_mismatch_conflict() {
 #[tokio::test]
 async fn test_restore_snapshot_on_draft_fails_immediately_with_invalid_state_transition() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
-    let title_attr = test_attr_id("title");
+    let title_attr = create_attr_id("title");
 
     let mut fields = HashMap::new();
     fields.insert(

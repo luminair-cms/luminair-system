@@ -128,6 +128,28 @@ fn append_user_field_columns(table: &mut TableDefinition, doc_type: &DocumentTyp
     }
 }
 
+fn field_type_to_sql_column_type(field_type: FieldType) -> SqlColumnType {
+    match field_type {
+        FieldType::Primitive(prim) => match prim {
+            PrimitiveType::Uid => SqlColumnType::Varchar(Some(255)),
+            PrimitiveType::Uuid => SqlColumnType::Uuid,
+            PrimitiveType::Text => SqlColumnType::Text,
+            PrimitiveType::Integer(size) => match size {
+                IntegerSize::I16 => SqlColumnType::SmallInt,
+                IntegerSize::I32 => SqlColumnType::Integer,
+                IntegerSize::I64 => SqlColumnType::BigInt,
+            },
+            PrimitiveType::Decimal { precision, scale } => SqlColumnType::Decimal(precision, scale),
+            PrimitiveType::Date => SqlColumnType::Date,
+            PrimitiveType::DateTime => SqlColumnType::Timestamptz,
+            PrimitiveType::Boolean => SqlColumnType::Boolean,
+        },
+        FieldType::Email => SqlColumnType::Varchar(Some(320)),
+        FieldType::Url => SqlColumnType::Text,
+        FieldType::Json | FieldType::LocalizedText => SqlColumnType::Jsonb,
+    }
+}
+
 fn append_trailing_audit_columns(table: &mut TableDefinition) {
     table.columns.insert(ColumnDefinition {
         name: COL_REVISION.into(),
@@ -293,28 +315,6 @@ fn resolve_target_table(relation: &RelationDefinition, registry: &SchemaRegistry
         || kebab_to_snake(relation.target.as_ref()),
         table_name_for_document_type,
     )
-}
-
-fn field_type_to_sql_column_type(field_type: FieldType) -> SqlColumnType {
-    match field_type {
-        FieldType::Primitive(prim) => match prim {
-            PrimitiveType::Uid => SqlColumnType::Varchar(Some(255)),
-            PrimitiveType::Uuid => SqlColumnType::Uuid,
-            PrimitiveType::Text => SqlColumnType::Text,
-            PrimitiveType::Integer(size) => match size {
-                IntegerSize::I16 => SqlColumnType::SmallInt,
-                IntegerSize::I32 => SqlColumnType::Integer,
-                IntegerSize::I64 => SqlColumnType::BigInt,
-            },
-            PrimitiveType::Decimal { precision, scale } => SqlColumnType::Decimal(precision, scale),
-            PrimitiveType::Date => SqlColumnType::Date,
-            PrimitiveType::DateTime => SqlColumnType::Timestamptz,
-            PrimitiveType::Boolean => SqlColumnType::Boolean,
-        },
-        FieldType::Email => SqlColumnType::Varchar(Some(320)),
-        FieldType::Url => SqlColumnType::Text,
-        FieldType::Json | FieldType::LocalizedText => SqlColumnType::Jsonb,
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 use domain::auth::{ActorId, AuthorizationService, Permission, Role, RoleId};
 use domain::content::DocumentInstance;
 use domain::test_support::{
-    admin_role, fixture_document_instance, test_doc_type_id, test_service_id, test_user_id,
+    admin_role, fixture_document_instance, create_doc_type_id, create_service_id, create_user_id,
 };
 use uuid::Uuid;
 
@@ -23,10 +23,10 @@ struct Case<'a> {
 
 #[test]
 fn test_az_authorization_decision_table() {
-    let owner_user = test_user_id("owner");
-    let other_user = test_user_id("other");
-    let article_type = test_doc_type_id("article");
-    let news_type = test_doc_type_id("news");
+    let owner_user = create_user_id("owner");
+    let other_user = create_user_id("other");
+    let article_type = create_doc_type_id("article");
+    let news_type = create_doc_type_id("news");
     let instance = fixture_document_instance("article", Some("owner"));
 
     let reader_article_role = Role {
@@ -242,7 +242,7 @@ fn test_az_authorization_decision_table() {
 
 #[test]
 fn test_az_actor_authorization_rules() {
-    let article_type = test_doc_type_id("article");
+    let article_type = create_doc_type_id("article");
     let instance = fixture_document_instance("article", Some("owner"));
     let publisher_article_role = Role {
         id: RoleId::new(Uuid::now_v7()),
@@ -264,7 +264,7 @@ fn test_az_actor_authorization_rules() {
     );
 
     // "AZ-20": Service actor has no owner privileges on instance with &[], and evaluates RBAC across assigned roles
-    let service_actor = ActorId::Service(test_service_id("sync-worker"));
+    let service_actor = ActorId::Service(create_service_id("sync-worker"));
     let az_20_denied = AuthorizationService::can_actor(
         &service_actor,
         &Permission::ReadDocument(Some(article_type.clone())),

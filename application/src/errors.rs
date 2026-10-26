@@ -1,11 +1,15 @@
 //! Application-level error types and RFC 9457 Problem Details mapping.
 
+use std::fmt;
+use std::ops::Deref;
+
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
 use domain::auth::{ActorId, Permission, UserId};
 use domain::content::DocumentInstanceId;
 use domain::errors::DomainError;
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 /// Machine-readable conflict error code for programmatic handling and UI localization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -25,27 +29,6 @@ pub enum ConflictCode {
     GenericConflict,
 }
 
-impl ConflictCode {
-    /// Returns the static `snake_case` string representation of the conflict code.
-    #[must_use]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::DraftHasPendingEdits => "draft_has_pending_edits",
-            Self::DraftAndPublishDisabled => "draft_and_publish_disabled",
-            Self::AlreadyPublished => "already_published",
-            Self::VersionMismatch => "version_mismatch",
-            Self::SingleTypeAlreadyExists => "single_type_already_exists",
-            Self::GenericConflict => "generic_conflict",
-        }
-    }
-}
-
-impl std::fmt::Display for ConflictCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
 /// A specific invalid field or parameter description within a validation error.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InvalidParam {
@@ -55,76 +38,6 @@ pub struct InvalidParam {
     pub reason: String,
     /// Machine-readable code for the specific parameter violation.
     pub code: String,
-}
-
-impl InvalidParam {
-    #[must_use]
-    pub fn new(
-        name: impl Into<String>,
-        reason: impl Into<String>,
-        code: impl Into<String>,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            reason: reason.into(),
-            code: code.into(),
-        }
-    }
-
-    /// Converts a `DomainError` into a structured `InvalidParam` if applicable.
-    #[must_use]
-    pub fn from_domain_error(err: &DomainError) -> Self {
-        match err {
-            DomainError::InvalidFieldValue {
-                attribute_id,
-                reason,
-                ..
-            } => Self::new(
-                attribute_id.to_string(),
-                reason.clone(),
-                "invalid_field_value",
-            ),
-            DomainError::UnknownAttribute(attr_id) => Self::new(
-                attr_id.to_string(),
-                format!("attribute '{attr_id}' is not declared in schema"),
-                "unknown_attribute",
-            ),
-            DomainError::UnknownLocale(locale) => Self::new(
-                "locale",
-                format!("locale '{locale}' is not configured in system locales"),
-                "unknown_locale",
-            ),
-            DomainError::Validation(msg) => {
-                if msg.contains("required") {
-                    Self::new("field", msg.clone(), "required_field_missing")
-                } else {
-                    Self::new("field", msg.clone(), "validation_error")
-                }
-            }
-            other => Self::new("field", other.to_string(), "validation_error"),
-        }
-    }
-}
-
-impl std::fmt::Display for InvalidParam {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.name, self.reason)
-    }
-}
-
-impl std::ops::Deref for InvalidParam {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        &self.reason
-    }
-}
-
-fn format_invalid_params(params: &[InvalidParam]) -> String {
-    params
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("; ")
 }
 
 /// Status of an authenticated user's onboarding access request.
@@ -219,6 +132,70 @@ pub enum ApplicationError {
     /// An internal system failure or unexpected error occurred.
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+impl ConflictCode {
+    /// Returns the static `snake_case` string representation of the conflict code.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::DraftHasPendingEdits => "draft_has_pending_edits",
+            Self::DraftAndPublishDisabled => "draft_and_publish_disabled",
+            Self::AlreadyPublished => "already_published",
+            Self::VersionMismatch => "version_mismatch",
+            Self::SingleTypeAlreadyExists => "single_type_already_exists",
+            Self::GenericConflict => "generic_conflict",
+        }
+    }
+}
+
+impl InvalidParam {
+    #[must_use]
+    pub fn new(
+        name: impl Into<String>,
+        reason: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            reason: reason.into(),
+            code: code.into(),
+        }
+    }
+
+    /// Converts a `DomainError` into a structured `InvalidParam` if applicable.
+    #[must_use]
+    pub fn from_domain_error(err: &DomainError) -> Self {
+        match err {
+            DomainError::InvalidFieldValue {
+                attribute_id,
+                reason,
+                ..
+            } => Self::new(
+                attribute_id.to_string(),
+                reason.clone(),
+                "invalid_field_value",
+            ),
+            DomainError::UnknownAttribute(attr_id) => Self::new(
+                attr_id.to_string(),
+                format!("attribute '{attr_id}' is not declared in schema"),
+                "unknown_attribute",
+            ),
+            DomainError::UnknownLocale(locale) => Self::new(
+                "locale",
+                format!("locale '{locale}' is not configured in system locales"),
+                "unknown_locale",
+            ),
+            DomainError::Validation(msg) => {
+                if msg.contains("required") {
+                    Self::new("field", msg.clone(), "required_field_missing")
+                } else {
+                    Self::new("field", msg.clone(), "validation_error")
+                }
+            }
+            other => Self::new("field", other.to_string(), "validation_error"),
+        }
+    }
 }
 
 impl ApplicationError {
@@ -503,6 +480,41 @@ impl ApplicationError {
             Self::Internal(msg) => (msg.clone(), None, None),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Trait Implementations
+// ---------------------------------------------------------------------------
+
+impl fmt::Display for ConflictCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl fmt::Display for InvalidParam {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.name, self.reason)
+    }
+}
+
+impl Deref for InvalidParam {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.reason
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper Functions
+// ---------------------------------------------------------------------------
+
+fn format_invalid_params(params: &[InvalidParam]) -> String {
+    params
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 const fn status_title(status: u16) -> &'static str {

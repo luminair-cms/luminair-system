@@ -1,8 +1,9 @@
-use indexmap::IndexSet;
-use rust_decimal::Decimal;
 use std::collections::HashSet;
 
-use super::ids::{test_attr_id, test_doc_type_id};
+use indexmap::IndexSet;
+use rust_decimal::Decimal;
+
+use super::ids::{create_attr_id, create_doc_type_id};
 use crate::common::DisplayName;
 use crate::schema::attributes::{
     AttributeId, FieldConstraint, FieldDefinition, RelationDefinition,
@@ -26,16 +27,25 @@ pub struct DocumentTypeBuilder {
     relations: IndexSet<RelationDefinition>,
 }
 
+/// Fluent builder for constructing `FieldDefinition` in tests.
+pub struct FieldDefinitionBuilder {
+    id: AttributeId,
+    field_type: FieldType,
+    unique: bool,
+    required: bool,
+    constraints: HashSet<FieldConstraint>,
+}
+
 impl DocumentTypeBuilder {
     /// Creates a collection-kind DocumentType with default singular and plural names.
     pub fn collection(id: &str) -> Self {
         let plural = format!("{id}s");
         Self {
-            id: test_doc_type_id(id),
+            id: create_doc_type_id(id),
             kind: DocumentKind::Collection,
             title: id.to_string(),
-            singular: test_doc_type_id(id),
-            plural: test_doc_type_id(&plural),
+            singular: create_doc_type_id(id),
+            plural: create_doc_type_id(&plural),
             draft_and_publish: true,
             display_fields: Vec::new(),
             fields: IndexSet::new(),
@@ -46,11 +56,11 @@ impl DocumentTypeBuilder {
     /// Creates a singleton DocumentType.
     pub fn singleton(id: &str) -> Self {
         Self {
-            id: test_doc_type_id(id),
+            id: create_doc_type_id(id),
             kind: DocumentKind::Singleton,
             title: id.to_string(),
-            singular: test_doc_type_id(id),
-            plural: test_doc_type_id(id),
+            singular: create_doc_type_id(id),
+            plural: create_doc_type_id(id),
             draft_and_publish: true,
             display_fields: Vec::new(),
             fields: IndexSet::new(),
@@ -69,12 +79,12 @@ impl DocumentTypeBuilder {
     }
 
     pub fn with_singular_name(mut self, singular: &str) -> Self {
-        self.singular = test_doc_type_id(singular);
+        self.singular = create_doc_type_id(singular);
         self
     }
 
     pub fn with_plural_name(mut self, plural: &str) -> Self {
-        self.plural = test_doc_type_id(plural);
+        self.plural = create_doc_type_id(plural);
         self
     }
 
@@ -119,19 +129,10 @@ impl DocumentTypeBuilder {
     }
 }
 
-/// Fluent builder for constructing `FieldDefinition` in tests.
-pub struct FieldDefinitionBuilder {
-    id: AttributeId,
-    field_type: FieldType,
-    unique: bool,
-    required: bool,
-    constraints: HashSet<FieldConstraint>,
-}
-
 impl FieldDefinitionBuilder {
     pub fn new(name: &str, field_type: FieldType) -> Self {
         Self {
-            id: test_attr_id(name),
+            id: create_attr_id(name),
             field_type,
             unique: false,
             required: true,

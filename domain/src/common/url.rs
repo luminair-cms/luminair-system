@@ -3,10 +3,6 @@ use std::str::FromStr;
 use nutype::nutype;
 use url::Url as ExternalUrl;
 
-fn is_valid_url(s: &str) -> bool {
-    ExternalUrl::from_str(s).is_ok()
-}
-
 #[nutype(
     sanitize(trim),
     validate(predicate = is_valid_url),
@@ -26,6 +22,10 @@ fn is_valid_url(s: &str) -> bool {
     )
 )]
 pub struct Url(String);
+
+fn is_valid_url(s: &str) -> bool {
+    ExternalUrl::from_str(s).is_ok()
+}
 
 #[cfg(test)]
 mod tests {

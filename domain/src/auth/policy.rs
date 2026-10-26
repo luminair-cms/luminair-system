@@ -10,6 +10,28 @@ use crate::errors::DomainError;
 pub struct AccessRequestPolicy;
 
 impl AccessRequestPolicy {
+    /// Guarded factory method for creating a new `AccessRequest`.
+    ///
+    /// This is the primary and only entry point for instantiating an access request.
+    /// It enforces that:
+    /// 1. The user must not already be enrolled (`existing_assignments` must be empty).
+    /// 2. The user must not already have an active (`Pending` or `Approved`) access request.
+    ///
+    /// # Errors
+    /// Returns [`DomainError::UserAlreadyEnrolled`] if already enrolled, or
+    /// [`DomainError::AccessRequestAlreadyActive`] if an active request exists.
+    pub fn create_request(
+        user_id: UserId,
+        email: Option<Email>,
+        name: Option<DisplayName>,
+        existing_assignments: &[UserRoleAssignment],
+        existing_request: Option<&AccessRequest>,
+        now: DateTime<Utc>,
+    ) -> Result<AccessRequest, DomainError> {
+        Self::validate_can_submit(&user_id, existing_assignments, existing_request)?;
+        Ok(AccessRequest::new_unvalidated(user_id, email, name, now))
+    }
+
     /// Validates whether a user is eligible to submit an access request.
     ///
     /// # Domain Invariants:
@@ -39,28 +61,6 @@ impl AccessRequestPolicy {
 
         Ok(())
     }
-
-    /// Guarded factory method for creating a new `AccessRequest`.
-    ///
-    /// This is the primary and only entry point for instantiating an access request.
-    /// It enforces that:
-    /// 1. The user must not already be enrolled (`existing_assignments` must be empty).
-    /// 2. The user must not already have an active (`Pending` or `Approved`) access request.
-    ///
-    /// # Errors
-    /// Returns [`DomainError::UserAlreadyEnrolled`] if already enrolled, or
-    /// [`DomainError::AccessRequestAlreadyActive`] if an active request exists.
-    pub fn create_request(
-        user_id: UserId,
-        email: Option<Email>,
-        name: Option<DisplayName>,
-        existing_assignments: &[UserRoleAssignment],
-        existing_request: Option<&AccessRequest>,
-        now: DateTime<Utc>,
-    ) -> Result<AccessRequest, DomainError> {
-        Self::validate_can_submit(&user_id, existing_assignments, existing_request)?;
-        Ok(AccessRequest::new_unvalidated(user_id, email, name, now))
-    }
 }
 
 #[cfg(test)]
@@ -71,7 +71,7 @@ mod tests {
 
     use crate::auth::AccessRequestStatus;
     use crate::auth::role::{RoleId, UserRoleAssignmentId};
-    use crate::test_support::{fixture_access_request, test_user_id};
+    use crate::test_support::{create_user_id, fixture_access_request};
 
     fn make_test_assignment(user_id: &UserId) -> UserRoleAssignment {
         UserRoleAssignment {
@@ -85,16 +85,16 @@ mod tests {
 
     #[test]
     fn test_can_submit_when_not_enrolled_and_no_prior_request() {
-        let user = test_user_id("new_user");
+        let user = create_user_id("new_user");
         let result = AccessRequestPolicy::validate_can_submit(&user, &[], None);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_can_submit_when_previous_request_was_rejected() {
-        let user = test_user_id("reapplying_user");
+        let user = create_user_id("reapplying_user");
         let (mut req, _, now) = fixture_access_request("reapplying_user");
-        let admin = test_user_id("admin");
+        let admin = create_user_id("admin");
         req.reject(admin, Some("needs more info".into()), now)
             .unwrap();
         assert!(!req.is_active());
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn test_cannot_submit_when_already_enrolled_single_role() {
-        let user = test_user_id("enrolled_user");
+        let user = create_user_id("enrolled_user");
         let assignment = make_test_assignment(&user);
 
         let result = AccessRequestPolicy::validate_can_submit(&user, &[assignment], None);
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_cannot_submit_when_already_enrolled_multiple_roles() {
-        let user = test_user_id("admin_user");
+        let user = create_user_id("admin_user");
         let a1 = make_test_assignment(&user);
         let a2 = make_test_assignment(&user);
 
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_cannot_submit_when_pending_request_exists() {
-        let user = test_user_id("applicant");
+        let user = create_user_id("applicant");
         let (req, _, _) = fixture_access_request("applicant");
         assert!(req.is_active());
 
@@ -143,9 +143,9 @@ mod tests {
 
     #[test]
     fn test_cannot_submit_when_approved_request_exists() {
-        let user = test_user_id("approved_user");
+        let user = create_user_id("approved_user");
         let (mut req, _, now) = fixture_access_request("approved_user");
-        let admin = test_user_id("admin");
+        let admin = create_user_id("admin");
         let role = RoleId::new(Uuid::now_v7());
         req.approve(admin, vec![role], now).unwrap();
         assert!(req.is_active());
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_enrolled_check_takes_precedence_over_active_request() {
-        let user = test_user_id("enrolled_and_requested");
+        let user = create_user_id("enrolled_and_requested");
         let assignment = make_test_assignment(&user);
         let (req, _, _) = fixture_access_request("enrolled_and_requested");
 
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_create_request_success() {
-        let user = test_user_id("valid_applicant");
+        let user = create_user_id("valid_applicant");
         let email = Email::try_new("applicant@example.com").ok();
         let name = DisplayName::try_new("Applicant User").ok();
         let now = Utc::now();
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_create_request_enforces_enrollment_invariants() {
-        let user = test_user_id("enrolled_user");
+        let user = create_user_id("enrolled_user");
         let assignment = make_test_assignment(&user);
         let now = Utc::now();
 

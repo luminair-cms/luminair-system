@@ -2,8 +2,9 @@
 
 use std::path::Path;
 
-use domain::schema::{DocumentType, SchemaRegistry};
 use sqlx::PgPool;
+
+use domain::schema::{DocumentType, SchemaRegistry};
 
 use super::builder::{build_desired_schema, build_document_type_tables};
 use super::diff::{DiffError, MigrationStep, SafetyPolicy, compute_diff};
@@ -84,6 +85,23 @@ pub async fn sync_dynamic_schemas(
     })
 }
 
+fn calculate_step_counts(steps: &[MigrationStep]) -> (usize, usize, usize) {
+    let mut tables = 0;
+    let mut cols = 0;
+    let mut idxs = 0;
+
+    for step in steps {
+        match step {
+            MigrationStep::CreateTable(_) => tables += 1,
+            MigrationStep::AddColumn { .. } => cols += 1,
+            MigrationStep::CreateIndex(_) => idxs += 1,
+            _ => {}
+        }
+    }
+
+    (tables, cols, idxs)
+}
+
 /// Generates all additive DDL statements for all document types in the registry without executing them.
 pub fn generate_ddl_for_registry(registry: &SchemaRegistry) -> Vec<String> {
     let desired = build_desired_schema(registry);
@@ -109,27 +127,6 @@ pub fn generate_ddl_for_document_type(
     let raw_steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap_or_default();
     let plan = plan_migrations(raw_steps);
     plan.steps.iter().map(step_to_sql).collect()
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn calculate_step_counts(steps: &[MigrationStep]) -> (usize, usize, usize) {
-    let mut tables = 0;
-    let mut cols = 0;
-    let mut idxs = 0;
-
-    for step in steps {
-        match step {
-            MigrationStep::CreateTable(_) => tables += 1,
-            MigrationStep::AddColumn { .. } => cols += 1,
-            MigrationStep::CreateIndex(_) => idxs += 1,
-            _ => {}
-        }
-    }
-
-    (tables, cols, idxs)
 }
 
 // ---------------------------------------------------------------------------

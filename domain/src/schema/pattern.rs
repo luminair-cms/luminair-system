@@ -1,7 +1,8 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A validated, pre-compiled regular expression pattern value object.
 /// Equality and hashing are based on the pattern string.

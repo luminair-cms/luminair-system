@@ -18,15 +18,6 @@ pub struct Pagination {
     pub page_size: u32,
 }
 
-impl Default for Pagination {
-    fn default() -> Self {
-        Self {
-            page: 1,
-            page_size: 25,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Page<T> {
     pub items: Vec<T>,
@@ -45,6 +36,15 @@ pub struct FieldFilter {
 /// A mapping of relation attribute to a map of parent instance IDs and their related instances:
 /// `AttributeId` -> (`ParentInstanceId` -> `Vec<RelatedInstance>`)
 pub type RelationMap = HashMap<AttributeId, HashMap<DocumentInstanceId, Vec<DocumentInstance>>>;
+
+impl Default for Pagination {
+    fn default() -> Self {
+        Self {
+            page: 1,
+            page_size: 25,
+        }
+    }
+}
 
 pub trait DocumentInstanceRepository: Send + Sync {
     /// Loads a single document instance by its type, ID, and requested lifecycle view:

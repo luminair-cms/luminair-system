@@ -28,8 +28,31 @@ pub struct ExecutionSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Public DDL Translators & Executor
+// Public Execution & DDL Translators
 // ---------------------------------------------------------------------------
+
+/// Executes a `MigrationPlan` statement-by-statement outside transaction blocks.
+///
+/// # Errors
+/// Returns [`PersistenceError`] if any DDL statement fails execution.
+pub async fn execute_migration_plan(
+    pool: &PgPool,
+    plan: &MigrationPlan,
+) -> Result<ExecutionSummary, PersistenceError> {
+    let mut executed = Vec::new();
+
+    for step in &plan.steps {
+        let sql = step_to_sql(step);
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql.as_str()))
+            .execute(pool)
+            .await?;
+        executed.push(sql);
+    }
+
+    Ok(ExecutionSummary {
+        executed_statements: executed,
+    })
+}
 
 /// Translates a single `MigrationStep` into a PostgreSQL DDL string using `sea-query`.
 #[must_use]
@@ -58,39 +81,6 @@ pub fn step_to_sql(step: &MigrationStep) -> String {
             .to_string(PostgresQueryBuilder),
     }
 }
-
-/// Executes a `MigrationPlan` statement-by-statement outside transaction blocks.
-///
-/// # Errors
-/// Returns [`PersistenceError`] if any DDL statement fails execution.
-pub async fn execute_migration_plan(
-    pool: &PgPool,
-    plan: &MigrationPlan,
-) -> Result<ExecutionSummary, PersistenceError> {
-    let mut executed = Vec::new();
-
-    for step in &plan.steps {
-        let sql = step_to_sql(step);
-        sqlx::raw_sql(sqlx::AssertSqlSafe(sql.as_str()))
-            .execute(pool)
-            .await?;
-        executed.push(sql);
-    }
-
-    Ok(ExecutionSummary {
-        executed_statements: executed,
-    })
-}
-
-/// Maps a `ColumnDefinition` to a typed `sea_query::ColumnDef`.
-#[must_use]
-pub fn build_column_def(col: &ColumnDefinition) -> ColumnDef {
-    build_column_def_internal(col, col.is_primary_key)
-}
-
-// ---------------------------------------------------------------------------
-// Private DDL Builders
-// ---------------------------------------------------------------------------
 
 fn build_create_table_sql(table: &TableDefinition) -> String {
     let mut stmt = Table::create();
@@ -145,6 +135,12 @@ fn build_create_index_sql(index: &IndexDefinition) -> String {
     }
 
     stmt.to_string(PostgresQueryBuilder)
+}
+
+/// Maps a `ColumnDefinition` to a typed `sea_query::ColumnDef`.
+#[must_use]
+pub fn build_column_def(col: &ColumnDefinition) -> ColumnDef {
+    build_column_def_internal(col, col.is_primary_key)
 }
 
 fn build_column_def_internal(col: &ColumnDefinition, include_pk: bool) -> ColumnDef {

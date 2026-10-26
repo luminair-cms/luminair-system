@@ -142,3 +142,14 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
      - Implemented `with_occ_retry` catching SQLSTATE `40001` (`serialization_failure`) with randomized exponential backoff and UUIDv4-derived entropy jitter, exhausting to typed `PersistenceError::OccConflictExhausted`.
      - Parameterized wide-table Sea-Query builders (`wide_table.rs`) for visitor queries (`has_pending_draft = FALSE`), pagination, equality filtering (`FieldFilter`), counts, upserts (`ON CONFLICT (id) DO UPDATE SET ...`), and display title lookups.
      - Junction query builders (`junction.rs`) for link inserts (`ON CONFLICT (source_id, target_id) DO UPDATE SET order_index`), deletions, and two-phase batch relation lookups.
+
+
+---
+
+### 2026-10-26 — Top-Down Code Organization & Test ID Helper Renaming (`create_*`)
+
+- **Context**: Code review revealed inconsistencies in top-down newspaper ordering (high-level orchestrators calling helpers defined far below without intermediate ordering) and misleading names in test support helpers (`test_actor_user`, `test_doc_type_id`, `test_locale_id`, `test_user_id`, `test_attr_id`, `test_service_id`, `test_locales` which create validated newtypes rather than asserting test cases).
+- **Decisions**:
+  1. **Strict Step-Down Narrative Ordering**: Reorganized 29 files across `domain`, `application`, and `infrastructure` (including `loader.rs`, `executor.rs`, `builder.rs`, `sync.rs`, and `wide_table.rs`) so that callers are immediately followed by their direct callee helpers, reading like a newspaper from highest level of abstraction to lowest level.
+  2. **Renamed Test ID Constructors**: Renamed test ID helpers in `domain::test_support::ids` to `create_*` (`create_actor_user`, `create_user_id`, `create_service_id`, `create_doc_type_id`, `create_attr_id`, `create_locales`, `create_locale_id`) reflecting their constructor nature while avoiding naming collisions with `#[test]` test runners.
+  3. **Backward Compatibility**: Re-exported `pub use create_* as test_*;` in `domain/src/test_support/ids.rs` for backward compatibility while migrating all internal references across the repository to `create_*`.

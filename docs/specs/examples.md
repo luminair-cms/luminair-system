@@ -44,7 +44,7 @@ use chrono::Utc;
 use domain::auth::ActorId;
 use domain::content::{DocumentInstance, PublicationState};
 use domain::errors::DomainError;
-use domain::test_support::{fixture_document_instance, test_user_id};
+use domain::test_support::{fixture_document_instance, create_user_id};
 
 #[derive(Clone, Copy)]
 enum StartState {
@@ -99,7 +99,7 @@ fn test_document_lifecycle_cases() {
                 inst.content.publication_state = PublicationState::Published {
                     revision: rev,
                     published_at: now,
-                    published_by: ActorId::User(test_user_id("alice")),
+                    published_by: ActorId::User(create_user_id("alice")),
                 };
                 inst.audit.version = 2;
             }
@@ -107,13 +107,13 @@ fn test_document_lifecycle_cases() {
                 inst.content.publication_state = PublicationState::Unpublished {
                     last_published_revision: rev,
                     unpublished_at: now,
-                    unpublished_by: ActorId::User(test_user_id("alice")),
+                    unpublished_by: ActorId::User(create_user_id("alice")),
                 };
                 inst.audit.version = 3;
             }
         }
 
-        let user = ActorId::User(test_user_id("bob"));
+        let user = ActorId::User(create_user_id("bob"));
         let res = match case.action {
             Action::Publish => inst.publish(user, now).map(Expect::PublishOk),
             Action::Unpublish => inst.unpublish(user, now).map(|_| Expect::UnpublishOk),
@@ -215,8 +215,8 @@ async fn ds_01_publish_requires_draft_and_publish_enabled() {
 async fn ds_02_non_owner_denied_without_explicit_role() {
     let (ctx, doc_type) = setup_test_context(true);
     let repo = FakeDocumentInstanceRepository::new();
-    let owner_id = domain::test_support::test_user_id("owner");
-    let stranger_id = domain::test_support::test_user_id("stranger");
+    let owner_id = domain::test_support::create_user_id("owner");
+    let stranger_id = domain::test_support::create_user_id("stranger");
     
     let inst = DocumentInstance::new(doc_type.id.clone(), ActorId::User(owner_id), chrono::Utc::now());
     repo.save_draft(&inst, &IndexMap::new(), &inst.id.to_string()).await.expect("seeded instance");

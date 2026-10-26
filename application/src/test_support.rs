@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use indexmap::IndexMap;
+
 use domain::auth::{
     AccessRequest, AccessRequestId, AccessRequestRepository, AccessRequestStatus, Role, RoleId,
     RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentId, UserRoleAssignmentRepository,
@@ -14,26 +16,6 @@ use domain::content::{
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentTypeId};
-use indexmap::IndexMap;
-
-/// Maps a poisoned `RwLock` to the error a real repository reports for a backend failure.
-fn lock_error<T>(_: std::sync::PoisonError<T>) -> DomainError {
-    DomainError::Storage("in-memory store lock poisoned".into())
-}
-
-/// Returns `true` when `instance` satisfies **all** `filters` (logical AND).
-///
-/// A filter matches when the instance has a scalar field with the filter's attribute whose value
-/// is equal to the filter value. A missing field, `Null` and `LocalizedText` never match.
-/// An empty filter list matches every instance.
-fn matches_filters(instance: &DocumentInstance, filters: &[FieldFilter]) -> bool {
-    filters.iter().all(|f| {
-        matches!(
-            instance.get_field(&f.attribute_id),
-            Some(ContentValue::Scalar(v)) if v == &f.value
-        )
-    })
-}
 
 pub type DisplayMetaMap = HashMap<DocumentInstanceId, (IndexMap<AttributeId, String>, String)>;
 
@@ -48,6 +30,24 @@ pub struct FakeDocumentInstanceRepository {
 }
 
 pub type FakeDocumentSnapshotRepository = FakeDocumentInstanceRepository;
+
+/// Thread-safe in-memory fake for `RoleRepository`.
+#[derive(Debug, Clone, Default)]
+pub struct FakeRoleRepository {
+    pub roles: Arc<RwLock<HashMap<RoleId, Role>>>,
+}
+
+/// Thread-safe in-memory fake for `UserRoleAssignmentRepository`.
+#[derive(Debug, Clone, Default)]
+pub struct FakeUserRoleAssignmentRepository {
+    pub assignments: Arc<RwLock<Vec<UserRoleAssignment>>>,
+}
+
+/// Thread-safe in-memory fake for `AccessRequestRepository`.
+#[derive(Debug, Clone, Default)]
+pub struct FakeAccessRequestRepository {
+    pub requests: Arc<RwLock<HashMap<AccessRequestId, AccessRequest>>>,
+}
 
 impl FakeDocumentInstanceRepository {
     pub fn new() -> Self {
@@ -95,6 +95,35 @@ impl FakeDocumentInstanceRepository {
         Ok(())
     }
 }
+
+impl FakeRoleRepository {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_role(self, role: Role) -> Self {
+        if let Ok(mut guard) = self.roles.write() {
+            guard.insert(role.id, role);
+        }
+        self
+    }
+}
+
+impl FakeUserRoleAssignmentRepository {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl FakeAccessRequestRepository {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trait Implementations
+// ---------------------------------------------------------------------------
 
 impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
     async fn find_by_id(
@@ -523,25 +552,6 @@ impl DocumentSnapshotRepository for FakeDocumentInstanceRepository {
     }
 }
 
-/// Thread-safe in-memory fake for `RoleRepository`.
-#[derive(Debug, Clone, Default)]
-pub struct FakeRoleRepository {
-    pub roles: Arc<RwLock<HashMap<RoleId, Role>>>,
-}
-
-impl FakeRoleRepository {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_role(self, role: Role) -> Self {
-        if let Ok(mut guard) = self.roles.write() {
-            guard.insert(role.id, role);
-        }
-        self
-    }
-}
-
 impl RoleRepository for FakeRoleRepository {
     async fn find_by_id(&self, id: RoleId) -> Result<Option<Role>, DomainError> {
         let store = self.roles.read().map_err(lock_error)?;
@@ -567,18 +577,6 @@ impl RoleRepository for FakeRoleRepository {
         let mut store = self.roles.write().map_err(lock_error)?;
         store.insert(role.id, role.clone());
         Ok(())
-    }
-}
-
-/// Thread-safe in-memory fake for `UserRoleAssignmentRepository`.
-#[derive(Debug, Clone, Default)]
-pub struct FakeUserRoleAssignmentRepository {
-    pub assignments: Arc<RwLock<Vec<UserRoleAssignment>>>,
-}
-
-impl FakeUserRoleAssignmentRepository {
-    pub fn new() -> Self {
-        Self::default()
     }
 }
 
@@ -617,18 +615,6 @@ impl UserRoleAssignmentRepository for FakeUserRoleAssignmentRepository {
         let mut store = self.assignments.write().map_err(lock_error)?;
         store.retain(|a| a.id != id);
         Ok(())
-    }
-}
-
-/// Thread-safe in-memory fake for `AccessRequestRepository`.
-#[derive(Debug, Clone, Default)]
-pub struct FakeAccessRequestRepository {
-    pub requests: Arc<RwLock<HashMap<AccessRequestId, AccessRequest>>>,
-}
-
-impl FakeAccessRequestRepository {
-    pub fn new() -> Self {
-        Self::default()
     }
 }
 
@@ -674,6 +660,29 @@ impl AccessRequestRepository for FakeAccessRequestRepository {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Helper Functions
+// ---------------------------------------------------------------------------
+
+/// Maps a poisoned `RwLock` to the error a real repository reports for a backend failure.
+fn lock_error<T>(_: std::sync::PoisonError<T>) -> DomainError {
+    DomainError::Storage("in-memory store lock poisoned".into())
+}
+
+/// Returns `true` when `instance` satisfies **all** `filters` (logical AND).
+///
+/// A filter matches when the instance has a scalar field with the filter's attribute whose value
+/// is equal to the filter value. A missing field, `Null` and `LocalizedText` never match.
+/// An empty filter list matches every instance.
+fn matches_filters(instance: &DocumentInstance, filters: &[FieldFilter]) -> bool {
+    filters.iter().all(|f| {
+        matches!(
+            instance.get_field(&f.attribute_id),
+            Some(ContentValue::Scalar(v)) if v == &f.value
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     //! Self-tests for the fakes: a fake that silently diverges from the repository contract makes
@@ -684,12 +693,12 @@ mod tests {
     use chrono::{Duration, Utc};
     use domain::auth::ActorId;
     use domain::content::{DomainValue, PrimitiveValue};
-    use domain::test_support::{test_attr_id, test_doc_type_id, test_user_id};
+    use domain::test_support::{create_attr_id, create_doc_type_id, create_user_id};
 
     use super::*;
 
     fn leak_type(name: &str) -> &'static DocumentTypeId {
-        Box::leak(Box::new(test_doc_type_id(name)))
+        Box::leak(Box::new(create_doc_type_id(name)))
     }
 
     fn text(v: &str) -> DomainValue {
@@ -702,14 +711,14 @@ mod tests {
     ) -> DocumentInstance {
         let mut inst = DocumentInstance::new(type_id.clone(), ActorId::System, Utc::now());
         for (name, value) in fields {
-            inst.set_field(test_attr_id(name), value.clone());
+            inst.set_field(create_attr_id(name), value.clone());
         }
         inst
     }
 
     fn filter(attr: &str, value: DomainValue) -> FieldFilter {
         FieldFilter {
-            attribute_id: test_attr_id(attr),
+            attribute_id: create_attr_id(attr),
             value,
         }
     }
@@ -870,7 +879,7 @@ mod tests {
             let _guard = repo.assignments.write().unwrap();
             panic!("poison the lock");
         }));
-        let err = repo.find_by_user(&test_user_id("u")).await.unwrap_err();
+        let err = repo.find_by_user(&create_user_id("u")).await.unwrap_err();
         assert!(matches!(err, DomainError::Storage(_)), "got {err:?}");
 
         let repo = FakeAccessRequestRepository::new();

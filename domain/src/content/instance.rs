@@ -27,6 +27,48 @@ use crate::schema::{AttributeId, DocumentTypeId};
 ))]
 pub struct DocumentInstanceId(Uuid);
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PublicationState {
+    Draft,
+    Published {
+        revision: u32,
+        published_at: DateTime<Utc>,
+        published_by: ActorId,
+    },
+    Modified {
+        live_revision: u32,
+        published_at: DateTime<Utc>,
+        published_by: ActorId,
+        draft_version: u32,
+    },
+    Unpublished {
+        last_published_revision: u32,
+        unpublished_at: DateTime<Utc>,
+        unpublished_by: ActorId,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditTrail {
+    pub created_at: DateTime<Utc>,
+    pub created_by: ActorId,
+    pub updated_at: DateTime<Utc>,
+    pub updated_by: ActorId,
+    pub version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRelation {
+    pub attribute_id: AttributeId,
+    pub target_instance_id: DocumentInstanceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentContent {
+    fields: HashMap<AttributeId, ContentValue>,
+    pub publication_state: PublicationState,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentInstance {
     pub id: DocumentInstanceId,
@@ -35,12 +77,6 @@ pub struct DocumentInstance {
     pub relations: HashMap<AttributeId, Vec<ResolvedRelation>>,
     pub populated_relations: HashMap<AttributeId, Vec<DocumentInstance>>,
     pub audit: AuditTrail,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentContent {
-    fields: HashMap<AttributeId, ContentValue>,
-    pub publication_state: PublicationState,
 }
 
 impl DocumentContent {
@@ -76,42 +112,6 @@ impl DocumentContent {
     pub fn replace_fields(&mut self, fields: HashMap<AttributeId, ContentValue>) {
         self.fields = fields;
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PublicationState {
-    Draft,
-    Published {
-        revision: u32,
-        published_at: DateTime<Utc>,
-        published_by: ActorId,
-    },
-    Modified {
-        live_revision: u32,
-        published_at: DateTime<Utc>,
-        published_by: ActorId,
-        draft_version: u32,
-    },
-    Unpublished {
-        last_published_revision: u32,
-        unpublished_at: DateTime<Utc>,
-        unpublished_by: ActorId,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuditTrail {
-    pub created_at: DateTime<Utc>,
-    pub created_by: ActorId,
-    pub updated_at: DateTime<Utc>,
-    pub updated_by: ActorId,
-    pub version: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedRelation {
-    pub attribute_id: AttributeId,
-    pub target_instance_id: DocumentInstanceId,
 }
 
 impl DocumentInstance {
@@ -403,13 +403,13 @@ mod tests {
     use super::*;
     use crate::content::header::{SnapshotId, SnapshotReason};
     use crate::content::values::{DomainValue, PrimitiveValue};
-    use crate::test_support::{test_attr_id, test_doc_type_id, test_user_id};
+    use crate::test_support::{create_attr_id, create_doc_type_id, create_user_id};
     use chrono::Duration;
 
     fn make_test_instance() -> (DocumentInstance, UserId, DateTime<Utc>) {
-        let user = test_user_id("author-1");
+        let user = create_user_id("author-1");
         let now = Utc::now();
-        let instance = DocumentInstance::new(test_doc_type_id("article"), user.clone(), now);
+        let instance = DocumentInstance::new(create_doc_type_id("article"), user.clone(), now);
         (instance, user, now)
     }
 
@@ -546,7 +546,7 @@ mod tests {
         let t1 = t0 + Duration::seconds(10);
         let t2 = t0 + Duration::seconds(20);
 
-        let title_attr = test_attr_id("title");
+        let title_attr = create_attr_id("title");
         let mut snap_fields = HashMap::new();
         snap_fields.insert(
             title_attr.clone(),
@@ -619,7 +619,7 @@ mod tests {
     #[test]
     fn test_encapsulated_field_accessors() {
         let (mut instance, _, _) = make_test_instance();
-        let title_attr = test_attr_id("title");
+        let title_attr = create_attr_id("title");
         let title_val =
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Rust".into())));
 
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(instance.get_field(&title_attr), None);
 
         let mut new_fields = HashMap::new();
-        let desc_attr = test_attr_id("desc");
+        let desc_attr = create_attr_id("desc");
         let desc_val =
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Desc".into())));
         new_fields.insert(desc_attr.clone(), desc_val.clone());
@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn test_set_relations_deduplicates_target_ids() {
         let (mut instance, _, _) = make_test_instance();
-        let attr = test_attr_id("categories");
+        let attr = create_attr_id("categories");
         let id1 = DocumentInstanceId::new(Uuid::now_v7());
         let id2 = DocumentInstanceId::new(Uuid::now_v7());
 
@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn test_connect_relations_appends_and_deduplicates() {
         let (mut instance, _, _) = make_test_instance();
-        let attr = test_attr_id("tags");
+        let attr = create_attr_id("tags");
         let id1 = DocumentInstanceId::new(Uuid::now_v7());
         let id2 = DocumentInstanceId::new(Uuid::now_v7());
         let id3 = DocumentInstanceId::new(Uuid::now_v7());
@@ -681,7 +681,7 @@ mod tests {
     #[test]
     fn test_disconnect_relations_removes_matching_targets_only() {
         let (mut instance, _, _) = make_test_instance();
-        let attr = test_attr_id("tags");
+        let attr = create_attr_id("tags");
         let id1 = DocumentInstanceId::new(Uuid::now_v7());
         let id2 = DocumentInstanceId::new(Uuid::now_v7());
         let id3 = DocumentInstanceId::new(Uuid::now_v7());
@@ -697,7 +697,7 @@ mod tests {
     #[test]
     fn test_unset_relations_removes_attribute() {
         let (mut instance, _, _) = make_test_instance();
-        let attr = test_attr_id("tags");
+        let attr = create_attr_id("tags");
         let id1 = DocumentInstanceId::new(Uuid::now_v7());
 
         instance.set_relations(attr.clone(), vec![id1]);
@@ -710,7 +710,7 @@ mod tests {
     #[test]
     fn test_is_owned_by_matching_and_non_matching_user() {
         let (instance, owner, _) = make_test_instance();
-        let stranger = test_user_id("stranger");
+        let stranger = create_user_id("stranger");
 
         assert!(instance.is_owned_by(&owner));
         assert!(!instance.is_owned_by(&stranger));
@@ -722,7 +722,7 @@ mod tests {
     fn test_touch_updates_timestamp_actor_and_increments_version() {
         let (mut instance, _, t0) = make_test_instance();
         assert_eq!(instance.audit.version, 1);
-        let editor = test_user_id("editor");
+        let editor = create_user_id("editor");
         let t1 = t0 + Duration::seconds(45);
 
         instance.touch(editor.clone(), t1);
@@ -734,9 +734,9 @@ mod tests {
     #[test]
     fn test_reconstitute_preserves_state() {
         let doc_id = DocumentInstanceId::new(Uuid::now_v7());
-        let doc_type = test_doc_type_id("article");
+        let doc_type = create_doc_type_id("article");
         let now = Utc::now();
-        let actor = ActorId::User(test_user_id("creator"));
+        let actor = ActorId::User(create_user_id("creator"));
         let audit = AuditTrail {
             created_at: now,
             created_by: actor.clone(),

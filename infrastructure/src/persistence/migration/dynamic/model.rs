@@ -13,30 +13,6 @@ use serde::{Deserialize, Serialize};
 // Schema AST Types
 // ---------------------------------------------------------------------------
 
-/// High-level representation of a relational database schema.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct DatabaseSchema {
-    pub tables: IndexSet<TableDefinition>,
-}
-
-impl DatabaseSchema {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            tables: IndexSet::new(),
-        }
-    }
-
-    #[must_use]
-    pub fn find_table(&self, name: &str) -> Option<&TableDefinition> {
-        self.tables.get(name)
-    }
-
-    pub fn insert_table(&mut self, table: TableDefinition) -> bool {
-        self.tables.insert(table)
-    }
-}
-
 /// The architectural classification of a database table in Luminair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TableKind {
@@ -59,215 +35,6 @@ pub enum ForeignKeyAction {
     NoAction,
 }
 
-/// Definition of a database foreign key constraint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForeignKeyDefinition {
-    pub name: String,
-    pub columns: Vec<String>,
-    pub referenced_table: String,
-    pub referenced_columns: Vec<String>,
-    pub on_delete: ForeignKeyAction,
-    pub on_update: ForeignKeyAction,
-}
-
-impl ForeignKeyDefinition {
-    pub fn new(
-        name: impl Into<String>,
-        columns: Vec<String>,
-        referenced_table: impl Into<String>,
-        referenced_columns: Vec<String>,
-        on_delete: ForeignKeyAction,
-        on_update: ForeignKeyAction,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            columns,
-            referenced_table: referenced_table.into(),
-            referenced_columns,
-            on_delete,
-            on_update,
-        }
-    }
-}
-
-impl PartialEq for ForeignKeyDefinition {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl Eq for ForeignKeyDefinition {}
-
-impl Hash for ForeignKeyDefinition {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-
-impl Borrow<str> for ForeignKeyDefinition {
-    fn borrow(&self) -> &str {
-        &self.name
-    }
-}
-
-/// Definition of a database table.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableDefinition {
-    pub name: String,
-    pub columns: IndexSet<ColumnDefinition>,
-    pub indexes: IndexSet<IndexDefinition>,
-    pub foreign_keys: IndexSet<ForeignKeyDefinition>,
-    pub kind: TableKind,
-    pub is_singleton: bool,
-}
-
-impl TableDefinition {
-    pub fn new(name: impl Into<String>, kind: TableKind, is_singleton: bool) -> Self {
-        Self {
-            name: name.into(),
-            columns: IndexSet::new(),
-            indexes: IndexSet::new(),
-            foreign_keys: IndexSet::new(),
-            kind,
-            is_singleton,
-        }
-    }
-
-    #[must_use]
-    pub fn is_junction(&self) -> bool {
-        self.kind == TableKind::Link
-    }
-
-    #[must_use]
-    pub fn find_column(&self, name: &str) -> Option<&ColumnDefinition> {
-        self.columns.get(name)
-    }
-
-    #[must_use]
-    pub fn find_index(&self, name: &str) -> Option<&IndexDefinition> {
-        self.indexes.get(name)
-    }
-
-    #[must_use]
-    pub fn find_foreign_key(&self, name: &str) -> Option<&ForeignKeyDefinition> {
-        self.foreign_keys.get(name)
-    }
-}
-
-impl PartialEq for TableDefinition {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl Eq for TableDefinition {}
-
-impl Hash for TableDefinition {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-
-impl Borrow<str> for TableDefinition {
-    fn borrow(&self) -> &str {
-        &self.name
-    }
-}
-
-/// Definition of a database column.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ColumnDefinition {
-    pub name: String,
-    pub data_type: SqlColumnType,
-    pub nullable: bool,
-    pub is_primary_key: bool,
-    pub default_value: Option<String>,
-    pub unique: bool,
-}
-
-impl ColumnDefinition {
-    pub fn new(
-        name: impl Into<String>,
-        data_type: SqlColumnType,
-        nullable: bool,
-        is_primary_key: bool,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            data_type,
-            nullable,
-            is_primary_key,
-            default_value: None,
-            unique: false,
-        }
-    }
-}
-
-impl PartialEq for ColumnDefinition {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl Eq for ColumnDefinition {}
-
-impl Hash for ColumnDefinition {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-
-impl Borrow<str> for ColumnDefinition {
-    fn borrow(&self) -> &str {
-        &self.name
-    }
-}
-
-/// Definition of a database index.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexDefinition {
-    pub name: String,
-    pub table_name: String,
-    pub columns: Vec<String>,
-    pub unique: bool,
-}
-
-impl IndexDefinition {
-    pub fn new(
-        name: impl Into<String>,
-        table_name: impl Into<String>,
-        columns: Vec<String>,
-        unique: bool,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            table_name: table_name.into(),
-            columns,
-            unique,
-        }
-    }
-}
-
-impl PartialEq for IndexDefinition {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-impl Eq for IndexDefinition {}
-
-impl Hash for IndexDefinition {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-
-impl Borrow<str> for IndexDefinition {
-    fn borrow(&self) -> &str {
-        &self.name
-    }
-}
-
 /// SQL column data types supported by Luminair and AWS Aurora DSQL.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SqlColumnType {
@@ -283,6 +50,58 @@ pub enum SqlColumnType {
     Timestamptz,
     Jsonb,
 }
+
+/// Definition of a database column.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnDefinition {
+    pub name: String,
+    pub data_type: SqlColumnType,
+    pub nullable: bool,
+    pub is_primary_key: bool,
+    pub default_value: Option<String>,
+    pub unique: bool,
+}
+
+/// Definition of a database index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexDefinition {
+    pub name: String,
+    pub table_name: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+}
+
+/// Definition of a database foreign key constraint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForeignKeyDefinition {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub referenced_table: String,
+    pub referenced_columns: Vec<String>,
+    pub on_delete: ForeignKeyAction,
+    pub on_update: ForeignKeyAction,
+}
+
+/// Definition of a database table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableDefinition {
+    pub name: String,
+    pub columns: IndexSet<ColumnDefinition>,
+    pub indexes: IndexSet<IndexDefinition>,
+    pub foreign_keys: IndexSet<ForeignKeyDefinition>,
+    pub kind: TableKind,
+    pub is_singleton: bool,
+}
+
+/// High-level representation of a relational database schema.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct DatabaseSchema {
+    pub tables: IndexSet<TableDefinition>,
+}
+
+// ---------------------------------------------------------------------------
+// Inherent Implementations
+// ---------------------------------------------------------------------------
 
 impl SqlColumnType {
     /// Formats the column type into standard PostgreSQL DDL syntax.
@@ -340,6 +159,195 @@ impl SqlColumnType {
     }
 }
 
+impl ColumnDefinition {
+    pub fn new(
+        name: impl Into<String>,
+        data_type: SqlColumnType,
+        nullable: bool,
+        is_primary_key: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            data_type,
+            nullable,
+            is_primary_key,
+            default_value: None,
+            unique: false,
+        }
+    }
+}
+
+impl IndexDefinition {
+    pub fn new(
+        name: impl Into<String>,
+        table_name: impl Into<String>,
+        columns: Vec<String>,
+        unique: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            table_name: table_name.into(),
+            columns,
+            unique,
+        }
+    }
+}
+
+impl ForeignKeyDefinition {
+    pub fn new(
+        name: impl Into<String>,
+        columns: Vec<String>,
+        referenced_table: impl Into<String>,
+        referenced_columns: Vec<String>,
+        on_delete: ForeignKeyAction,
+        on_update: ForeignKeyAction,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            columns,
+            referenced_table: referenced_table.into(),
+            referenced_columns,
+            on_delete,
+            on_update,
+        }
+    }
+}
+
+impl TableDefinition {
+    pub fn new(name: impl Into<String>, kind: TableKind, is_singleton: bool) -> Self {
+        Self {
+            name: name.into(),
+            columns: IndexSet::new(),
+            indexes: IndexSet::new(),
+            foreign_keys: IndexSet::new(),
+            kind,
+            is_singleton,
+        }
+    }
+
+    #[must_use]
+    pub fn is_junction(&self) -> bool {
+        self.kind == TableKind::Link
+    }
+
+    #[must_use]
+    pub fn find_column(&self, name: &str) -> Option<&ColumnDefinition> {
+        self.columns.get(name)
+    }
+
+    #[must_use]
+    pub fn find_index(&self, name: &str) -> Option<&IndexDefinition> {
+        self.indexes.get(name)
+    }
+
+    #[must_use]
+    pub fn find_foreign_key(&self, name: &str) -> Option<&ForeignKeyDefinition> {
+        self.foreign_keys.get(name)
+    }
+}
+
+impl DatabaseSchema {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            tables: IndexSet::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn find_table(&self, name: &str) -> Option<&TableDefinition> {
+        self.tables.get(name)
+    }
+
+    pub fn insert_table(&mut self, table: TableDefinition) -> bool {
+        self.tables.insert(table)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trait Implementations
+// ---------------------------------------------------------------------------
+
+impl PartialEq for ColumnDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for ColumnDefinition {}
+
+impl Hash for ColumnDefinition {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+impl Borrow<str> for ColumnDefinition {
+    fn borrow(&self) -> &str {
+        &self.name
+    }
+}
+
+impl PartialEq for IndexDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for IndexDefinition {}
+
+impl Hash for IndexDefinition {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+impl Borrow<str> for IndexDefinition {
+    fn borrow(&self) -> &str {
+        &self.name
+    }
+}
+
+impl PartialEq for ForeignKeyDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for ForeignKeyDefinition {}
+
+impl Hash for ForeignKeyDefinition {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+impl Borrow<str> for ForeignKeyDefinition {
+    fn borrow(&self) -> &str {
+        &self.name
+    }
+}
+
+impl PartialEq for TableDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for TableDefinition {}
+
+impl Hash for TableDefinition {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+impl Borrow<str> for TableDefinition {
+    fn borrow(&self) -> &str {
+        &self.name
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -350,60 +358,58 @@ mod tests {
 
     #[test]
     fn test_table_definition_borrow_lookup() {
-        let mut schema = DatabaseSchema::new();
-        let mut table = TableDefinition::new("articles", TableKind::Entity, false);
-        let col = ColumnDefinition::new("title", SqlColumnType::Text, false, false);
-        table.columns.insert(col);
+        let mut tables = IndexSet::new();
+        let table = TableDefinition::new("articles", TableKind::Entity, false);
+        tables.insert(table);
 
-        schema.insert_table(table);
+        assert!(tables.contains("articles"));
+        assert!(!tables.contains("authors"));
 
-        let found = schema.find_table("articles");
+        let found = tables.get("articles");
         assert!(found.is_some());
         assert_eq!(found.unwrap().name, "articles");
         assert_eq!(found.unwrap().kind, TableKind::Entity);
-
-        let col_found = found.unwrap().find_column("title");
-        assert!(col_found.is_some());
-        assert_eq!(col_found.unwrap().name, "title");
-        assert_eq!(col_found.unwrap().data_type, SqlColumnType::Text);
-
-        assert!(schema.find_table("non_existent").is_none());
+        assert!(!found.unwrap().is_junction());
     }
 
     #[test]
     fn test_index_definition_borrow_lookup() {
-        let mut table = TableDefinition::new("articles", TableKind::Entity, false);
+        let mut indexes = IndexSet::new();
         let idx = IndexDefinition::new(
             "idx_articles_title",
             "articles",
             vec!["title".into()],
             false,
         );
-        table.indexes.insert(idx);
+        indexes.insert(idx);
 
-        assert!(table.find_index("idx_articles_title").is_some());
-        assert!(table.find_index("unknown").is_none());
+        assert!(indexes.contains("idx_articles_title"));
+        assert!(!indexes.contains("idx_other"));
+
+        let found = indexes.get("idx_articles_title");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().table_name, "articles");
     }
 
     #[test]
     fn test_foreign_key_definition_borrow_lookup() {
-        let mut table = TableDefinition::new("articles_tags_links", TableKind::Link, false);
+        let mut fks = IndexSet::new();
         let fk = ForeignKeyDefinition::new(
-            "fk_articles_tags_links_source",
-            vec!["source_id".into()],
-            "articles",
+            "fk_articles_author",
+            vec!["author_id".into()],
+            "authors",
             vec!["id".into()],
             ForeignKeyAction::Cascade,
-            ForeignKeyAction::NoAction,
+            ForeignKeyAction::Cascade,
         );
-        table.foreign_keys.insert(fk);
+        fks.insert(fk);
 
-        assert!(
-            table
-                .find_foreign_key("fk_articles_tags_links_source")
-                .is_some()
-        );
-        assert!(table.find_foreign_key("unknown").is_none());
+        assert!(fks.contains("fk_articles_author"));
+        assert!(!fks.contains("fk_other"));
+
+        let found = fks.get("fk_articles_author");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().referenced_table, "authors");
     }
 
     #[test]
@@ -413,6 +419,7 @@ mod tests {
             SqlColumnType::Varchar(Some(255)).to_sql_string(),
             "VARCHAR(255)"
         );
+        assert_eq!(SqlColumnType::Varchar(None).to_sql_string(), "VARCHAR");
         assert_eq!(SqlColumnType::Text.to_sql_string(), "TEXT");
         assert_eq!(SqlColumnType::SmallInt.to_sql_string(), "SMALLINT");
         assert_eq!(SqlColumnType::Integer.to_sql_string(), "INTEGER");
@@ -434,16 +441,16 @@ mod tests {
             Some(SqlColumnType::Uuid)
         );
         assert_eq!(
-            SqlColumnType::from_information_schema("character varying", Some(255), None, None),
-            Some(SqlColumnType::Varchar(Some(255)))
+            SqlColumnType::from_information_schema("character varying", Some(128), None, None),
+            Some(SqlColumnType::Varchar(Some(128)))
         );
         assert_eq!(
-            SqlColumnType::from_information_schema("numeric", None, Some(10), Some(2)),
-            Some(SqlColumnType::Decimal(10, 2))
+            SqlColumnType::from_information_schema("numeric", None, Some(14), Some(4)),
+            Some(SqlColumnType::Decimal(14, 4))
         );
         assert_eq!(
-            SqlColumnType::from_information_schema("timestamp with time zone", None, None, None),
-            Some(SqlColumnType::Timestamptz)
+            SqlColumnType::from_information_schema("unknown_type", None, None, None),
+            None
         );
     }
 }

@@ -50,16 +50,16 @@ impl SystemContext {
 mod tests {
     use super::*;
     use crate::test_support::{
-        DocumentTypeBuilder, fixture_system_config, test_doc_type_id, test_locales,
+        DocumentTypeBuilder, fixture_system_config, create_doc_type_id, create_locales,
     };
 
     #[test]
     fn test_system_context_delegation() {
-        let type_id = test_doc_type_id("article");
+        let type_id = create_doc_type_id("article");
         let doc_type = DocumentTypeBuilder::collection("article").build();
         let registry = SchemaRegistry::new(vec![doc_type]);
         let config = fixture_system_config();
-        let (en, uk, fr) = test_locales();
+        let (en, uk, fr) = create_locales();
 
         let ctx = SystemContext::new(registry, config);
 

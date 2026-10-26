@@ -71,13 +71,13 @@ mod tests {
     use crate::auth::role::RoleId;
     use crate::schema::DocumentTypeId;
     use crate::test_support::{
-        admin_role, fixture_document_instance, test_doc_type_id, test_user_id,
+        admin_role, create_doc_type_id, create_user_id, fixture_document_instance,
     };
 
     fn make_test_fixture() -> (UserId, UserId, DocumentTypeId, DocumentInstance) {
-        let owner = test_user_id("owner_user");
-        let other = test_user_id("other_user");
-        let type_id = test_doc_type_id("article");
+        let owner = create_user_id("owner_user");
+        let other = create_user_id("other_user");
+        let type_id = create_doc_type_id("article");
         let instance = fixture_document_instance("article", Some("owner_user"));
         (owner, other, type_id, instance)
     }
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn test_can_actor_service_evaluates_rbac() {
         let (_, _, type_id, instance) = make_test_fixture();
-        let service = crate::test_support::test_service_id("export-worker");
+        let service = crate::test_support::create_service_id("export-worker");
         let service_actor = ActorId::Service(service);
 
         // Service has no owner privileges even if instance is present

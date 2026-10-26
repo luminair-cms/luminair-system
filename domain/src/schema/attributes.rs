@@ -75,6 +75,42 @@ pub enum RelationType {
     BelongsToMany,
 }
 
+impl FieldConstraint {
+    #[must_use]
+    pub fn is_applicable_for(&self, ft: &FieldType) -> bool {
+        match self {
+            FieldConstraint::Pattern(_)
+            | FieldConstraint::MinLength(_)
+            | FieldConstraint::MaxLength(_) => matches!(
+                ft,
+                FieldType::Primitive(PrimitiveType::Text | PrimitiveType::Uid)
+                    | FieldType::LocalizedText
+            ),
+            FieldConstraint::MinInteger(_) | FieldConstraint::MaxInteger(_) => {
+                matches!(ft, FieldType::Primitive(PrimitiveType::Integer(_)))
+            }
+            FieldConstraint::MinDecimal(_) | FieldConstraint::MaxDecimal(_) => {
+                matches!(ft, FieldType::Primitive(PrimitiveType::Decimal { .. }))
+            }
+        }
+    }
+}
+
+impl RelationType {
+    #[must_use]
+    pub fn is_owning(&self) -> bool {
+        matches!(self, RelationType::HasOne | RelationType::HasMany)
+    }
+
+    #[must_use]
+    pub fn is_inverse(&self) -> bool {
+        matches!(
+            self,
+            RelationType::BelongsToOne | RelationType::BelongsToMany
+        )
+    }
+}
+
 impl PartialEq for FieldDefinition {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -110,42 +146,6 @@ impl Hash for RelationDefinition {
 impl Borrow<AttributeId> for RelationDefinition {
     fn borrow(&self) -> &AttributeId {
         &self.id
-    }
-}
-
-impl FieldConstraint {
-    #[must_use]
-    pub fn is_applicable_for(&self, ft: &FieldType) -> bool {
-        match self {
-            FieldConstraint::Pattern(_)
-            | FieldConstraint::MinLength(_)
-            | FieldConstraint::MaxLength(_) => matches!(
-                ft,
-                FieldType::Primitive(PrimitiveType::Text | PrimitiveType::Uid)
-                    | FieldType::LocalizedText
-            ),
-            FieldConstraint::MinInteger(_) | FieldConstraint::MaxInteger(_) => {
-                matches!(ft, FieldType::Primitive(PrimitiveType::Integer(_)))
-            }
-            FieldConstraint::MinDecimal(_) | FieldConstraint::MaxDecimal(_) => {
-                matches!(ft, FieldType::Primitive(PrimitiveType::Decimal { .. }))
-            }
-        }
-    }
-}
-
-impl RelationType {
-    #[must_use]
-    pub fn is_owning(&self) -> bool {
-        matches!(self, RelationType::HasOne | RelationType::HasMany)
-    }
-
-    #[must_use]
-    pub fn is_inverse(&self) -> bool {
-        matches!(
-            self,
-            RelationType::BelongsToOne | RelationType::BelongsToMany
-        )
     }
 }
 

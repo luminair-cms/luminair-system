@@ -15,7 +15,7 @@ use super::model::{
 use crate::persistence::error::PersistenceError;
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants & Types
 // ---------------------------------------------------------------------------
 
 /// Internal system and static migration tables excluded from dynamic schema management.
@@ -29,6 +29,19 @@ pub const SYSTEM_TABLES: &[&str] = &[
     "document_drafts",
     "document_snapshots",
 ];
+
+type RawColumnRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<i32>,
+    Option<i32>,
+    Option<i32>,
+);
+
+type RawFkRow = (String, String, String, String, String, String);
 
 // ---------------------------------------------------------------------------
 // Public Introspection Entry Point
@@ -108,17 +121,6 @@ async fn fetch_primary_keys(
     }
     Ok(pk_map)
 }
-
-type RawColumnRow = (
-    String,
-    String,
-    String,
-    String,
-    Option<String>,
-    Option<i32>,
-    Option<i32>,
-    Option<i32>,
-);
 
 async fn fetch_columns(
     pool: &PgPool,
@@ -224,8 +226,6 @@ fn extract_index_columns(idx_def: &str) -> Vec<String> {
     }
     Vec::new()
 }
-
-type RawFkRow = (String, String, String, String, String, String);
 
 async fn fetch_foreign_keys(
     pool: &PgPool,

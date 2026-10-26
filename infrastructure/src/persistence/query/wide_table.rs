@@ -3,57 +3,17 @@
 //! Provides SQL statement construction for published wide table operations:
 //! single-instance reads, visitor pagination queries, filters, counts, and upserts.
 
-use domain::content::ports::{FieldFilter, Pagination};
-use domain::content::values::{DomainValue, PrimitiveValue};
 use sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Order, Query, SelectStatement};
 use uuid::Uuid;
+
+use domain::content::ports::{FieldFilter, Pagination};
+use domain::content::values::{DomainValue, PrimitiveValue};
 
 use crate::persistence::naming::{
     COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES, COL_HAS_PENDING_DRAFT,
     COL_ID, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_REVISION, COL_UPDATED_AT, COL_UPDATED_BY,
     column_name,
 };
-
-// ---------------------------------------------------------------------------
-// Value Translation
-// ---------------------------------------------------------------------------
-
-/// Converts a domain value to a Sea-Query SQL parameter value.
-#[must_use]
-pub fn domain_value_to_sea_value(val: &DomainValue) -> sea_query::Value {
-    match val {
-        DomainValue::Primitive(p) => match p {
-            PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => s.clone().into(),
-            PrimitiveValue::Uuid(u) => (*u).into(),
-            PrimitiveValue::Integer(i) => (*i).into(),
-            PrimitiveValue::Decimal(d) => (*d).into(),
-            PrimitiveValue::Date(d) => (*d).into(),
-            PrimitiveValue::DateTime(dt) => (*dt).into(),
-            PrimitiveValue::Boolean(b) => (*b).into(),
-        },
-        DomainValue::Email(e) => e.as_ref().to_string().into(),
-        DomainValue::Url(u) => u.as_ref().to_string().into(),
-        DomainValue::Json(j) => {
-            let map: serde_json::Map<String, serde_json::Value> = j
-                .iter()
-                .map(|(k, v)| (k.clone(), primitive_value_to_json(v)))
-                .collect();
-            serde_json::Value::Object(map).into()
-        }
-    }
-}
-
-fn primitive_value_to_json(p: &PrimitiveValue) -> serde_json::Value {
-    match p {
-        PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
-        PrimitiveValue::Uuid(u) => serde_json::Value::String(u.to_string()),
-        PrimitiveValue::Integer(i) => serde_json::Value::Number((*i).into()),
-        PrimitiveValue::Decimal(d) => serde_json::Value::String(d.to_string()),
-        PrimitiveValue::Date(d) => serde_json::Value::String(d.to_string()),
-        PrimitiveValue::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339()),
-        PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Public Wide Table Query Builders
@@ -190,6 +150,43 @@ fn apply_field_filters(stmt: &mut SelectStatement, filters: &[FieldFilter]) {
         let col = column_name(&filter.attribute_id);
         let sea_val = domain_value_to_sea_value(&filter.value);
         stmt.and_where(Expr::col(Alias::new(col)).eq(sea_val));
+    }
+}
+
+/// Converts a domain value to a Sea-Query SQL parameter value.
+#[must_use]
+pub fn domain_value_to_sea_value(val: &DomainValue) -> sea_query::Value {
+    match val {
+        DomainValue::Primitive(p) => match p {
+            PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => s.clone().into(),
+            PrimitiveValue::Uuid(u) => (*u).into(),
+            PrimitiveValue::Integer(i) => (*i).into(),
+            PrimitiveValue::Decimal(d) => (*d).into(),
+            PrimitiveValue::Date(d) => (*d).into(),
+            PrimitiveValue::DateTime(dt) => (*dt).into(),
+            PrimitiveValue::Boolean(b) => (*b).into(),
+        },
+        DomainValue::Email(e) => e.as_ref().to_string().into(),
+        DomainValue::Url(u) => u.as_ref().to_string().into(),
+        DomainValue::Json(j) => {
+            let map: serde_json::Map<String, serde_json::Value> = j
+                .iter()
+                .map(|(k, v)| (k.clone(), primitive_value_to_json(v)))
+                .collect();
+            serde_json::Value::Object(map).into()
+        }
+    }
+}
+
+fn primitive_value_to_json(p: &PrimitiveValue) -> serde_json::Value {
+    match p {
+        PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
+        PrimitiveValue::Uuid(u) => serde_json::Value::String(u.to_string()),
+        PrimitiveValue::Integer(i) => serde_json::Value::Number((*i).into()),
+        PrimitiveValue::Decimal(d) => serde_json::Value::String(d.to_string()),
+        PrimitiveValue::Date(d) => serde_json::Value::String(d.to_string()),
+        PrimitiveValue::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339()),
+        PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
     }
 }
 

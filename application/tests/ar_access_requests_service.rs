@@ -16,7 +16,7 @@ use domain::auth::{
 };
 use domain::common::{DisplayName, Email};
 use domain::errors::DomainError;
-use domain::test_support::{admin_role, test_user_id};
+use domain::test_support::{admin_role, create_user_id};
 
 type TestAccessRequestsService = AccessRequestsServiceImpl<
     FakeAccessRequestRepository,
@@ -34,7 +34,7 @@ fn create_test_service() -> TestAccessRequestsService {
 #[tokio::test]
 async fn ar_01_submit_creates_pending_request_for_new_user() {
     let service = create_test_service();
-    let user = test_user_id("user-01");
+    let user = create_user_id("user-01");
 
     let req = service
         .submit(SubmitAccessRequestCommand::new(
@@ -61,7 +61,7 @@ async fn ar_01_submit_creates_pending_request_for_new_user() {
 #[tokio::test]
 async fn ar_02_submit_rejected_if_user_already_enrolled() {
     let service = create_test_service();
-    let user = test_user_id("user-02");
+    let user = create_user_id("user-02");
 
     let assignment = UserRoleAssignment {
         id: UserRoleAssignmentId::new(Uuid::now_v7()),
@@ -85,7 +85,7 @@ async fn ar_02_submit_rejected_if_user_already_enrolled() {
 #[tokio::test]
 async fn ar_03_submit_rejected_if_active_request_exists() {
     let service = create_test_service();
-    let user = test_user_id("user-03");
+    let user = create_user_id("user-03");
 
     service
         .submit(SubmitAccessRequestCommand::new(user.clone(), None, None))
@@ -105,7 +105,7 @@ async fn ar_03_submit_rejected_if_active_request_exists() {
 #[tokio::test]
 async fn ar_04_submit_allowed_if_previous_request_was_rejected() {
     let service = create_test_service();
-    let user = test_user_id("user-04");
+    let user = create_user_id("user-04");
     let admin_caller = CallerContext::system();
 
     let first = service
@@ -134,8 +134,8 @@ async fn ar_04_submit_allowed_if_previous_request_was_rejected() {
 #[tokio::test]
 async fn ar_05_approve_creates_role_assignments_and_sets_status() {
     let service = create_test_service();
-    let user = test_user_id("candidate-05");
-    let admin_user = test_user_id("admin-05");
+    let user = create_user_id("candidate-05");
+    let admin_user = create_user_id("admin-05");
     let admin_caller = CallerContext::new(ActorId::User(admin_user.clone()), vec![admin_role()]);
 
     let r1 = Role {
@@ -190,7 +190,7 @@ async fn ar_05_approve_creates_role_assignments_and_sets_status() {
 #[tokio::test]
 async fn ar_06_approve_rejects_self_approval() {
     let service = create_test_service();
-    let admin_user = test_user_id("admin-06");
+    let admin_user = create_user_id("admin-06");
     let admin_caller = CallerContext::new(ActorId::User(admin_user.clone()), vec![admin_role()]);
 
     let role = Role {
@@ -226,8 +226,8 @@ async fn ar_06_approve_rejects_self_approval() {
 #[tokio::test]
 async fn ar_07_approve_rejects_non_existent_role_id() {
     let service = create_test_service();
-    let user = test_user_id("user-07");
-    let admin_user = test_user_id("admin-07");
+    let user = create_user_id("user-07");
+    let admin_user = create_user_id("admin-07");
     let admin_caller = CallerContext::new(ActorId::User(admin_user), vec![admin_role()]);
 
     let req = service
@@ -260,8 +260,8 @@ async fn ar_07_approve_rejects_non_existent_role_id() {
 #[tokio::test]
 async fn ar_08_reject_records_reason_and_reviewer() {
     let service = create_test_service();
-    let user = test_user_id("user-08");
-    let admin_user = test_user_id("admin-08");
+    let user = create_user_id("user-08");
+    let admin_user = create_user_id("admin-08");
     let admin_caller = CallerContext::new(ActorId::User(admin_user.clone()), vec![admin_role()]);
 
     let req = service
@@ -302,7 +302,7 @@ async fn ar_08_reject_records_reason_and_reviewer() {
 #[tokio::test]
 async fn ar_09_requester_can_read_own_request_without_admin_role() {
     let service = create_test_service();
-    let user_a = test_user_id("user-a-09");
+    let user_a = create_user_id("user-a-09");
     let caller_a = CallerContext::new(ActorId::User(user_a.clone()), vec![]);
 
     let req = service
@@ -322,8 +322,8 @@ async fn ar_09_requester_can_read_own_request_without_admin_role() {
 #[tokio::test]
 async fn ar_10_non_requester_denied_get_without_manage_users_permission() {
     let service = create_test_service();
-    let user_a = test_user_id("user-a-10");
-    let user_b = test_user_id("user-b-10");
+    let user_a = create_user_id("user-a-10");
+    let user_b = create_user_id("user-b-10");
     let caller_b = CallerContext::new(ActorId::User(user_b), vec![]);
 
     let req = service

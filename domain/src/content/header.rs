@@ -44,17 +44,6 @@ pub enum DocumentStatus {
     Unpublished,
 }
 
-impl From<&PublicationState> for DocumentStatus {
-    fn from(state: &PublicationState) -> Self {
-        match state {
-            PublicationState::Draft => DocumentStatus::Draft,
-            PublicationState::Published { .. } => DocumentStatus::Published,
-            PublicationState::Modified { .. } => DocumentStatus::Modified,
-            PublicationState::Unpublished { .. } => DocumentStatus::Unpublished,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentHeader {
     pub id: DocumentInstanceId,
@@ -72,28 +61,6 @@ pub struct DocumentHeader {
     pub updated_by: ActorId,
     pub published_at: Option<DateTime<Utc>>,
     pub published_by: Option<ActorId>,
-}
-
-impl DocumentHeader {
-    /// Enriches this header's `display_values` and `display_title` with a resolved relational target title
-    /// at the exact schema-defined attribute position in `effective_fields`.
-    pub fn enrich_relational_display(
-        &mut self,
-        effective_fields: &[AttributeId],
-        rel_attr: &AttributeId,
-        target_title: &str,
-    ) {
-        let mut rebuilt = IndexMap::with_capacity(effective_fields.len());
-        for field_id in effective_fields {
-            if field_id == rel_attr {
-                rebuilt.insert(field_id.clone(), target_title.to_string());
-            } else if let Some(val) = self.display_values.swap_remove(field_id) {
-                rebuilt.insert(field_id.clone(), val);
-            }
-        }
-        self.display_values = rebuilt;
-        self.display_title = format_display_title(&self.display_values, self.id);
-    }
 }
 
 #[nutype(derive(
@@ -143,6 +110,39 @@ pub struct SnapshotHeader {
     pub reason: SnapshotReason,
 }
 
+impl DocumentHeader {
+    /// Enriches this header's `display_values` and `display_title` with a resolved relational target title
+    /// at the exact schema-defined attribute position in `effective_fields`.
+    pub fn enrich_relational_display(
+        &mut self,
+        effective_fields: &[AttributeId],
+        rel_attr: &AttributeId,
+        target_title: &str,
+    ) {
+        let mut rebuilt = IndexMap::with_capacity(effective_fields.len());
+        for field_id in effective_fields {
+            if field_id == rel_attr {
+                rebuilt.insert(field_id.clone(), target_title.to_string());
+            } else if let Some(val) = self.display_values.swap_remove(field_id) {
+                rebuilt.insert(field_id.clone(), val);
+            }
+        }
+        self.display_values = rebuilt;
+        self.display_title = format_display_title(&self.display_values, self.id);
+    }
+}
+
+impl From<&PublicationState> for DocumentStatus {
+    fn from(state: &PublicationState) -> Self {
+        match state {
+            PublicationState::Draft => DocumentStatus::Draft,
+            PublicationState::Published { .. } => DocumentStatus::Published,
+            PublicationState::Modified { .. } => DocumentStatus::Modified,
+            PublicationState::Unpublished { .. } => DocumentStatus::Unpublished,
+        }
+    }
+}
+
 impl From<&DocumentSnapshot> for SnapshotHeader {
     fn from(s: &DocumentSnapshot) -> Self {
         Self {
@@ -160,12 +160,12 @@ impl From<&DocumentSnapshot> for SnapshotHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{test_attr_id, test_doc_type_id, test_user_id};
+    use crate::test_support::{create_attr_id, create_doc_type_id, create_user_id};
 
     #[test]
     fn test_document_status_from_publication_state() {
         let now = Utc::now();
-        let actor = ActorId::User(test_user_id("alice"));
+        let actor = ActorId::User(create_user_id("alice"));
 
         let draft = PublicationState::Draft;
         assert_eq!(DocumentStatus::from(&draft), DocumentStatus::Draft);
@@ -199,8 +199,8 @@ mod tests {
     #[test]
     fn test_snapshot_header_from_document_snapshot() {
         let now = Utc::now();
-        let actor = ActorId::User(test_user_id("bob"));
-        let doc_type = test_doc_type_id("article");
+        let actor = ActorId::User(create_user_id("bob"));
+        let doc_type = create_doc_type_id("article");
         let doc_id = DocumentInstanceId::new(Uuid::now_v7());
         let snap_id = SnapshotId::new(Uuid::now_v7());
 
@@ -230,11 +230,11 @@ mod tests {
     #[test]
     fn test_enrich_relational_display() {
         let now = Utc::now();
-        let actor = ActorId::User(test_user_id("alice"));
-        let doc_type = test_doc_type_id("article");
+        let actor = ActorId::User(create_user_id("alice"));
+        let doc_type = create_doc_type_id("article");
         let doc_id = DocumentInstanceId::new(Uuid::now_v7());
-        let title_attr = test_attr_id("title");
-        let author_attr = test_attr_id("author");
+        let title_attr = create_attr_id("title");
+        let author_attr = create_attr_id("author");
 
         let mut display_values = IndexMap::new();
         display_values.insert(title_attr.clone(), "My Post".to_string());

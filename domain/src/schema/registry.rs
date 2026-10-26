@@ -105,7 +105,7 @@ mod tests {
     use crate::schema::attributes::RelationDefinition;
     use crate::schema::types::{FieldType, PrimitiveType};
     use crate::test_support::{
-        DocumentTypeBuilder, FieldDefinitionBuilder, test_attr_id, test_doc_type_id, text_field,
+        DocumentTypeBuilder, FieldDefinitionBuilder, create_attr_id, create_doc_type_id, text_field,
     };
 
     #[test]
@@ -131,7 +131,7 @@ mod tests {
 
         // Non-existent lookups return None
         assert!(registry.find_by_name("non-existent").is_none());
-        assert!(registry.get(&test_doc_type_id("missing")).is_none());
+        assert!(registry.get(&create_doc_type_id("missing")).is_none());
     }
 
     #[test]
@@ -148,15 +148,15 @@ mod tests {
     fn test_schema_registry_try_new_valid() {
         let author = DocumentTypeBuilder::collection("author")
             .with_field(text_field("name"))
-            .with_display_fields(vec![test_attr_id("name")])
+            .with_display_fields(vec![create_attr_id("name")])
             .build();
         let article = DocumentTypeBuilder::collection("article")
             .with_field(text_field("title"))
-            .with_display_fields(vec![test_attr_id("title")])
+            .with_display_fields(vec![create_attr_id("title")])
             .with_relation(RelationDefinition {
-                id: test_attr_id("author"),
+                id: create_attr_id("author"),
                 relation_type: RelationType::HasOne,
-                target: test_doc_type_id("author"),
+                target: create_doc_type_id("author"),
             })
             .build();
 
@@ -168,7 +168,7 @@ mod tests {
     fn test_schema_registry_try_new_invalid_display_fields() {
         let article = DocumentTypeBuilder::collection("article")
             .with_field(text_field("title"))
-            .with_display_fields(vec![test_attr_id("missing-field")])
+            .with_display_fields(vec![create_attr_id("missing-field")])
             .build();
 
         let res = SchemaRegistry::try_new(vec![article]);
@@ -183,9 +183,9 @@ mod tests {
         let article = DocumentTypeBuilder::collection("article")
             .with_field(text_field("title"))
             .with_relation(RelationDefinition {
-                id: test_attr_id("author"),
+                id: create_attr_id("author"),
                 relation_type: RelationType::HasOne,
-                target: test_doc_type_id("unregistered-author"),
+                target: create_doc_type_id("unregistered-author"),
             })
             .build();
 

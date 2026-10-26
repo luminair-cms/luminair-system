@@ -14,6 +14,24 @@ pub struct SubmitAccessRequestCommand {
     pub name: Option<DisplayName>,
 }
 
+/// Command to approve a pending access request and assign roles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApproveAccessRequestCommand {
+    /// Identifier of the access request to approve.
+    pub request_id: AccessRequestId,
+    /// Roles to assign to the user upon approval.
+    pub role_ids: Vec<RoleId>,
+}
+
+/// Command to reject a pending access request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectAccessRequestCommand {
+    /// Identifier of the access request to reject.
+    pub request_id: AccessRequestId,
+    /// Optional rejection reason for audit and feedback.
+    pub reason: Option<String>,
+}
+
 impl SubmitAccessRequestCommand {
     #[must_use]
     pub fn new(user_id: UserId, email: Option<Email>, name: Option<DisplayName>) -> Self {
@@ -25,15 +43,6 @@ impl SubmitAccessRequestCommand {
     }
 }
 
-/// Command to approve a pending access request and assign roles.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApproveAccessRequestCommand {
-    /// Identifier of the access request to approve.
-    pub request_id: AccessRequestId,
-    /// Roles to assign to the user upon approval.
-    pub role_ids: Vec<RoleId>,
-}
-
 impl ApproveAccessRequestCommand {
     #[must_use]
     pub fn new(request_id: AccessRequestId, role_ids: Vec<RoleId>) -> Self {
@@ -42,15 +51,6 @@ impl ApproveAccessRequestCommand {
             role_ids,
         }
     }
-}
-
-/// Command to reject a pending access request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RejectAccessRequestCommand {
-    /// Identifier of the access request to reject.
-    pub request_id: AccessRequestId,
-    /// Optional rejection reason for audit and feedback.
-    pub reason: Option<String>,
 }
 
 impl RejectAccessRequestCommand {

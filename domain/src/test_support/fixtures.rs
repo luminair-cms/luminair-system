@@ -1,8 +1,9 @@
-use chrono::{DateTime, Utc};
 use std::collections::HashMap;
+
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::ids::{test_doc_type_id, test_locales, test_user_id};
+use super::ids::{create_doc_type_id, create_locales, create_user_id};
 use crate::auth::access_request::AccessRequest;
 use crate::auth::policy::AccessRequestPolicy;
 use crate::auth::role::{Permission, Role, RoleId};
@@ -15,7 +16,7 @@ use crate::system::config::{SystemConfig, SystemConfigId};
 
 /// Returns a default `SystemConfig` configured with "en" (default) and "uk".
 pub fn fixture_system_config() -> SystemConfig {
-    let (en, uk, _) = test_locales();
+    let (en, uk, _) = create_locales();
     SystemConfig::new(
         SystemConfigId::new(Uuid::now_v7()),
         vec![en.clone(), uk],
@@ -26,16 +27,16 @@ pub fn fixture_system_config() -> SystemConfig {
 
 /// Returns a new `DocumentInstance` in Draft state with audit initialized.
 pub fn fixture_document_instance(type_id: &str, owner_name: Option<&str>) -> DocumentInstance {
-    let doc_type = test_doc_type_id(type_id);
+    let doc_type = create_doc_type_id(type_id);
     let actor = owner_name
-        .map(|n| ActorId::User(test_user_id(n)))
+        .map(|n| ActorId::User(create_user_id(n)))
         .unwrap_or(ActorId::System);
     DocumentInstance::new(doc_type, actor, Utc::now())
 }
 
 /// Returns a pre-built `AccessRequest` in Pending state.
 pub fn fixture_access_request(user_name: &str) -> (AccessRequest, UserId, DateTime<Utc>) {
-    let user = test_user_id(user_name);
+    let user = create_user_id(user_name);
     let email = Email::try_new("test@example.com").ok();
     let name = DisplayName::try_new("Test User").ok();
     let now = Utc::now();

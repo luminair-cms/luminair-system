@@ -3,10 +3,6 @@ use std::str::FromStr;
 use email_address::EmailAddress;
 use nutype::nutype;
 
-fn is_valid_email(s: &str) -> bool {
-    EmailAddress::from_str(s).is_ok()
-}
-
 #[nutype(
     sanitize(trim, lowercase),
     validate(predicate = is_valid_email),
@@ -26,6 +22,10 @@ fn is_valid_email(s: &str) -> bool {
     )
 )]
 pub struct Email(String);
+
+fn is_valid_email(s: &str) -> bool {
+    EmailAddress::from_str(s).is_ok()
+}
 
 #[cfg(test)]
 mod tests {

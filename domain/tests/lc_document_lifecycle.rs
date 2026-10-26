@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use uuid::Uuid;
+
 use domain::auth::ActorId;
 use domain::content::header::{DocumentSnapshot, SnapshotId, SnapshotReason};
 use domain::content::{DocumentInstance, PublicationState};
 use domain::errors::DomainError;
-use domain::test_support::{fixture_document_instance, test_user_id};
-use uuid::Uuid;
+use domain::test_support::{create_doc_type_id, create_user_id, fixture_document_instance};
 
 #[derive(Clone, Copy)]
 enum StartState {
@@ -93,7 +94,7 @@ fn test_document_lifecycle_cases() {
                 inst.content.publication_state = PublicationState::Published {
                     revision: rev,
                     published_at: now,
-                    published_by: ActorId::User(test_user_id("alice")),
+                    published_by: ActorId::User(create_user_id("alice")),
                 };
                 inst.audit.version = 2;
             }
@@ -101,13 +102,13 @@ fn test_document_lifecycle_cases() {
                 inst.content.publication_state = PublicationState::Unpublished {
                     last_published_revision: rev,
                     unpublished_at: now,
-                    unpublished_by: ActorId::User(test_user_id("alice")),
+                    unpublished_by: ActorId::User(create_user_id("alice")),
                 };
                 inst.audit.version = 3;
             }
         }
 
-        let user = ActorId::User(test_user_id("bob"));
+        let user = ActorId::User(create_user_id("bob"));
         let res = match case.action {
             Action::Publish => inst.publish(user, now).map(Expect::PublishOk),
             Action::Unpublish => inst.unpublish(user, now).map(|_| Expect::UnpublishOk),
@@ -138,9 +139,9 @@ fn test_document_lifecycle_cases() {
 #[test]
 fn lc_07_new_instance_defaults() {
     let now = Utc::now();
-    let alice = test_user_id("alice");
+    let alice = create_user_id("alice");
     let inst = DocumentInstance::new(
-        domain::test_support::test_doc_type_id("article"),
+        create_doc_type_id("article"),
         alice.clone(),
         now,
     );
@@ -156,7 +157,7 @@ fn lc_07_new_instance_defaults() {
 #[test]
 fn lc_13_restore_snapshot_on_draft_fails() {
     let now = Utc::now();
-    let alice = test_user_id("alice");
+    let alice = create_user_id("alice");
     let mut inst = fixture_document_instance("article", Some("alice"));
     assert_eq!(inst.audit.version, 1);
 
@@ -187,7 +188,7 @@ fn lc_08_touch_increments_version_and_updates_audit() {
     let t1 = now + chrono::Duration::seconds(10);
     let mut inst = fixture_document_instance("article", Some("alice"));
     let initial_version = inst.audit.version;
-    let bob = test_user_id("bob");
+    let bob = create_user_id("bob");
 
     inst.touch(bob.clone(), t1);
 
@@ -202,7 +203,7 @@ fn lc_09_edit_draft_transitions_to_modified() {
     let t1 = now + chrono::Duration::seconds(10);
     let t2 = now + chrono::Duration::seconds(20);
     let mut inst = fixture_document_instance("article", Some("alice"));
-    let alice = test_user_id("alice");
+    let alice = create_user_id("alice");
 
     inst.publish(alice.clone(), t1).unwrap();
     assert_eq!(inst.audit.version, 2);
@@ -228,7 +229,7 @@ fn lc_10_discard_draft_restores_published() {
     let t1 = now + chrono::Duration::seconds(10);
     let t2 = now + chrono::Duration::seconds(20);
     let mut inst = fixture_document_instance("article", Some("alice"));
-    let alice = test_user_id("alice");
+    let alice = create_user_id("alice");
 
     inst.publish(alice.clone(), t1).unwrap();
     inst.edit_draft(alice, t2);
@@ -262,7 +263,7 @@ fn lc_12_restore_snapshot_transitions_to_modified() {
     let t2 = now + chrono::Duration::seconds(20);
     let t3 = now + chrono::Duration::seconds(30);
     let mut inst = fixture_document_instance("article", Some("alice"));
-    let alice = test_user_id("alice");
+    let alice = create_user_id("alice");
 
     // Rev 1
     inst.publish(alice.clone(), t1).unwrap();

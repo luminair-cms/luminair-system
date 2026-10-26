@@ -56,7 +56,7 @@ impl SystemConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_locales;
+    use crate::test_support::create_locales;
     use uuid::Uuid;
 
     fn test_config_id() -> SystemConfigId {
@@ -65,21 +65,21 @@ mod tests {
 
     #[test]
     fn test_contains_locale_found() {
-        let (en, uk, _) = test_locales();
+        let (en, uk, _) = create_locales();
         let config = SystemConfig::new(test_config_id(), vec![en.clone(), uk.clone()], en).unwrap();
         assert!(config.contains_locale(&uk));
     }
 
     #[test]
     fn test_contains_locale_not_found() {
-        let (en, uk, fr) = test_locales();
+        let (en, uk, fr) = create_locales();
         let config = SystemConfig::new(test_config_id(), vec![en.clone(), uk], en).unwrap();
         assert!(!config.contains_locale(&fr));
     }
 
     #[test]
     fn test_contains_locale_default_included() {
-        let (en, uk, fr) = test_locales();
+        let (en, uk, fr) = create_locales();
         // default_locale 'fr' is not in [en, uk] -> error
         let res = SystemConfig::new(test_config_id(), vec![en.clone(), uk], fr.clone());
         assert!(matches!(res, Err(DomainError::UnknownLocale(loc)) if loc == fr));

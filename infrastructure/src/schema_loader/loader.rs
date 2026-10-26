@@ -52,181 +52,6 @@ pub fn load_schemas_from_dir(
     Ok((system_config, registry))
 }
 
-/// Parses the system configuration from a `system-config.json` string content (no `id` required).
-///
-/// # Errors
-/// Returns [`SchemaLoaderError`] if JSON is malformed or locale configuration is invalid.
-pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
-    let record: SystemConfigRecord =
-        serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
-
-    let default_locale = LocaleId::try_new(record.default_locale).map_err(|e| {
-        SchemaLoaderError::Validation(format!(
-            "invalid defaultLocale '{}': {e}",
-            record.default_locale
-        ))
-    })?;
-
-    let mut available_locales = Vec::with_capacity(record.available_locales.len());
-    for loc in record.available_locales {
-        let loc_id = LocaleId::try_new(loc).map_err(|e| {
-            SchemaLoaderError::Validation(format!("invalid availableLocale '{loc}': {e}"))
-        })?;
-        available_locales.push(loc_id);
-    }
-
-    let id = SystemConfigId::new(uuid::Uuid::now_v7());
-    let config = SystemConfig::new(id, available_locales, default_locale)?;
-    Ok(config)
-}
-
-/// Parses a single document type definition from JSON string content.
-///
-/// # Errors
-/// Returns [`SchemaLoaderError`] if JSON parsing, keyword check, or schema mapping fails.
-#[allow(clippy::mutable_key_type)]
-pub fn parse_document_type(
-    content: &str,
-    file_stem: &str,
-) -> Result<DocumentType, SchemaLoaderError> {
-    validate_file_stem(file_stem)?;
-
-    let record: DocumentRecord =
-        serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
-
-    let info = parse_document_info(&record.info, file_stem)?;
-    let options = parse_document_options(record.options);
-    let (fields, relations) = parse_attributes(record.attributes, file_stem)?;
-
-    Ok(DocumentType {
-        id: info.singular_name.clone(),
-        kind: record.kind.into(),
-        info,
-        options,
-        fields,
-        relations,
-    })
-}
-
-/// Parses a `FieldTypeDto` into a domain `FieldType`.
-///
-/// # Errors
-/// Returns [`SchemaLoaderError::Validation`] if the field type is unrecognized or bounds are invalid.
-pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoaderError> {
-    match dto {
-        FieldTypeDto::Simple(s) => {
-            let lower = s.to_ascii_lowercase();
-            match lower.as_str() {
-                "text" | "string" => Ok(FieldType::Primitive(PrimitiveType::Text)),
-                "localizedtext" | "localized_text" => Ok(FieldType::LocalizedText),
-                "boolean" | "bool" => Ok(FieldType::Primitive(PrimitiveType::Boolean)),
-                "date" => Ok(FieldType::Primitive(PrimitiveType::Date)),
-                "datetime" | "date_time" => Ok(FieldType::Primitive(PrimitiveType::DateTime)),
-                "email" => Ok(FieldType::Email),
-                "url" => Ok(FieldType::Url),
-                "json" => Ok(FieldType::Json),
-                "uid" => Ok(FieldType::Primitive(PrimitiveType::Uid)),
-                "uuid" => Ok(FieldType::Primitive(PrimitiveType::Uuid)),
-                "int16" | "short" | "int32" | "integer" | "int64" | "long" => {
-                    let size = parse_integer_size(&lower)?;
-                    Ok(FieldType::Primitive(PrimitiveType::Integer(size)))
-                }
-                "decimal" => Ok(FieldType::Primitive(PrimitiveType::Decimal {
-                    precision: 10,
-                    scale: 2,
-                })),
-                unknown => Err(SchemaLoaderError::Validation(format!(
-                    "unrecognized field type '{unknown}'"
-                ))),
-            }
-        }
-        FieldTypeDto::Integer { integer } => {
-            let size = parse_integer_size(integer)?;
-            Ok(FieldType::Primitive(PrimitiveType::Integer(size)))
-        }
-        FieldTypeDto::Decimal { decimal } => {
-            if decimal.precision == 0 || decimal.precision > 38 || decimal.scale > decimal.precision
-            {
-                return Err(SchemaLoaderError::Validation(format!(
-                    "invalid decimal bounds: precision {} (must be in 1..=38) and scale {} (must be <= precision)",
-                    decimal.precision, decimal.scale
-                )));
-            }
-            Ok(FieldType::Primitive(PrimitiveType::Decimal {
-                precision: decimal.precision,
-                scale: decimal.scale,
-            }))
-        }
-    }
-}
-
-/// Parses constraint records into domain `FieldConstraint` variants.
-///
-/// # Errors
-/// Returns [`SchemaLoaderError`] if regex compilation or numeric parsing fails.
-#[allow(clippy::mutable_key_type)]
-pub fn parse_constraints(
-    records: &[ConstraintRecord<'_>],
-    field_type: FieldType,
-) -> Result<HashSet<FieldConstraint>, SchemaLoaderError> {
-    let mut constraints = HashSet::new();
-
-    for c in records {
-        if let Some(min_len) = c.min_length {
-            constraints.insert(FieldConstraint::MinLength(min_len));
-        }
-        if let Some(max_len) = c.max_length {
-            constraints.insert(FieldConstraint::MaxLength(max_len));
-        }
-        if let Some(pat) = c.pattern {
-            let pattern = RegexPattern::try_new(pat).map_err(|e| {
-                SchemaLoaderError::Validation(format!("invalid regex pattern '{pat}': {e}"))
-            })?;
-            constraints.insert(FieldConstraint::Pattern(pattern));
-        }
-        if let Some(ref val) = c.min {
-            let (int_val, dec_val) = parse_numeric_bound(val, field_type, "min")?;
-            if let Some(i) = int_val {
-                constraints.insert(FieldConstraint::MinInteger(i));
-            }
-            if let Some(d) = dec_val {
-                constraints.insert(FieldConstraint::MinDecimal(d));
-            }
-        }
-        if let Some(ref val) = c.max {
-            let (int_val, dec_val) = parse_numeric_bound(val, field_type, "max")?;
-            if let Some(i) = int_val {
-                constraints.insert(FieldConstraint::MaxInteger(i));
-            }
-            if let Some(d) = dec_val {
-                constraints.insert(FieldConstraint::MaxDecimal(d));
-            }
-        }
-    }
-
-    Ok(constraints)
-}
-
-/// Parses an integer size identifier into a domain `IntegerSize`.
-/// Supported pairs: `int16`/`short`, `int32`/`integer`, `int64`/`long`.
-///
-/// # Errors
-/// Returns [`SchemaLoaderError::Validation`] if the size string is unrecognized.
-pub fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
-    match s.to_ascii_lowercase().as_str() {
-        "int16" | "short" => Ok(IntegerSize::I16),
-        "int32" | "integer" => Ok(IntegerSize::I32),
-        "int64" | "long" => Ok(IntegerSize::I64),
-        unknown => Err(SchemaLoaderError::Validation(format!(
-            "unrecognized integer size '{unknown}'"
-        ))),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Private Helpers for `load_schemas_from_dir`
-// ---------------------------------------------------------------------------
-
 /// Ensures that the schema directory exists on disk.
 fn ensure_schema_dir_exists(schema_dir: &Path) -> Result<(), SchemaLoaderError> {
     if !schema_dir.exists() {
@@ -263,6 +88,34 @@ fn load_system_config_file(schema_dir: &Path) -> Result<SystemConfig, SchemaLoad
         },
         other => other,
     })
+}
+
+/// Parses the system configuration from a `system-config.json` string content (no `id` required).
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if JSON is malformed or locale configuration is invalid.
+pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
+    let record: SystemConfigRecord =
+        serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
+
+    let default_locale = LocaleId::try_new(record.default_locale).map_err(|e| {
+        SchemaLoaderError::Validation(format!(
+            "invalid defaultLocale '{}': {e}",
+            record.default_locale
+        ))
+    })?;
+
+    let mut available_locales = Vec::with_capacity(record.available_locales.len());
+    for loc in record.available_locales {
+        let loc_id = LocaleId::try_new(loc).map_err(|e| {
+            SchemaLoaderError::Validation(format!("invalid availableLocale '{loc}': {e}"))
+        })?;
+        available_locales.push(loc_id);
+    }
+
+    let id = SystemConfigId::new(uuid::Uuid::now_v7());
+    let config = SystemConfig::new(id, available_locales, default_locale)?;
+    Ok(config)
 }
 
 /// Discovers, reads, and parses all `document-types/*.json` definitions within `schema_dir`.
@@ -326,9 +179,33 @@ fn load_document_type_file(path: &Path) -> Result<DocumentType, SchemaLoaderErro
     })
 }
 
-// ---------------------------------------------------------------------------
-// Private Helpers for `parse_document_type`
-// ---------------------------------------------------------------------------
+/// Parses a single document type definition from JSON string content.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if JSON parsing, keyword check, or schema mapping fails.
+#[allow(clippy::mutable_key_type)]
+pub fn parse_document_type(
+    content: &str,
+    file_stem: &str,
+) -> Result<DocumentType, SchemaLoaderError> {
+    validate_file_stem(file_stem)?;
+
+    let record: DocumentRecord =
+        serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
+
+    let info = parse_document_info(&record.info, file_stem)?;
+    let options = parse_document_options(record.options);
+    let (fields, relations) = parse_attributes(record.attributes, file_stem)?;
+
+    Ok(DocumentType {
+        id: info.singular_name.clone(),
+        kind: record.kind.into(),
+        info,
+        options,
+        fields,
+        relations,
+    })
+}
 
 /// Validates that a file stem is not a reserved SQL keyword.
 fn validate_file_stem(file_stem: &str) -> Result<(), SchemaLoaderError> {
@@ -500,9 +377,120 @@ fn parse_relation_attribute(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Private Helpers for `parse_constraints`
-// ---------------------------------------------------------------------------
+/// Parses a `FieldTypeDto` into a domain `FieldType`.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError::Validation`] if the field type is unrecognized or bounds are invalid.
+pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoaderError> {
+    match dto {
+        FieldTypeDto::Simple(s) => {
+            let lower = s.to_ascii_lowercase();
+            match lower.as_str() {
+                "text" | "string" => Ok(FieldType::Primitive(PrimitiveType::Text)),
+                "localizedtext" | "localized_text" => Ok(FieldType::LocalizedText),
+                "boolean" | "bool" => Ok(FieldType::Primitive(PrimitiveType::Boolean)),
+                "date" => Ok(FieldType::Primitive(PrimitiveType::Date)),
+                "datetime" | "date_time" => Ok(FieldType::Primitive(PrimitiveType::DateTime)),
+                "email" => Ok(FieldType::Email),
+                "url" => Ok(FieldType::Url),
+                "json" => Ok(FieldType::Json),
+                "uid" => Ok(FieldType::Primitive(PrimitiveType::Uid)),
+                "uuid" => Ok(FieldType::Primitive(PrimitiveType::Uuid)),
+                "int16" | "short" | "int32" | "integer" | "int64" | "long" => {
+                    let size = parse_integer_size(&lower)?;
+                    Ok(FieldType::Primitive(PrimitiveType::Integer(size)))
+                }
+                "decimal" => Ok(FieldType::Primitive(PrimitiveType::Decimal {
+                    precision: 10,
+                    scale: 2,
+                })),
+                unknown => Err(SchemaLoaderError::Validation(format!(
+                    "unrecognized field type '{unknown}'"
+                ))),
+            }
+        }
+        FieldTypeDto::Integer { integer } => {
+            let size = parse_integer_size(integer)?;
+            Ok(FieldType::Primitive(PrimitiveType::Integer(size)))
+        }
+        FieldTypeDto::Decimal { decimal } => {
+            if decimal.precision == 0 || decimal.precision > 38 || decimal.scale > decimal.precision
+            {
+                return Err(SchemaLoaderError::Validation(format!(
+                    "invalid decimal bounds: precision {} (must be in 1..=38) and scale {} (must be <= precision)",
+                    decimal.precision, decimal.scale
+                )));
+            }
+            Ok(FieldType::Primitive(PrimitiveType::Decimal {
+                precision: decimal.precision,
+                scale: decimal.scale,
+            }))
+        }
+    }
+}
+
+/// Parses an integer size identifier into a domain `IntegerSize`.
+/// Supported pairs: `int16`/`short`, `int32`/`integer`, `int64`/`long`.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError::Validation`] if the size string is unrecognized.
+pub fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
+    match s.to_ascii_lowercase().as_str() {
+        "int16" | "short" => Ok(IntegerSize::I16),
+        "int32" | "integer" => Ok(IntegerSize::I32),
+        "int64" | "long" => Ok(IntegerSize::I64),
+        unknown => Err(SchemaLoaderError::Validation(format!(
+            "unrecognized integer size '{unknown}'"
+        ))),
+    }
+}
+
+/// Parses constraint records into domain `FieldConstraint` variants.
+///
+/// # Errors
+/// Returns [`SchemaLoaderError`] if regex compilation or numeric parsing fails.
+#[allow(clippy::mutable_key_type)]
+pub fn parse_constraints(
+    records: &[ConstraintRecord<'_>],
+    field_type: FieldType,
+) -> Result<HashSet<FieldConstraint>, SchemaLoaderError> {
+    let mut constraints = HashSet::new();
+
+    for c in records {
+        if let Some(min_len) = c.min_length {
+            constraints.insert(FieldConstraint::MinLength(min_len));
+        }
+        if let Some(max_len) = c.max_length {
+            constraints.insert(FieldConstraint::MaxLength(max_len));
+        }
+        if let Some(pat) = c.pattern {
+            let pattern = RegexPattern::try_new(pat).map_err(|e| {
+                SchemaLoaderError::Validation(format!("invalid regex pattern '{pat}': {e}"))
+            })?;
+            constraints.insert(FieldConstraint::Pattern(pattern));
+        }
+        if let Some(ref val) = c.min {
+            let (int_val, dec_val) = parse_numeric_bound(val, field_type, "min")?;
+            if let Some(i) = int_val {
+                constraints.insert(FieldConstraint::MinInteger(i));
+            }
+            if let Some(d) = dec_val {
+                constraints.insert(FieldConstraint::MinDecimal(d));
+            }
+        }
+        if let Some(ref val) = c.max {
+            let (int_val, dec_val) = parse_numeric_bound(val, field_type, "max")?;
+            if let Some(i) = int_val {
+                constraints.insert(FieldConstraint::MaxInteger(i));
+            }
+            if let Some(d) = dec_val {
+                constraints.insert(FieldConstraint::MaxDecimal(d));
+            }
+        }
+    }
+
+    Ok(constraints)
+}
 
 /// Helper to parse a numeric bound from JSON into integer or decimal constraint values.
 fn parse_numeric_bound(

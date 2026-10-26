@@ -1,9 +1,10 @@
 //! Spec: docs/specs/domain/value-objects.md — generated from behavior specification rules.
 
+use proptest::prelude::*;
+
 use domain::auth::{ActorId, ServiceId, UserId};
 use domain::schema::{AttributeId, DocumentTypeId, RegexPattern};
 use domain::system::LocaleId;
-use proptest::prelude::*;
 
 proptest! {
     #[test]

@@ -38,21 +38,6 @@ pub struct RoleId(Uuid);
 ))]
 pub struct UserRoleAssignmentId(Uuid);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Role {
-    pub id: RoleId,
-    pub name: String,
-    pub description: Option<String>,
-    pub permissions: Vec<Permission>,
-}
-
-impl Role {
-    #[must_use]
-    pub fn has_permission(&self, action: &Permission) -> bool {
-        self.permissions.iter().any(|p| p.matches(action))
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Permission {
     ManageSchema,
@@ -63,6 +48,30 @@ pub enum Permission {
     PublishDocument(Option<DocumentTypeId>),
     ManageRoles,
     ManageUsers,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Role {
+    pub id: RoleId,
+    pub name: String,
+    pub description: Option<String>,
+    pub permissions: Vec<Permission>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserRoleAssignment {
+    pub id: UserRoleAssignmentId,
+    pub user_id: UserId,
+    pub role_id: RoleId,
+    pub granted_at: DateTime<Utc>,
+    pub granted_by: Option<ActorId>, // None = system / bootstrap grant
+}
+
+impl Role {
+    #[must_use]
+    pub fn has_permission(&self, action: &Permission) -> bool {
+        self.permissions.iter().any(|p| p.matches(action))
+    }
 }
 
 impl Permission {
@@ -91,24 +100,15 @@ impl Permission {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserRoleAssignment {
-    pub id: UserRoleAssignmentId,
-    pub user_id: UserId,
-    pub role_id: RoleId,
-    pub granted_at: DateTime<Utc>,
-    pub granted_by: Option<ActorId>, // None = system / bootstrap grant
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_doc_type_id;
+    use crate::test_support::create_doc_type_id;
 
     #[test]
     fn test_permission_matches_wildcard_and_exact() {
-        let type_a = test_doc_type_id("article");
-        let type_b = test_doc_type_id("author");
+        let type_a = create_doc_type_id("article");
+        let type_b = create_doc_type_id("author");
 
         let wildcard = Permission::ReadDocument(None);
         let exact_a = Permission::ReadDocument(Some(type_a));
@@ -130,8 +130,8 @@ mod tests {
 
     #[test]
     fn test_permission_matches_all_variants_wildcards_and_exact() {
-        let doc_type = test_doc_type_id("article");
-        let other_type = test_doc_type_id("author");
+        let doc_type = create_doc_type_id("article");
+        let other_type = create_doc_type_id("author");
 
         // System-level permissions
         assert!(Permission::ManageSchema.matches(&Permission::ManageSchema));
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_role_has_permission() {
-        let doc_type = test_doc_type_id("article");
+        let doc_type = create_doc_type_id("article");
         let role = Role {
             id: RoleId::new(Uuid::now_v7()),
             name: "editor".into(),
