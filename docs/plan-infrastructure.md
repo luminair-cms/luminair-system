@@ -7,7 +7,7 @@
   - Database Persistence & Adapters: [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md)
   - REST API & Authentication: [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md)
   - Canonical API Reference: [`docs/api.md`](./api.md)
-- **Status**: Phases 1–4A Complete (Schema Loader, Persistence Foundation, Repository Adapters, CLI `test`/`dry-run`/`migrate` Modes & Docker Compose) — Ready for Phase 4B (`AppContainer` & Service Mode) and Phase 5 (`auth`)
+- **Status**: Phases 1–6 Complete (Schema Loader, Persistence Foundation, Repository Adapters, CLI `test`/`dry-run`/`migrate` Modes, `AppContainer`, Health Checker, Authentication & Authorization, Generic `HttpState`, Zero-Clone Codecs & REST API) — Ready for Phase 4B.3 / Phase 7 (`RunMode::Service` & Cloud Runtime / DSQL IAM Integration)
 - **Last Updated**: 2026-10-27
 
 ---
@@ -22,10 +22,10 @@ flowchart TD
     P2["Phase 2: Database Persistence Foundation (Complete)<br/>(SchemaNaming cache, static migrations, 9-module dynamic DDL sync, 8-module Sea-Query, OCC)"]
     P3["Phase 3: Repository Adapters (Complete)<br/>(Codecs, Row Mappers, Relations helper, 5 Thin SQLx Repositories)"]
     P4A["Phase 4A: CLI Subsystem & Binary Entry Point (Complete)<br/>(CliConfig, runner: Test / DryRun / Migrate, main.rs, Docker Compose)"]
-    P4B["Phase 4B: Composition Root & Service Mode<br/>(PersistenceContainer, AppContainer, HealthChecker, RunMode::Service)"]
-    P5["Phase 5: Authentication & Authorization<br/>(OIDC JWT, Service Tokens, Shadow Users, Axum CallerContext extractor)"]
-    P6["Phase 6: REST API & Axum HTTP Layer<br/>(ProblemDetails translation, content/schema/auth endpoints, middleware)"]
-    P7["Phase 7: Cloud Runtime & DSQL IAM Integration<br/>(AWS DSQL IAM token rotation, graceful HTTP shutdown)"]
+    P4B["Phase 4B: Composition Root & Health Checker (Steps 4B.1–4B.2 Complete)<br/>(PersistenceContainer, AppContainer, HealthCheckService, ProductionHttpState)"]
+    P5["Phase 5: Authentication & Authorization (Complete)<br/>(OIDC JWT, Service Tokens, Shadow Users, AuthContextResolver, Caller / OnboardingUser)"]
+    P6["Phase 6: REST API & Axum HTTP Layer (Complete)<br/>(Generic HttpState, Has* traits, Zero-Clone Codecs, RFC 9457 ProblemDetails, 23 Endpoints)"]
+    P7["Phase 7: Cloud Runtime & DSQL IAM Integration<br/>(RunMode::Service, AWS DSQL IAM token rotation, graceful HTTP shutdown)"]
 
     P1 --> P2
     P2 --> P3
@@ -145,45 +145,49 @@ flowchart TD
   - `main.rs` entry point with `tracing_subscriber` (stderr) and `ExitCode` handling.
   - Prepared config files (`config/cli/{test,dry-run,migrate}.json`), `docker-compose.yml` profiles (`test`, `dry-run`, `dry-run-offline`, `migrate`), and CLI integration tests (`infrastructure/tests/cli_test.rs`).
 
-#### Phase 4B: Composition Root (`container.rs`), Health Checker & `Service` Mode (Pending)
+#### Phase 4B: Composition Root (`container.rs`), Health Checker & `Service` Mode
 
-- [ ] **Step 4B.1: Composition Root Wiring (`infrastructure/src/container.rs`)**
-  - Assemble `PersistenceContainer` (initializing `&'static SchemaNaming` via `SchemaNaming::from_registry(&context.schema)` and constructing all 5 `Sqlx*Repository` adapters).
-  - Assemble `AppContainer` wiring `DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, and `SystemConfigServiceImpl`.
-- [ ] **Step 4B.2: Health Checker**
-  - Implement `/healthz` (liveness) and `/ready` (readiness via `SELECT 1` on `PgPool`) checks.
+- [x] **Step 4B.1: Composition Root Wiring (`infrastructure/src/container.rs`)**
+  - Assemble `PersistenceContainer` (initializing `&'static SchemaNaming` via `SchemaNaming::from_registry(&context.schema)` and constructing all 5 `Sqlx*Repository` adapters + `SqlxShadowUserRecorder`).
+  - Assemble `AppContainer` wiring `DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`, `SqlxHealthChecker`, and `SqlxAuthResolver`, plus `AppContainer::http_state() -> ProductionHttpState`.
+- [x] **Step 4B.2: Health Checker (`infrastructure/src/health.rs`)**
+  - Implement `HealthCheckService`, `SqlxHealthChecker` (`/healthz` liveness and `/ready` readiness via `SELECT 1` on `PgPool`), and `AlwaysHealthyChecker`.
 - [ ] **Step 4B.3: `RunMode::Service` Worker (`infrastructure/src/cli/service.rs`)**
   - Extend `RunMode` and `CliConfig` with HTTP server settings (`host`, `port`, auth configuration) and `RunMode::Service` startup.
 
 ---
 
-### Phase 5: Authentication & Authorization Machinery
+### Phase 5: Authentication & Authorization Machinery (Complete)
 
 > **Detailed Specification**: See [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md#3-authentication-machinery-auth).
 
-- [ ] **Step 5.1: OIDC JWT Verification (`infrastructure/src/auth/oidc.rs`)**
-  - Validate JWT signatures via JWKS, verify `aud`/`iss`, and extract `UserId`.
-- [ ] **Step 5.2: Service API Tokens (`infrastructure/src/auth/service_token.rs`)**
-  - Validate pre-shared service tokens mapping to `ActorId::Service`.
-- [ ] **Step 5.3: Axum CallerContext Extractor (`infrastructure/src/auth/extractor.rs`)**
-  - Middleware loading assigned roles and populating `CallerContext`.
-- [ ] **Step 5.4: Shadow Users (`infrastructure/src/auth/shadow_user.rs`)**
-  - Upsert first-seen OIDC identities into `shadow_users`.
+- [x] **Step 5.1: OIDC JWT Verification (`infrastructure/src/auth/oidc.rs`)**
+  - Validate JWT signatures (HS256, RS256, disabled test mode), verify `aud`/`iss`, and extract `AuthenticatedUser` (`UserId`, `Email`, `DisplayName`) with zero-clone `claims.sub` move.
+- [x] **Step 5.2: Service API Tokens (`infrastructure/src/auth/service_token.rs`)**
+  - Validate pre-shared service tokens mapping to `ActorId::Service` or `ActorId::System` with assigned `Role`s.
+- [x] **Step 5.3: Auth Context Resolver & Axum Extractors (`infrastructure/src/auth/resolver.rs`, `extractor.rs`)**
+  - `AuthContextResolver` port and `DefaultAuthResolver<A, U, R, S>` (`SqlxAuthResolver`) resolving `CallerContext` and onboarding errors (`access_not_requested`, `access_pending`, `access_rejected`).
+  - Axum `FromRequestParts<St>` where `St: HasAuthResolver` for `Caller(pub CallerContext)` and `OnboardingUser(pub AuthenticatedUser)`.
+- [x] **Step 5.4: Shadow Users (`infrastructure/src/auth/shadow_user.rs`)**
+  - `ShadowUserRecorder`, `SqlxShadowUserRecorder` (upserting `shadow_users` with zero-allocation borrowed `&str` bindings), and `NoopShadowUserRecorder`.
 
 ---
 
-### Phase 6: REST API & Axum HTTP Layer
+### Phase 6: REST API & Axum HTTP Layer (Complete)
 
 > **Detailed Specification**: See [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md) and canonical endpoint catalog in [`docs/api.md`](./api.md).
 
-- [ ] **Step 6.1: Problem Details Error Translation (`infrastructure/src/api/error.rs`)**
-  - Map `ApplicationError` variants to standardized HTTP status codes and RFC 9457 `ProblemDetails` payloads.
-- [ ] **Step 6.2: Route Handlers (`infrastructure/src/api/handlers/`)**
-  - Implement content endpoints (CRUD, publish, unpublish, discard draft, restore snapshot, list snapshots, admin headers).
-  - Implement schema discovery and system configuration endpoints.
-  - Implement access requests onboarding endpoints.
-- [ ] **Step 6.3: HTTP Integration Test Suite (`infrastructure/tests/api_test.rs`)**
-  - End-to-end route tests using `axum-test`.
+- [x] **Step 6.1: Generic `HttpState` & Interface-Segregated `Has*` Traits (`infrastructure/src/api/state.rs`)**
+  - Generic `HttpState<D, A, S, C, H, Auth>` holding `&'static SystemContext` and `Arc`-wrapped service traits with manual `Clone` implementation and `HasSystemContext`, `HasAuthResolver`, `HasDocumentsService`, `HasAccessRequestsService`, `HasSchemaService`, `HasSystemConfigService`, and `HasHealthChecker` traits.
+- [x] **Step 6.2: Zero-Clone Codecs, Envelopes, Middleware & RFC 9457 Error Translation (`infrastructure/src/api/`)**
+  - `error.rs`: `ApiError` & `ApiProblemDetails` mapping `ApplicationError` and `AuthError` to `application/problem+json` responses.
+  - `middleware.rs`: `propagate_request_id` (`X-Request-Id`) and `inject_problem_instance` (populating RFC 9457 `instance` URI).
+  - `envelope.rs`: `JsonData<T>`, `CreatedJson<T>`, `PagedJson<T>`, `PaginationMeta`.
+  - `codec/`: Zero-clone consuming request decoding (`decode_document_payload`, `decode_fields_map`, `decode_relations_map`) and streaming `serde::Serialize` response wrappers (`SerFieldsMap`, `SerContentValue`, `DocumentInstanceDto`, `SystemConfigDto<'a>`, etc.).
+- [x] **Step 6.3: Route Handlers & Router Assembly (`infrastructure/src/api/handlers/`, `routes.rs`)**
+  - 12 content endpoints (`handlers/content.rs`), 5 access request endpoints (`handlers/access_requests.rs`), 2 schema endpoints + aliases (`handlers/schema.rs`), 2 system endpoints (`handlers/system.rs`), and 2 health endpoints (`handlers/health.rs`), assembled via `build_router`.
+- [x] **Step 6.4: HTTP Integration Test Suite (`infrastructure/tests/api_test.rs`)**
+  - End-to-end route tests using `axum-test` over generic `HttpState` backed by in-memory fake repositories.
 
 ---
 
@@ -200,6 +204,6 @@ flowchart TD
 
 ## 3. Immediate Next Execution Step
 
-Execute **Phase 4B (Composition Root & Health Checker)** and **Phase 5 (Authentication & Authorization Machinery)**:
-- Step 4B.1–4B.2: Implement `PersistenceContainer`, `AppContainer`, and `HealthChecker` in `infrastructure/src/container.rs`.
-- Step 5.1–5.4: Implement OIDC JWT verification, service token validation, shadow user provisioning, and the Axum `CallerContext` extractor in `infrastructure/src/auth/`.
+Execute **Phase 4B.3 & Phase 7 (HTTP Server `RunMode::Service` & Cloud Runtime / DSQL IAM Integration)**:
+- Step 4B.3 / 7.1: Implement `RunMode::Service` in `infrastructure/src/cli/` to start the Axum HTTP server using `AppContainer::http_state()` and `build_router` with graceful shutdown.
+- Step 7.2: Implement AWS Aurora DSQL connection factory with IAM token rotation.

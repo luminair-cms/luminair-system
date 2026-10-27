@@ -279,11 +279,19 @@ All endpoints accept and return JSON. Authenticate requests using `Authorization
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/system/config` | Get system configuration (default locale, active locales). |
+| `GET` | `/api/v1/system/config` | Get system configuration (`id`, `defaultLocale`, `availableLocales`). |
+| `GET` | `/api/v1/system/locales` | Get default and available system locales (`defaultLocale`, `availableLocales`). |
 
 ### 6.4 Schema & Content Types
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/v1/schema/document-types` | List all registered document types and schemas. |
-| `GET` | `/api/v1/schema/document-types/:id` | Get schema definition for a specific document type. |
+| `GET` | `/api/v1/schema/document-types` (alias `/api/v1/schemas`) | List all registered document types and schemas authorized for the caller. |
+| `GET` | `/api/v1/schema/document-types/:id` (alias `/api/v1/schemas/:id`) | Get schema definition for a specific document type. |
+
+### 6.5 Health & Readiness Probes
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/healthz` | Liveness probe (`200 OK` `{"status": "healthy"}` or `503 Service Unavailable`). |
+| `GET` | `/ready` | Readiness probe verifying database connectivity (`200 OK` or `503 Service Unavailable`). |

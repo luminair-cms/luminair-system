@@ -112,6 +112,11 @@ impl DocumentContent {
     pub fn replace_fields(&mut self, fields: HashMap<AttributeId, ContentValue>) {
         self.fields = fields;
     }
+
+    #[must_use]
+    pub fn into_parts(self) -> (HashMap<AttributeId, ContentValue>, PublicationState) {
+        (self.fields, self.publication_state)
+    }
 }
 
 impl DocumentInstance {

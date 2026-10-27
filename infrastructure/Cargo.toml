@@ -27,4 +27,6 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 axum-test = { workspace = true }
+domain = { workspace = true, features = ["test-support"] }
+application = { workspace = true, features = ["test-support"] }
 

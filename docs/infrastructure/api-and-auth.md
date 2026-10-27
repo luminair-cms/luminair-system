@@ -1,132 +1,176 @@
 # Infrastructure API & Authentication Design
 
-- **Target Modules**: `infrastructure::api`, `infrastructure::auth`
+- **Target Modules**: `infrastructure::api`, `infrastructure::auth`, `infrastructure::health`, `infrastructure::container`
 - **Canonical API Reference**: [`docs/api.md`](../api.md)
 - **Governing RFCs**: [RFC 9457 (Problem Details for HTTP APIs)](https://www.rfc-editor.org/rfc/rfc9457.html)
 - **Status**: Active Architecture Specification
-- **Last Updated**: 2026-10-23
+- **Last Updated**: 2026-10-27
 
 ---
 
-## 1. REST API Driving Adapter Architecture (`api`)
+## 1. Driving Adapter Architecture & Generic `HttpState` Design
 
 The `api` module is the HTTP driving adapter constructed with [Axum](https://github.com/tokio-rs/axum). It decodes incoming HTTP requests, passes control to the application layer via typed commands and `CallerContext`, and formats responses according to [`docs/api.md`](../api.md).
 
+### 1.1 Separation Between Composition Root (`AppContainer`) and Driving State (`HttpState`)
+
+To keep driving adapters (both REST `/api/v1/*` and future GraphQL `/graphql`) strictly decoupled from database infrastructure (`PgPool`, `SchemaNaming`, and `Sqlx*Repository` adapters), `container.rs` wires the concrete repositories into application services at startup and projects a repository-free, trait-generic **`HttpState`**:
+
 ```mermaid
-flowchart LR
-    REQ["HTTP Request"] --> MW["Middleware Pipeline<br/>(Trace ID, Logging, CORS)"]
-    MW --> AUTH["Auth Middleware / Extractor<br/>(OIDC JWT / Service Token -> CallerContext)"]
-    AUTH --> HANDLER["Route Handlers<br/>(api::handlers)"]
-    HANDLER --> APP["Application Service Call<br/>(DocumentsService, AccessRequestsService)"]
-    APP --> RESP["Success: 200/201/204 JSON<br/>Error: RFC 9457 ProblemDetails"]
+flowchart TD
+    subgraph CompositionRoot["Composition Root (container.rs)"]
+        POOL["PgPool"]
+        NAMING["&'static SchemaNaming"]
+        CTX["&'static SystemContext"]
+        REPOS["PersistenceContainer<br/>(5 Sqlx*Repository adapters)"]
+        POOL & NAMING & CTX --> REPOS
+    end
+
+    subgraph AppLayer["Application Services (Trait Implementations)"]
+        DOC_SVC["Arc&lt;D: DocumentsService&gt;"]
+        AR_SVC["Arc&lt;A: AccessRequestsService&gt;"]
+        SCH_SVC["Arc&lt;S: SchemaService&gt;"]
+        CFG_SVC["Arc&lt;C: SystemConfigService&gt;"]
+        HLTH["Arc&lt;H: HealthCheckService&gt;"]
+        AUTH["Arc&lt;Auth: AuthContextResolver&gt;"]
+    end
+
+    REPOS & CTX --> DOC_SVC & AR_SVC & SCH_SVC & CFG_SVC & HLTH & AUTH
+
+    subgraph DrivingLayer["HTTP Driving Layer (Shared by REST & Future GraphQL)"]
+        STATE["HttpState&lt;D, A, S, C, H, Auth&gt;<br/>(No Repositories, No PgPool)"]
+        REST["REST Router (/api/v1/*)"]
+        GQL["Future GraphQL Router (/graphql)"]
+        CODEC["Shared Zero-Clone Content & Relation Codec"]
+    end
+
+    DOC_SVC & AR_SVC & SCH_SVC & CFG_SVC & HLTH & AUTH & CTX --> STATE
+    STATE --> REST
+    STATE -.-> GQL
+    CODEC --> REST
+    CODEC -.-> GQL
 ```
+
+### 1.2 Generic `HttpState` & Interface-Segregated `Has*` State Traits (`api::state`)
+
+`HttpState` is parameterized over the application port traits (`DocumentsService`, `AccessRequestsService`, `SchemaService`, `SystemConfigService`, `HealthCheckService`, `AuthContextResolver`) with defaults pointing to the production SQLx-backed service implementations:
+
+```rust
+pub struct HttpState<
+    D = ProductionDocumentsService,
+    A = ProductionAccessRequestsService,
+    S = SchemaServiceImpl,
+    C = SystemConfigServiceImpl,
+    H = SqlxHealthChecker,
+    Auth = DefaultAuthResolver,
+> {
+    pub context: &'static SystemContext,
+    pub auth: Arc<Auth>,
+    pub documents_service: Arc<D>,
+    pub access_requests_service: Arc<A>,
+    pub schema_service: Arc<S>,
+    pub system_config_service: Arc<C>,
+    pub health_checker: Arc<H>,
+}
+```
+
+- **Manual `Clone` via `Arc::clone`**: Implemented without requiring `D: Clone, A: Clone, ...` bounds on the service traits.
+- **Interface-Segregated `Has*` Traits**: Each handler module constrains only the single service trait it calls (`HasDocumentsService`, `HasAccessRequestsService`, `HasSchemaService`, `HasSystemConfigService`, `HasHealthChecker`, `HasAuthResolver`), keeping handler signatures concise and reusable across REST and GraphQL.
+- **Zero-Database Route Testing**: Because routers and handlers are generic over service traits, `infrastructure/tests/api_test.rs` can instantiate `HttpState` over `application::test_support` in-memory fakes for fast end-to-end HTTP verification via `axum-test`.
 
 ---
 
-## 2. Canonical Error Translation (`api::error`)
+## 2. Zero-Clone & Zero-Allocation Codec Architecture (`api::codec`)
 
-Luminair conforms to RFC 9457 Problem Details for all non-2xx responses. While `application::errors` defines `ApplicationError` and machine-readable `ConflictCode`, the HTTP status code mapping and serialization machinery live in `infrastructure::api::error`:
+To eliminate unnecessary `.clone()` calls and intermediate `serde_json::Value` heap trees during both **request decoding** and **response encoding**, `api::codec` (and `persistence::repositories::codec`) uses three ownership patterns:
+
+1. **Consuming Move-on-Decode (`serde_json::Value` $\rightarrow$ Domain Values)**:
+   - Consumes the incoming `serde_json::Map<String, Value>` by value (`into_iter()`).
+   - Destructures `Value::String(s)` and `Value::Object(map)` by value to move `String` buffers directly into `PrimitiveValue::Text(s)`, `PrimitiveValue::Uid(s)`, `Email::try_new(s)`, `Url::try_new(s)`, `ContentValue::LocalizedText`, and `DomainValue::Json` with **0 string clones**.
+   - Parses `Uuid`, `NaiveDate`, `DateTime<Utc>`, and `Decimal` directly from borrowed `val.as_str()` without allocating temporary `String`s.
+   - Accumulates all field validation errors into `Vec<InvalidParam>` (never truncating at the first error).
+2. **Consuming Move-on-Encode (`From<DomainEntity>` by Value) & Borrowed Static DTOs**:
+   - Consumes owned domain entities returned by application services (`DocumentInstance`, `DocumentHeader`, `DocumentSnapshot`, `SnapshotHeader`, `AccessRequest`, `DocumentType`) by value (`self`), moving all `HashMap`s, `IndexMap`s, `Vec`s, and `String`s into response DTOs with **0 `.clone()` calls**.
+   - Uses borrowed `SystemConfigDto<'a>` for `&'static SystemConfig` (`SystemConfigService::get_config`), borrowing `&'a LocaleId` and `&'a [LocaleId]` directly.
+3. **Streaming `serde::Serialize` Newtype Wrappers (`SerFieldsMap`, `SerContentValue<'a>`)**:
+   - Wraps moved `HashMap<AttributeId, ContentValue>` in `SerFieldsMap` and implements `serde::Serialize` directly via `serializer.collect_map(...)` and `serializer.serialize_str(s)`, streaming borrowed `&str` slices straight into the HTTP response buffer without constructing an intermediate `serde_json::Value` tree.
+
+---
+
+## 3. Canonical Error Translation (`api::error`)
+
+Luminair conforms to RFC 9457 Problem Details for all non-2xx responses. `ApiError` wraps `ApplicationError`, attaches the request URI path (`instance`) when available, and serializes `ProblemDetails` with `Content-Type: application/problem+json`:
 
 ```rust
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use application::errors::{ApplicationError, ProblemDetails};
+use application::errors::ApplicationError;
 
-pub struct ApiError(pub ApplicationError);
-
-impl From<ApplicationError> for ApiError {
-    fn from(err: ApplicationError) -> Self {
-        ApiError(err)
-    }
+pub struct ApiError {
+    pub error: ApplicationError,
+    pub instance: Option<String>,
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match &self.0 {
-            ApplicationError::Unauthorized { .. } => StatusCode::FORBIDDEN,
-            ApplicationError::NotFound { .. } => StatusCode::NOT_FOUND,
-            ApplicationError::Conflict(_) => StatusCode::CONFLICT,
-            ApplicationError::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            ApplicationError::Onboarding(_) => StatusCode::FORBIDDEN,
-            ApplicationError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ApplicationError::Domain(de) => match de {
-                domain::errors::DomainError::DocumentTypeNotFound(_) => StatusCode::NOT_FOUND,
-                domain::errors::DomainError::InvalidStateTransition { .. } => StatusCode::CONFLICT,
-                domain::errors::DomainError::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            },
-        };
-
-        let problem: ProblemDetails = self.0.into();
+        let status = StatusCode::from_u16(self.error.status_code())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let mut problem = self.error.to_problem_details();
         (
             status,
-            [("content-type", "application/problem+json")],
+            [(header::CONTENT_TYPE, "application/problem+json")],
             Json(problem),
-        ).into_response()
+        )
+            .into_response()
     }
 }
 ```
 
 ---
 
-## 3. Authentication Machinery (`auth`)
+## 4. Authentication Machinery (`auth`)
 
-The `auth` module extracts and verifies incoming credentials, translating them into the domain's strongly typed `CallerContext`:
+The `auth` module extracts and verifies incoming credentials, translating them into `AuthenticatedIdentity` (for onboarding) or the domain's strongly typed `CallerContext`:
 
-### 3.1 Authentication Providers
+### 4.1 Authentication Providers & `AuthContextResolver`
 
 1. **OIDC Bearer Tokens (`auth::oidc`)**:
-   - Validates incoming JWT tokens in the `Authorization: Bearer <token>` header.
-   - Verifies signature against cached OIDC JWKS (JSON Web Key Set), validating audience (`aud`), issuer (`iss`), and expiration (`exp`).
-   - Extracts subject (`sub`) as `UserId` and constructs `ActorId::User(user_id)`.
+   - Validates incoming JWT tokens in `Authorization: Bearer <token>`.
+   - Extracts subject (`sub`) as `UserId` alongside optional `email` and `name` claims.
 2. **Service API Tokens (`auth::service_token`)**:
-   - For machine-to-machine integrations and background workers.
-   - Validates pre-shared tokens or signed HMAC tokens mapping to `ActorId::Service(service_id)`.
-3. **Internal System Actor**:
-   - Used for startup hooks, background sync, and migrations: `CallerContext::system()` using `ActorId::System`.
-
-### 3.2 `CallerContext` Axum Extractor (`auth::extractor`)
-
-An Axum request extractor queries the `UserRoleAssignmentRepository` for the actor's assigned roles, assembling the full `CallerContext`:
-
-```rust
-#[derive(Clone)]
-pub struct AuthAppState {
-    pub oidc_validator: Arc<OidcTokenValidator>,
-    pub service_tokens: Arc<ServiceTokenRegistry>,
-    pub assignment_repo: SqlxUserRoleAssignmentRepository,
-    pub role_repo: SqlxRoleRepository,
-}
-```
-
-### 3.3 Shadow Users (`auth::shadow_user`)
-
-When an authenticated user accesses the API for the first time via OIDC, their identity is automatically recorded in the `shadow_users` table with `first_seen` and `last_seen` timestamps.
+   - Validates pre-shared machine-to-machine tokens mapping to `ActorId::Service(service_id)`.
+3. **Shadow Users (`auth::shadow_user`)**:
+   - Records first-seen OIDC identities in `shadow_users` with `first_seen` and `last_seen` timestamps.
+4. **Typestate Axum Extractors (`auth::extractor`)**:
+   - `OnboardingUser(pub AuthenticatedIdentity)`: Used by `POST /api/v1/auth/access-requests` for authenticated OIDC users who do not yet have roles.
+   - `Caller(pub CallerContext)`: Used by all protected endpoints; if an authenticated OIDC user has 0 assigned roles, checks `AccessRequestRepository` and returns the canonical onboarding status error (`403 access_not_requested`, `403 access_pending`, or `403 access_rejected`).
 
 ---
 
-## 4. Route Hierarchy & Endpoint Mapping
+## 5. Route Hierarchy & Endpoint Mapping
 
 Conforming to [`docs/api.md`](../api.md):
 
 ```
 /api/v1
-├── /content/:type_id                         # Find, create, list documents
-│   ├── /:id                                  # Find by ID, update, delete
-│   ├── /:id/publish                          # Publish document
-│   ├── /:id/unpublish                        # Unpublish document
-│   ├── /:id/discard-draft                    # Discard draft edits
-│   ├── /:id/snapshots                        # List revision snapshots
-│   ├── /:id/snapshots/:revision              # Get single snapshot
-│   ├── /:id/snapshots/:revision/restore      # Restore revision into draft
-│   └── /admin-headers                        # Lightweight Admin Studio listing
-├── /schemas                                  # List and inspect registered schemas
-│   └── /:type_id                             # Get document type schema
-├── /auth
-│   └── /access-requests                      # Submit, list, approve, reject onboarding
+├── /content/{type_id}                        # GET (find published/working), POST (create)
+│   ├── /admin/headers (alias /admin-headers) # GET lightweight Admin Studio listing
+│   ├── /{id}                                 # GET (find by ID), PUT (update), DELETE (delete)
+│   ├── /{id}/publish                         # POST publish working draft
+│   ├── /{id}/unpublish                       # POST unpublish document
+│   ├── /{id}/discard-draft                   # POST discard draft edits
+│   ├── /{id}/snapshots                       # GET list revision snapshots
+│   ├── /{id}/snapshots/{revision}            # GET single snapshot
+│   └── /{id}/snapshots/{revision}/restore    # POST restore revision into draft
+├── /schema/document-types (alias /schemas)   # GET list registered document types
+│   └── /{id}                                 # GET document type schema by ID
+├── /auth/access-requests                     # POST submit, GET list pending
+│   ├── /{id}                                 # GET access request status
+│   ├── /{id}/approve                         # POST approve and assign roles
+│   └── /{id}/reject                          # POST reject with reason
 ├── /system
-│   ├── /config                               # Inspect system configuration
-│   └── /locales                              # List active locales
-└── /healthz, /ready                          # Liveness and readiness probes
+│   ├── /config                               # GET system configuration
+│   └── /locales                              # GET active locales
+└── /healthz, /ready                          # GET liveness and readiness probes
 ```

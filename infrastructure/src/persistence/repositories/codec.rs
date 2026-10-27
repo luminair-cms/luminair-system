@@ -442,22 +442,28 @@ pub(crate) fn deserialize_localized_text(
     val: serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<ContentValue, PersistenceError> {
-    let obj = val.as_object().ok_or_else(|| {
-        PersistenceError::Validation(format!(
-            "expected JSON object for localized text field '{attr_id}'"
-        ))
-    })?;
+    let obj = match val {
+        serde_json::Value::Object(map) => map,
+        _ => {
+            return Err(PersistenceError::Validation(format!(
+                "expected JSON object for localized text field '{attr_id}'"
+            )));
+        }
+    };
 
     let mut map = HashMap::with_capacity(obj.len());
     for (loc_str, text_val) in obj {
         let loc = LocaleId::try_new(loc_str)
             .map_err(|e| PersistenceError::Validation(e.to_string()))?;
-        let text = text_val.as_str().ok_or_else(|| {
-            PersistenceError::Validation(format!(
-                "expected string value for locale '{loc}' in field '{attr_id}'"
-            ))
-        })?;
-        map.insert(loc, text.to_string());
+        let text = match text_val {
+            serde_json::Value::String(s) => s,
+            _ => {
+                return Err(PersistenceError::Validation(format!(
+                    "expected string value for locale '{loc}' in field '{attr_id}'"
+                )));
+            }
+        };
+        map.insert(loc, text);
     }
     Ok(ContentValue::LocalizedText(map))
 }
@@ -466,9 +472,7 @@ fn deserialize_email(
     val: serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<ContentValue, PersistenceError> {
-    let s = val.as_str().ok_or_else(|| {
-        PersistenceError::Validation(format!("expected string for email field '{attr_id}'"))
-    })?;
+    let s = parse_string_value(val, attr_id)?;
     let email = Email::try_new(s)
         .map_err(|e| PersistenceError::Validation(e.to_string()))?;
     Ok(ContentValue::Scalar(DomainValue::Email(email)))
@@ -478,9 +482,7 @@ fn deserialize_url(
     val: serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<ContentValue, PersistenceError> {
-    let s = val.as_str().ok_or_else(|| {
-        PersistenceError::Validation(format!("expected string for url field '{attr_id}'"))
-    })?;
+    let s = parse_string_value(val, attr_id)?;
     let url = Url::try_new(s)
         .map_err(|e| PersistenceError::Validation(e.to_string()))?;
     Ok(ContentValue::Scalar(DomainValue::Url(url)))
@@ -490,24 +492,29 @@ pub(crate) fn deserialize_json_map(
     val: serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<ContentValue, PersistenceError> {
-    let obj = val.as_object().ok_or_else(|| {
-        PersistenceError::Validation(format!("expected JSON object for json field '{attr_id}'"))
-    })?;
+    let obj = match val {
+        serde_json::Value::Object(map) => map,
+        _ => {
+            return Err(PersistenceError::Validation(format!(
+                "expected JSON object for json field '{attr_id}'"
+            )));
+        }
+    };
 
     let mut map = HashMap::with_capacity(obj.len());
     for (key, item) in obj {
         let prim = json_value_to_primitive(item, attr_id)?;
-        map.insert(key.clone(), prim);
+        map.insert(key, prim);
     }
     Ok(ContentValue::Scalar(DomainValue::Json(map)))
 }
 
 fn json_value_to_primitive(
-    val: &serde_json::Value,
+    val: serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
     match val {
-        serde_json::Value::Bool(b) => Ok(PrimitiveValue::Boolean(*b)),
+        serde_json::Value::Bool(b) => Ok(PrimitiveValue::Boolean(b)),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Ok(PrimitiveValue::Integer(i))
@@ -517,7 +524,7 @@ fn json_value_to_primitive(
                 Ok(PrimitiveValue::Text(n.to_string()))
             }
         }
-        serde_json::Value::String(s) => Ok(PrimitiveValue::Text(s.clone())),
+        serde_json::Value::String(s) => Ok(PrimitiveValue::Text(s)),
         _ => Err(PersistenceError::Validation(format!(
             "unsupported value type in JSON map for field '{attr_id}'"
         ))),
@@ -532,12 +539,12 @@ fn deserialize_primitive(
     match pt {
         PrimitiveType::Uid => parse_string_value(val, attr_id).map(PrimitiveValue::Uid),
         PrimitiveType::Text => parse_string_value(val, attr_id).map(PrimitiveValue::Text),
-        PrimitiveType::Uuid => parse_uuid_value(val, attr_id),
-        PrimitiveType::Integer(_) => parse_integer_value(val, attr_id),
-        PrimitiveType::Decimal { .. } => parse_decimal_value(val, attr_id),
-        PrimitiveType::Date => parse_date_value(val, attr_id),
-        PrimitiveType::DateTime => parse_datetime_value(val, attr_id),
-        PrimitiveType::Boolean => parse_boolean_value(val, attr_id),
+        PrimitiveType::Uuid => parse_uuid_value(&val, attr_id),
+        PrimitiveType::Integer(_) => parse_integer_value(&val, attr_id),
+        PrimitiveType::Decimal { .. } => parse_decimal_value(&val, attr_id),
+        PrimitiveType::Date => parse_date_value(&val, attr_id),
+        PrimitiveType::DateTime => parse_datetime_value(&val, attr_id),
+        PrimitiveType::Boolean => parse_boolean_value(&val, attr_id),
     }
 }
 
@@ -545,23 +552,28 @@ fn parse_string_value(
     val: serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<String, PersistenceError> {
-    val.as_str()
-        .map(ToString::to_string)
-        .ok_or_else(|| PersistenceError::Validation(format!("expected string for '{attr_id}'")))
+    match val {
+        serde_json::Value::String(s) => Ok(s),
+        _ => Err(PersistenceError::Validation(format!(
+            "expected string for '{attr_id}'"
+        ))),
+    }
 }
 
 fn parse_uuid_value(
-    val: serde_json::Value,
+    val: &serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
-    let s = parse_string_value(val, attr_id)?;
-    Uuid::parse_str(&s)
+    let s = val
+        .as_str()
+        .ok_or_else(|| PersistenceError::Validation(format!("expected string for '{attr_id}'")))?;
+    Uuid::parse_str(s)
         .map(PrimitiveValue::Uuid)
         .map_err(|e| PersistenceError::Validation(format!("invalid UUID in '{attr_id}': {e}")))
 }
 
 fn parse_integer_value(
-    val: serde_json::Value,
+    val: &serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
     if let Some(i) = val.as_i64() {
@@ -579,7 +591,7 @@ fn parse_integer_value(
 }
 
 fn parse_decimal_value(
-    val: serde_json::Value,
+    val: &serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
     if let Some(s) = val.as_str() {
@@ -600,27 +612,31 @@ fn parse_decimal_value(
 }
 
 fn parse_date_value(
-    val: serde_json::Value,
+    val: &serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
-    let s = parse_string_value(val, attr_id)?;
-    NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+    let s = val
+        .as_str()
+        .ok_or_else(|| PersistenceError::Validation(format!("expected string for '{attr_id}'")))?;
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
         .map(PrimitiveValue::Date)
         .map_err(|e| PersistenceError::Validation(format!("invalid date in '{attr_id}': {e}")))
 }
 
 fn parse_datetime_value(
-    val: serde_json::Value,
+    val: &serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
-    let s = parse_string_value(val, attr_id)?;
-    DateTime::parse_from_rfc3339(&s)
+    let s = val
+        .as_str()
+        .ok_or_else(|| PersistenceError::Validation(format!("expected string for '{attr_id}'")))?;
+    DateTime::parse_from_rfc3339(s)
         .map(|dt| PrimitiveValue::DateTime(dt.with_timezone(&Utc)))
         .map_err(|e| PersistenceError::Validation(format!("invalid datetime in '{attr_id}': {e}")))
 }
 
 fn parse_boolean_value(
-    val: serde_json::Value,
+    val: &serde_json::Value,
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
     val.as_bool()
