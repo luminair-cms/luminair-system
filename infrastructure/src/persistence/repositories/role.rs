@@ -186,7 +186,7 @@ async fn execute_insert_role_permissions(
     if permissions.is_empty() {
         return Ok(());
     }
-    let tuples = build_permission_tuples(permissions);
+    let tuples: Vec<(&str, Option<&str>)> = build_permission_tuples(permissions);
     if let Some(stmt) = insert_permissions_batch_query(role_id, &tuples) {
         let (sql, values) = compile_insert(&stmt);
         sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
@@ -199,14 +199,8 @@ async fn execute_insert_role_permissions(
 
 fn build_permission_tuples(
     permissions: &[Permission],
-) -> Vec<(Uuid, &'static str, Option<String>)> {
-    permissions
-        .iter()
-        .map(|perm| {
-            let (action, doc_type) = permission_to_db_tuple(perm);
-            (Uuid::now_v7(), action, doc_type)
-        })
-        .collect()
+) -> Vec<(&'static str, Option<&str>)> {
+    permissions.iter().map(permission_to_db_tuple).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -245,9 +239,9 @@ mod tests {
         ];
         let tuples = build_permission_tuples(&permissions);
         assert_eq!(tuples.len(), 2);
-        assert_eq!(tuples[0].1, "ManageSchema");
-        assert_eq!(tuples[0].2, None);
-        assert_eq!(tuples[1].1, "CreateDocument");
-        assert_eq!(tuples[1].2, None);
+        assert_eq!(tuples[0].0, "ManageSchema");
+        assert_eq!(tuples[0].1, None);
+        assert_eq!(tuples[1].0, "CreateDocument");
+        assert_eq!(tuples[1].1, None);
     }
 }

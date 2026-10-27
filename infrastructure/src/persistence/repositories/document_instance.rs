@@ -434,7 +434,7 @@ async fn fetch_working_by_id(
         .map_err(PersistenceError::from)?;
 
     if let Some(row) = maybe_draft {
-        let status_str: String = row.try_get(COL_STATUS)?;
+        let status_str: &str = row.try_get(COL_STATUS)?;
         let live_meta = if status_str == "modified" {
             fetch_wide_published_meta(pool, type_naming, id).await?
         } else {
@@ -582,7 +582,7 @@ async fn fetch_draft_instances(
 
     let mut items = Vec::with_capacity(rows.len());
     for row in &rows {
-        let status_str: String = row.try_get(COL_STATUS)?;
+        let status_str: &str = row.try_get(COL_STATUS)?;
         let live_meta = if status_str == "modified" {
             let id: Uuid = row.try_get(COL_ID)?;
             fetch_wide_published_meta(pool, type_naming, id).await?
@@ -696,7 +696,7 @@ async fn execute_upsert_draft(
         updated_by_urn: instance.audit.updated_by.to_urn(),
     };
 
-    let stmt = upsert_draft_query(&params);
+    let stmt = upsert_draft_query(params);
     let (sql, values) = compile_insert(&stmt);
     sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
         .execute(conn)

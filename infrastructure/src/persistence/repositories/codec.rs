@@ -29,9 +29,9 @@ pub fn parse_actor_urn(urn: &str) -> Result<ActorId, PersistenceError> {
     ActorId::from_urn(urn).map_err(PersistenceError::Domain)
 }
 
-/// Parses an optional URN string into an optional [`ActorId`].
-pub fn parse_optional_actor_urn(urn: Option<String>) -> Result<Option<ActorId>, PersistenceError> {
-    urn.as_deref().map(parse_actor_urn).transpose()
+/// Parses an optional database URN string into an `Option<ActorId>`.
+pub fn parse_optional_actor_urn(urn: Option<&str>) -> Result<Option<ActorId>, PersistenceError> {
+    urn.map(parse_actor_urn).transpose()
 }
 
 // ---------------------------------------------------------------------------
@@ -115,28 +115,14 @@ pub fn snapshot_reason_from_db_str(s: &str) -> Result<SnapshotReason, Persistenc
 
 /// Decomposes a [`Permission`] into an action string and an optional target document type identifier.
 #[must_use]
-pub fn permission_to_db_tuple(perm: &Permission) -> (&'static str, Option<String>) {
+pub fn permission_to_db_tuple(perm: &Permission) -> (&'static str, Option<&str>) {
     match perm {
         Permission::ManageSchema => ("ManageSchema", None),
-        Permission::CreateDocument(opt) => (
-            "CreateDocument",
-            opt.as_ref().map(|t| t.as_ref().to_string()),
-        ),
-        Permission::ReadDocument(opt) => {
-            ("ReadDocument", opt.as_ref().map(|t| t.as_ref().to_string()))
-        }
-        Permission::UpdateDocument(opt) => (
-            "UpdateDocument",
-            opt.as_ref().map(|t| t.as_ref().to_string()),
-        ),
-        Permission::DeleteDocument(opt) => (
-            "DeleteDocument",
-            opt.as_ref().map(|t| t.as_ref().to_string()),
-        ),
-        Permission::PublishDocument(opt) => (
-            "PublishDocument",
-            opt.as_ref().map(|t| t.as_ref().to_string()),
-        ),
+        Permission::CreateDocument(opt) => ("CreateDocument", opt.as_ref().map(AsRef::as_ref)),
+        Permission::ReadDocument(opt) => ("ReadDocument", opt.as_ref().map(AsRef::as_ref)),
+        Permission::UpdateDocument(opt) => ("UpdateDocument", opt.as_ref().map(AsRef::as_ref)),
+        Permission::DeleteDocument(opt) => ("DeleteDocument", opt.as_ref().map(AsRef::as_ref)),
+        Permission::PublishDocument(opt) => ("PublishDocument", opt.as_ref().map(AsRef::as_ref)),
         Permission::ManageRoles => ("ManageRoles", None),
         Permission::ManageUsers => ("ManageUsers", None),
     }
@@ -329,6 +315,37 @@ pub fn deserialize_fields_json(
 }
 
 // ---------------------------------------------------------------------------
+// Crate-Visible Functions - Value JSON Serialization
+// ---------------------------------------------------------------------------
+
+/// Converts a localized text map into a JSON object keyed by locale ID.
+#[must_use]
+pub(crate) fn localized_text_to_json(map: &HashMap<LocaleId, String>) -> serde_json::Value {
+    let mut obj = serde_json::Map::with_capacity(map.len());
+    for (loc, text) in map {
+        obj.insert(
+            loc.as_ref().to_string(),
+            serde_json::Value::String(text.clone()),
+        );
+    }
+    serde_json::Value::Object(obj)
+}
+
+/// Converts a [`PrimitiveValue`] to its JSON representation.
+#[must_use]
+pub(crate) fn primitive_value_to_json(prim: &PrimitiveValue) -> serde_json::Value {
+    match prim {
+        PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
+        PrimitiveValue::Uuid(u) => serde_json::Value::String(u.to_string()),
+        PrimitiveValue::Integer(i) => serde_json::Value::Number((*i).into()),
+        PrimitiveValue::Decimal(d) => serde_json::Value::String(d.to_string()),
+        PrimitiveValue::Date(d) => serde_json::Value::String(d.format("%Y-%m-%d").to_string()),
+        PrimitiveValue::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339()),
+        PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Private Helpers - Relations
 // ---------------------------------------------------------------------------
 
@@ -372,16 +389,7 @@ fn parse_relation_targets_array(
 fn content_value_to_json(cv: &ContentValue) -> serde_json::Value {
     match cv {
         ContentValue::Null => serde_json::Value::Null,
-        ContentValue::LocalizedText(map) => {
-            let mut obj = serde_json::Map::with_capacity(map.len());
-            for (loc, text) in map {
-                obj.insert(
-                    loc.as_ref().to_string(),
-                    serde_json::Value::String(text.clone()),
-                );
-            }
-            serde_json::Value::Object(obj)
-        }
+        ContentValue::LocalizedText(map) => localized_text_to_json(map),
         ContentValue::Scalar(dv) => domain_value_to_json(dv),
     }
 }
@@ -398,18 +406,6 @@ fn domain_value_to_json(dv: &DomainValue) -> serde_json::Value {
             }
             serde_json::Value::Object(obj)
         }
-    }
-}
-
-fn primitive_value_to_json(prim: &PrimitiveValue) -> serde_json::Value {
-    match prim {
-        PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
-        PrimitiveValue::Uuid(u) => serde_json::Value::String(u.to_string()),
-        PrimitiveValue::Integer(i) => serde_json::Value::Number((*i).into()),
-        PrimitiveValue::Decimal(d) => serde_json::Value::String(d.to_string()),
-        PrimitiveValue::Date(d) => serde_json::Value::String(d.format("%Y-%m-%d").to_string()),
-        PrimitiveValue::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339()),
-        PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
     }
 }
 
@@ -723,7 +719,7 @@ mod tests {
         let actor = parse_actor_urn(urn).unwrap();
         assert_eq!(actor.to_urn(), urn);
 
-        let opt = parse_optional_actor_urn(Some(urn.into())).unwrap();
+        let opt = parse_optional_actor_urn(Some(urn)).unwrap();
         assert_eq!(opt, Some(actor));
 
         let none = parse_optional_actor_urn(None).unwrap();
@@ -781,13 +777,43 @@ mod tests {
         let (action, doc) = permission_to_db_tuple(&p1);
         assert_eq!(action, "ManageSchema");
         assert_eq!(doc, None);
-        assert_eq!(permission_from_db_row(action, doc).unwrap(), p1);
+        assert_eq!(
+            permission_from_db_row(action, doc.map(ToString::to_string)).unwrap(),
+            p1
+        );
 
         let p2 = Permission::CreateDocument(Some(DocumentTypeId::try_new("post").unwrap()));
         let (action2, doc2) = permission_to_db_tuple(&p2);
         assert_eq!(action2, "CreateDocument");
-        assert_eq!(doc2, Some("post".into()));
-        assert_eq!(permission_from_db_row(action2, doc2).unwrap(), p2);
+        assert_eq!(doc2, Some("post"));
+        assert_eq!(
+            permission_from_db_row(action2, doc2.map(ToString::to_string)).unwrap(),
+            p2
+        );
+    }
+
+    #[test]
+    fn test_primitive_value_to_json() {
+        assert_eq!(
+            primitive_value_to_json(&PrimitiveValue::Text("hello".into())),
+            serde_json::Value::String("hello".into())
+        );
+        assert_eq!(
+            primitive_value_to_json(&PrimitiveValue::Integer(42)),
+            serde_json::Value::Number(42.into())
+        );
+        assert_eq!(
+            primitive_value_to_json(&PrimitiveValue::Boolean(true)),
+            serde_json::Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn test_localized_text_to_json() {
+        let mut map = HashMap::new();
+        map.insert(LocaleId::try_new("en-US").unwrap(), "Hello".into());
+        let val = localized_text_to_json(&map);
+        assert_eq!(val, serde_json::json!({"en-US": "Hello"}));
     }
 
     #[test]

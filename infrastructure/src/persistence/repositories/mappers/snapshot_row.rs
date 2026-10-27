@@ -35,10 +35,10 @@ pub fn map_snapshot_header_row(row: &PgRow) -> Result<SnapshotHeader, Persistenc
         PersistenceError::Validation(format!("invalid negative revision '{revision_i32}': {e}"))
     })?;
     let created_at: DateTime<Utc> = row.try_get(COL_CREATED_AT)?;
-    let created_by_str: String = row.try_get(COL_CREATED_BY)?;
-    let created_by = parse_actor_urn(&created_by_str)?;
-    let reason_str: String = row.try_get(COL_REASON)?;
-    let reason = snapshot_reason_from_db_str(&reason_str)?;
+    let created_by_str: &str = row.try_get(COL_CREATED_BY)?;
+    let created_by = parse_actor_urn(created_by_str)?;
+    let reason_str: &str = row.try_get(COL_REASON)?;
+    let reason = snapshot_reason_from_db_str(reason_str)?;
 
     Ok(SnapshotHeader {
         id: SnapshotId::new(id),

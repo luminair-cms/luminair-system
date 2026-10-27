@@ -148,7 +148,7 @@ pub fn delete_permissions_by_role_query(role_id: Uuid) -> DeleteStatement {
 #[must_use]
 pub fn insert_permissions_batch_query(
     role_id: Uuid,
-    permissions: &[(Uuid, &'static str, Option<String>)],
+    permissions: &[(&str, Option<&str>)],
 ) -> Option<InsertStatement> {
     if permissions.is_empty() {
         return None;
@@ -158,12 +158,12 @@ pub fn insert_permissions_batch_query(
     stmt.into_table(TABLE_ROLE_PERMISSIONS_IDEN)
         .columns(PERMISSION_INSERT_COLUMNS);
 
-    for (perm_id, action, doc_type_id) in permissions {
+    for (action, doc_type_id) in permissions {
         stmt.values_panic([
-            (*perm_id).into(),
+            Uuid::now_v7().into(),
             role_id.into(),
             (*action).into(),
-            doc_type_id.clone().into(),
+            (*doc_type_id).into(),
         ]);
     }
 
@@ -286,10 +286,7 @@ pub fn upsert_access_request_query(
     rejection_reason: Option<&str>,
     assigned_roles_json: serde_json::Value,
 ) -> InsertStatement {
-    let email = request.email.as_ref().map(|e| e.as_ref().to_string());
-    let name = request.name.as_ref().map(|n| n.as_ref().to_string());
     let reviewed_by_urn = request.reviewed_by.as_ref().map(ToString::to_string);
-    let rejection_str = rejection_reason.map(ToString::to_string);
 
     let mut stmt = Query::insert();
     stmt.into_table(TABLE_ACCESS_REQUESTS_IDEN)
@@ -297,11 +294,11 @@ pub fn upsert_access_request_query(
         .values_panic([
             (*request.id).into(),
             request.user_id.as_ref().into(),
-            email.into(),
-            name.into(),
+            request.email.as_ref().map(AsRef::as_ref).into(),
+            request.name.as_ref().map(AsRef::as_ref).into(),
             request.requested_at.into(),
             status_str.into(),
-            rejection_str.into(),
+            rejection_reason.into(),
             reviewed_by_urn.into(),
             request.reviewed_at.into(),
             assigned_roles_json.into(),
@@ -391,9 +388,9 @@ mod tests {
 
         assert!(insert_permissions_batch_query(role_id, &[]).is_none());
 
-        let perms = vec![
-            (Uuid::now_v7(), "ManageSchema", None),
-            (Uuid::now_v7(), "ReadDocument", Some("article".to_string())),
+        let perms = [
+            ("ManageSchema", None),
+            ("CreateDocument", Some("article")),
         ];
         let stmt_batch = insert_permissions_batch_query(role_id, &perms).unwrap();
         let unparam_batch = stmt_batch.to_string(PostgresQueryBuilder);

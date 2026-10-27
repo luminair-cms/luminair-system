@@ -102,25 +102,25 @@ pub fn select_drafts_by_type_query(type_id: &DocumentTypeId) -> SelectStatement 
 
 /// Builds an upsert statement into `document_drafts` with `ON CONFLICT (document_type_id, id) DO UPDATE`.
 #[must_use]
-pub fn upsert_draft_query(params: &DraftUpsertParams<'_>) -> InsertStatement {
+pub fn upsert_draft_query(params: DraftUpsertParams<'_>) -> InsertStatement {
     let mut stmt = Query::insert();
     stmt.into_table(TABLE_DOCUMENT_DRAFTS_IDEN)
         .columns(DRAFT_INSERT_COLUMNS)
         .values_panic([
             params.id.into(),
             params.document_type_id.as_ref().into(),
-            params.display_values_json.clone().into(),
+            params.display_values_json.into(),
             params.display_title.into(),
             params.status.into(),
-            params.content_json.clone().into(),
-            params.relations_json.clone().into(),
+            params.content_json.into(),
+            params.relations_json.into(),
             params.schema_version.into(),
             params.version.into(),
             params.last_published_revision.into(),
             params.created_at.into(),
-            params.created_by_urn.clone().into(),
+            params.created_by_urn.into(),
             params.updated_at.into(),
-            params.updated_by_urn.clone().into(),
+            params.updated_by_urn.into(),
         ])
         .on_conflict(
             OnConflict::columns([IDEN_DOCUMENT_TYPE_ID, IDEN_ID])
@@ -217,7 +217,7 @@ mod tests {
             updated_by_urn: "user:test".to_string(),
         };
 
-        let stmt = upsert_draft_query(&params);
+        let stmt = upsert_draft_query(params);
         let unparam = stmt.to_string(PostgresQueryBuilder);
         assert!(unparam.contains("INSERT INTO \"document_drafts\""));
         assert!(unparam.contains("ON CONFLICT (\"document_type_id\", \"id\") DO UPDATE SET"));

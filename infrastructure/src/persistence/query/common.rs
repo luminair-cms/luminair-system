@@ -11,7 +11,6 @@ use sea_query_sqlx::{SqlxBinder, SqlxValues};
 use domain::content::ports::{FieldFilter, Pagination};
 use domain::content::values::{ContentValue, DomainValue, PrimitiveValue};
 use domain::schema::{FieldType, IntegerSize, PrimitiveType};
-use domain::system::LocaleId;
 
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{
@@ -26,6 +25,7 @@ use crate::persistence::naming::{
     TABLE_DOCUMENT_SNAPSHOTS, TABLE_DOCUMENT_TOMBSTONES, TABLE_ROLE_PERMISSIONS, TABLE_ROLES,
     TABLE_SHADOW_USERS, TABLE_USER_ROLE_ASSIGNMENTS,
 };
+use crate::persistence::repositories::codec::{localized_text_to_json, primitive_value_to_json};
 
 // ---------------------------------------------------------------------------
 // Public StaticIden Constants
@@ -253,26 +253,6 @@ fn json_map_to_sea_value(map: &HashMap<String, PrimitiveValue>) -> sea_query::Va
     serde_json::Value::Object(json_map).into()
 }
 
-fn primitive_value_to_json(p: &PrimitiveValue) -> serde_json::Value {
-    match p {
-        PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
-        PrimitiveValue::Uuid(u) => serde_json::Value::String(u.to_string()),
-        PrimitiveValue::Integer(i) => serde_json::Value::Number((*i).into()),
-        PrimitiveValue::Decimal(d) => serde_json::Value::String(d.to_string()),
-        PrimitiveValue::Date(d) => serde_json::Value::String(d.to_string()),
-        PrimitiveValue::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339()),
-        PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
-    }
-}
-
-fn localized_text_to_json(map: &HashMap<LocaleId, String>) -> serde_json::Value {
-    let mut obj = serde_json::Map::with_capacity(map.len());
-    for (locale, text) in map {
-        obj.insert(locale.as_ref().to_string(), serde_json::Value::String(text.clone()));
-    }
-    serde_json::Value::Object(obj)
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -286,6 +266,7 @@ mod tests {
         AttributeId, DocumentKind, DocumentType, DocumentTypeId, DocumentTypeInfo,
         DocumentTypeOptions, FieldDefinition, SchemaRegistry,
     };
+    use domain::system::LocaleId;
     use sea_query::Query;
 
     fn make_test_doc_type(

@@ -23,7 +23,6 @@ use crate::persistence::query::junction::{
     delete_links_by_source_query, insert_links_batch_query, select_links_by_sources_query,
     select_links_by_targets_query, select_targets_by_source_query,
 };
-use crate::persistence::repositories::codec::deserialize_relations_json;
 use crate::persistence::repositories::mappers::{map_draft_row, map_wide_table_row};
 
 // ---------------------------------------------------------------------------
@@ -338,13 +337,13 @@ async fn fetch_wide_target_instances(
         .map_err(PersistenceError::from)?;
 
     let found_uuids: Vec<Uuid> = rows.iter().filter_map(|r| r.try_get(COL_ID).ok()).collect();
-    let owning_relations =
+    let mut owning_relations =
         load_owning_relations_batch(pool, target_type_naming, &found_uuids).await?;
 
     let mut map = HashMap::with_capacity(rows.len());
     for row in rows {
         let row_id: Uuid = row.try_get(COL_ID)?;
-        let rels = owning_relations.get(&row_id).cloned().unwrap_or_default();
+        let rels = owning_relations.remove(&row_id).unwrap_or_default();
         let instance = map_wide_table_row(&row, target_type_naming, rels)?;
         map.insert(instance.id, instance);
     }
@@ -443,18 +442,23 @@ async fn fetch_draft_relational_targets(
     for row in rows {
         let id = DocumentInstanceId::new(row.try_get(COL_ID)?);
         let rel_val: serde_json::Value = row.try_get(COL_RELATIONS)?;
-        let maybe_target = deserialize_relations_json(rel_val)
-            .ok()
-            .as_ref()
-            .and_then(|rels| rels.get(rel_attr))
-            .and_then(|list| list.first())
-            .map(|r| r.target_instance_id);
-
-        if let Some(target_id) = maybe_target {
+        if let Some(target_id) = extract_first_relation_target(&rel_val, rel_attr) {
             map.insert(id, target_id);
         }
     }
     Ok(map)
+}
+
+fn extract_first_relation_target(
+    rel_val: &serde_json::Value,
+    rel_attr: &AttributeId,
+) -> Option<DocumentInstanceId> {
+    let uuid_str = rel_val
+        .get(rel_attr.as_ref())
+        .and_then(serde_json::Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(serde_json::Value::as_str)?;
+    Uuid::parse_str(uuid_str).ok().map(DocumentInstanceId::new)
 }
 
 async fn fetch_published_relational_targets(
@@ -567,5 +571,38 @@ mod tests {
         let list = assembled.get(&parent1).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, actual_target_id);
+    }
+
+    #[test]
+    fn test_extract_first_relation_target() {
+        let attr = AttributeId::try_new("category").unwrap();
+        let target_uuid = Uuid::now_v7();
+
+        // 1. Valid relation array with one or more UUIDs
+        let valid_json = serde_json::json!({
+            "category": [target_uuid.to_string(), Uuid::now_v7().to_string()]
+        });
+        assert_eq!(
+            extract_first_relation_target(&valid_json, &attr),
+            Some(DocumentInstanceId::new(target_uuid))
+        );
+
+        // 2. Empty array
+        let empty_json = serde_json::json!({
+            "category": []
+        });
+        assert_eq!(extract_first_relation_target(&empty_json, &attr), None);
+
+        // 3. Missing attribute
+        let missing_json = serde_json::json!({
+            "other": [target_uuid.to_string()]
+        });
+        assert_eq!(extract_first_relation_target(&missing_json, &attr), None);
+
+        // 4. Invalid UUID string
+        let invalid_uuid_json = serde_json::json!({
+            "category": ["not-a-valid-uuid"]
+        });
+        assert_eq!(extract_first_relation_target(&invalid_uuid_json, &attr), None);
     }
 }

@@ -38,9 +38,9 @@ pub fn map_role_base_row(row: &PgRow) -> Result<(RoleId, String, Option<String>)
 /// Maps a row from `role_permissions` into a `(RoleId, Permission)` pair.
 pub fn map_permission_row(row: &PgRow) -> Result<(RoleId, Permission), PersistenceError> {
     let role_id: Uuid = row.try_get(COL_ROLE_ID)?;
-    let action: String = row.try_get(COL_ACTION)?;
+    let action: &str = row.try_get(COL_ACTION)?;
     let doc_type_id: Option<String> = row.try_get(COL_DOCUMENT_TYPE_ID)?;
-    let perm = permission_from_db_row(&action, doc_type_id)?;
+    let perm = permission_from_db_row(action, doc_type_id)?;
     Ok((RoleId::new(role_id), perm))
 }
 
@@ -77,7 +77,7 @@ pub fn map_user_role_assignment_row(row: &PgRow) -> Result<UserRoleAssignment, P
         .map_err(|e| PersistenceError::Validation(e.to_string()))?;
     let role_id: Uuid = row.try_get(COL_ROLE_ID)?;
     let granted_at: DateTime<Utc> = row.try_get(COL_GRANTED_AT)?;
-    let granted_by_str: Option<String> = row.try_get(COL_GRANTED_BY)?;
+    let granted_by_str: Option<&str> = row.try_get(COL_GRANTED_BY)?;
     let granted_by = parse_optional_actor_urn(granted_by_str)?;
 
     Ok(UserRoleAssignment {
@@ -104,10 +104,10 @@ pub fn map_access_request_row(row: &PgRow) -> Result<AccessRequest, PersistenceE
         .map(|s| DisplayName::try_new(s).map_err(|e| PersistenceError::Validation(e.to_string())))
         .transpose()?;
     let requested_at: DateTime<Utc> = row.try_get(COL_REQUESTED_AT)?;
-    let status_str: String = row.try_get(COL_STATUS)?;
+    let status_str: &str = row.try_get(COL_STATUS)?;
     let rejection_reason: Option<String> = row.try_get(COL_REJECTION_REASON)?;
-    let status = access_request_status_from_db(&status_str, rejection_reason)?;
-    let reviewed_by_str: Option<String> = row.try_get(COL_REVIEWED_BY)?;
+    let status = access_request_status_from_db(status_str, rejection_reason)?;
+    let reviewed_by_str: Option<&str> = row.try_get(COL_REVIEWED_BY)?;
     let reviewed_by = parse_optional_actor_urn(reviewed_by_str)?;
     let reviewed_at: Option<DateTime<Utc>> = row.try_get(COL_REVIEWED_AT)?;
     let assigned_roles_val: serde_json::Value = row.try_get(COL_ASSIGNED_ROLES)?;

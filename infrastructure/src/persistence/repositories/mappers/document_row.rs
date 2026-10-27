@@ -53,11 +53,11 @@ pub fn map_wide_table_row(
         PersistenceError::Validation(format!("invalid negative revision '{rev_i32}': {e}"))
     })?;
     let published_at: DateTime<Utc> = row.try_get(COL_PUBLISHED_AT)?;
-    let published_by = parse_actor_urn(&row.try_get::<String, _>(COL_PUBLISHED_BY)?)?;
+    let published_by = parse_actor_urn(row.try_get::<&str, _>(COL_PUBLISHED_BY)?)?;
     let created_at: DateTime<Utc> = row.try_get(COL_CREATED_AT)?;
-    let created_by = parse_actor_urn(&row.try_get::<String, _>(COL_CREATED_BY)?)?;
+    let created_by = parse_actor_urn(row.try_get::<&str, _>(COL_CREATED_BY)?)?;
     let updated_at: DateTime<Utc> = row.try_get(COL_UPDATED_AT)?;
-    let updated_by = parse_actor_urn(&row.try_get::<String, _>(COL_UPDATED_BY)?)?;
+    let updated_by = parse_actor_urn(row.try_get::<&str, _>(COL_UPDATED_BY)?)?;
 
     let mut fields = HashMap::with_capacity(type_naming.field_columns.len());
     for (attr_id, col_naming) in &type_naming.field_columns {
@@ -95,7 +95,7 @@ pub fn map_draft_row(
     live_published_meta: Option<(u32, DateTime<Utc>, ActorId)>,
 ) -> Result<DocumentInstance, PersistenceError> {
     let id = DocumentInstanceId::new(row.try_get(COL_ID)?);
-    let status_str: String = row.try_get(COL_STATUS)?;
+    let status_str: &str = row.try_get(COL_STATUS)?;
     let content_val: serde_json::Value = row.try_get(COL_CONTENT)?;
     let fields = deserialize_fields_json(content_val, type_naming)?;
     let rel_val: serde_json::Value = row.try_get(COL_RELATIONS)?;
@@ -110,12 +110,12 @@ pub fn map_draft_row(
         .map(|r| u32::try_from(r).unwrap_or(0));
 
     let created_at: DateTime<Utc> = row.try_get(COL_CREATED_AT)?;
-    let created_by = parse_actor_urn(&row.try_get::<String, _>(COL_CREATED_BY)?)?;
+    let created_by = parse_actor_urn(row.try_get::<&str, _>(COL_CREATED_BY)?)?;
     let updated_at: DateTime<Utc> = row.try_get(COL_UPDATED_AT)?;
-    let updated_by = parse_actor_urn(&row.try_get::<String, _>(COL_UPDATED_BY)?)?;
+    let updated_by = parse_actor_urn(row.try_get::<&str, _>(COL_UPDATED_BY)?)?;
 
     let publication_state = resolve_draft_publication_state(
-        &status_str,
+        status_str,
         version,
         last_published_rev,
         updated_at,
@@ -149,8 +149,8 @@ pub fn extract_wide_published_meta(
         PersistenceError::Validation(format!("invalid negative revision '{rev_i32}': {e}"))
     })?;
     let published_at: DateTime<Utc> = row.try_get(COL_PUBLISHED_AT)?;
-    let published_by_str: String = row.try_get(COL_PUBLISHED_BY)?;
-    let published_by = parse_actor_urn(&published_by_str)?;
+    let published_by_str: &str = row.try_get(COL_PUBLISHED_BY)?;
+    let published_by = parse_actor_urn(published_by_str)?;
     Ok((revision, published_at, published_by))
 }
 
@@ -163,8 +163,8 @@ pub fn map_header_row(
     let display_values_val: serde_json::Value = row.try_get(COL_DISPLAY_VALUES)?;
     let display_values = deserialize_display_values_json(display_values_val)?;
     let display_title: Option<String> = row.try_get(COL_DISPLAY_TITLE)?;
-    let status_str: String = row.try_get(COL_STATUS)?;
-    let status = status_from_db_str(&status_str)?;
+    let status_str: &str = row.try_get(COL_STATUS)?;
+    let status = status_from_db_str(status_str)?;
     let slug: Option<String> = row.try_get(COL_SLUG)?;
 
     let revision = row
@@ -175,11 +175,12 @@ pub fn map_header_row(
         .map(|v| u32::try_from(v).unwrap_or(0));
 
     let created_at: DateTime<Utc> = row.try_get(COL_CREATED_AT)?;
-    let created_by = parse_actor_urn(&row.try_get::<String, _>(COL_CREATED_BY)?)?;
+    let created_by = parse_actor_urn(row.try_get::<&str, _>(COL_CREATED_BY)?)?;
     let updated_at: DateTime<Utc> = row.try_get(COL_UPDATED_AT)?;
-    let updated_by = parse_actor_urn(&row.try_get::<String, _>(COL_UPDATED_BY)?)?;
+    let updated_by = parse_actor_urn(row.try_get::<&str, _>(COL_UPDATED_BY)?)?;
     let published_at: Option<DateTime<Utc>> = row.try_get(COL_PUBLISHED_AT)?;
-    let published_by = parse_optional_actor_urn(row.try_get(COL_PUBLISHED_BY)?)?;
+    let published_by =
+        parse_optional_actor_urn(row.try_get::<Option<&str>, _>(COL_PUBLISHED_BY)?)?;
 
     Ok(DocumentHeader {
         id,
