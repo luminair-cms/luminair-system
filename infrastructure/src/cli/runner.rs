@@ -7,6 +7,7 @@ use super::dry_run::execute_dry_run_mode;
 use super::error::CliError;
 use super::migrate::execute_migrate_mode;
 use super::report::CliOutcome;
+use super::service::execute_service_mode;
 use super::test_config::execute_test_mode;
 use crate::schema_loader::load_system_context_from_dir;
 
@@ -44,6 +45,7 @@ async fn dispatch_mode(
         RunMode::Migrate => Ok(CliOutcome::Migrate(
             execute_migrate_mode(config, context).await?,
         )),
+        RunMode::Service => Ok(execute_service_mode(config, context).await?),
     }
 }
 

@@ -3,13 +3,13 @@
 use std::collections::HashSet;
 
 use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
 
 use domain::system::SystemContext;
 
 use super::config::CliConfig;
 use super::error::CliError;
 use super::report::{DryRunReport, StaticMigrationStatus, StaticMigrationStepSummary};
+use crate::persistence::create_connection_pool;
 use crate::persistence::PersistenceError;
 use crate::persistence::migration::{MIGRATOR, preview_dynamic_schemas};
 
@@ -74,11 +74,7 @@ async fn execute_offline_dry_run(
 }
 
 async fn connect_pool(db_url: &str, max_connections: u32) -> Result<PgPool, PersistenceError> {
-    PgPoolOptions::new()
-        .max_connections(max_connections)
-        .connect(db_url)
-        .await
-        .map_err(PersistenceError::from)
+    create_connection_pool(db_url, max_connections).await
 }
 
 async fn inspect_live_static_migrations(

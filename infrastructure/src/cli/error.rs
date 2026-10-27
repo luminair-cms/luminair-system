@@ -49,6 +49,10 @@ pub enum CliError {
     /// Error during database connection, static migration, or dynamic DDL sync.
     #[error("persistence migration failed: {0}")]
     Persistence(#[from] PersistenceError),
+
+    /// Error during HTTP server execution.
+    #[error("http server error: {0}")]
+    Server(String),
 }
 
 // ---------------------------------------------------------------------------

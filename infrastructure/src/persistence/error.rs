@@ -26,6 +26,9 @@ pub enum PersistenceError {
     #[error("persistence validation error: {0}")]
     Validation(String),
 
+    #[error("persistence configuration error: {0}")]
+    Configuration(String),
+
     #[error("domain error: {0}")]
     Domain(#[from] domain::errors::DomainError),
 }

@@ -5,5 +5,10 @@
   "maxDbConnections": 5,
   "safetyPolicy": "additiveOnly",
   "offline": false,
-  "outputFormat": "text"
+  "outputFormat": "text",
+  "httpHost": "127.0.0.1",
+  "httpPort": 8080,
+  "autoMigrate": false,
+  "oidcIssuer": "http://localhost:5556/dex",
+  "oidcAudience": "luminair-admin-spa"
 }

@@ -152,7 +152,7 @@ flowchart TD
   - Assemble `AppContainer` (`from_pool_and_context`) wiring `DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`, `SqlxHealthChecker`, and `SqlxAuthResolver`, plus `AppContainer::http_state() -> ProductionHttpState`.
 - [x] **Step 4B.2: Health Checker (`infrastructure/src/health.rs`)**
   - Implement `HealthStatus` (`Healthy`, `Unhealthy { reason }`), `HealthCheckService` port trait, `SqlxHealthChecker` (`/healthz` liveness and `/ready` readiness via `SELECT 1` on `PgPool`), and `AlwaysHealthyChecker`.
-- [ ] **Step 4B.3: `RunMode::Service` Worker (`infrastructure/src/cli/service.rs`)**
+- [x] **Step 4B.3: `RunMode::Service` Worker (`infrastructure/src/cli/service.rs`)**
   - Extend `RunMode`, `CliConfig`, and `CliOutcome` with HTTP server settings (`host`, `port`, auth configuration) and `RunMode::Service` startup.
 
 ---
@@ -221,26 +221,24 @@ flowchart TD
 ```
 
 
-- [ ] **Step 7.1: HTTP Service Worker & Graceful Shutdown (`infrastructure/src/cli/service.rs`, `config.rs`, `runner.rs`, `report.rs`)**
+- [x] **Step 7.1: HTTP Service Worker & Graceful Shutdown (`infrastructure/src/cli/service.rs`, `config.rs`, `runner.rs`, `report.rs`)**
   - Extend `RunMode` with `RunMode::Service` and `CliConfig` with HTTP settings (`http_host`, `http_port`, `auto_migrate`, `oidc_jwt_secret`, `oidc_jwt_public_key_pem`, `oidc_issuer`, `oidc_audience`, `service_tokens`).
   - Implement `execute_service_mode` orchestrator binding `tokio::net::TcpListener` and mounting `build_router(container.http_state())`.
   - Handle cross-platform graceful termination via `tokio::signal::ctrl_c()` (`SIGINT`) and Unix `SIGTERM`, passing shutdown signal to `axum::serve(listener, router).with_graceful_shutdown()`.
   - Output structured `ServiceReport` via `CliOutcome::Service`.
-- [ ] **Step 7.2: AWS Aurora DSQL Connection Factory (`infrastructure/src/persistence/connection.rs`)**
+- [x] **Step 7.2: AWS Aurora DSQL Connection Factory (`infrastructure/src/persistence/connection.rs`)**
   - Implement `create_connection_pool` supporting both standard PostgreSQL (`postgres://...`) and Aurora DSQL (`*.dsql.[region].on.aws`).
   - Implement `DsqlTokenProvider` trait with local SigV4 / environment token generator.
   - Enforce SSL/TLS requirement for Aurora DSQL and configure `PgPoolOptions` with `max_lifetime = 10 minutes` (well within the 15-minute token lifecycle) and `idle_timeout = 5 minutes`.
   - Refactor `cli/migrate.rs` and `cli/dry_run.rs` to route through the centralized connection factory.
-- [ ] **Step 7.3: Operational Configuration & Integration Tests (`config/cli-config.json`, `docker-compose.yml`, `infrastructure/tests/cli_test.rs`)**
+- [x] **Step 7.3: Operational Configuration & Integration Tests (`config/cli-config.json`, `docker-compose.yml`, `infrastructure/tests/cli_test.rs`)**
   - Update `config/cli-config.json` with service parameters.
   - Update `docker-compose.yml` adding service / web container profile.
   - Write integration tests in `cli_test.rs` testing service mode ephemeral port binding, `/healthz` HTTP probe, and clean signal termination.
 
 ---
 
-## 3. Immediate Next Execution Step
+## 3. Plan Completion Summary
 
-Execute **Phase 4B.3 & Phase 7 (HTTP Server `RunMode::Service` & Cloud Runtime / DSQL IAM Integration)**:
-- Step 7.2: Implement AWS Aurora DSQL connection factory in `infrastructure/src/persistence/connection.rs`.
-- Step 7.1: Implement `RunMode::Service` in `infrastructure/src/cli/` with server settings and graceful shutdown.
-- Step 7.3: Operational packaging and CLI integration tests.
+All 7 implementation phases of the `infrastructure` crate are **100% complete**.
+The crate provides a fully operational, production-ready binary with AWS Aurora DSQL compatibility, PostgreSQL portability, offline/CI testability, OIDC/Service Token authentication, Axum REST routing, and Docker Compose development environments with Dex and Postgres.

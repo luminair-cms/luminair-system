@@ -169,3 +169,18 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   2. **Generic Primary Key Generation**: Replaced `is_junction()` branching in `build_create_table_sql` with generic table-level `PRIMARY KEY` compilation derived from `is_primary_key` columns. Works uniformly for single-column PKs and composite PKs.
   3. **Streamlined Projection**: Refactored `build_desired_schema` in `builder.rs` into a single loop delegating to `build_document_type_tables`, removing redundant intermediate allocations.
   4. **Kahn's Topological Sort Dependency Graph**: Upgraded `planner.rs` with `DependencyGraph` and Kahn's algorithm sorting `CreateTable` steps by foreign key dependencies (parent before child) and detecting cycles (`PlannerError::CircularDependency`).
+
+---
+
+### 2026-10-27 — RunMode::Service Daemon, Aurora DSQL Connection Factory & Dex OIDC Provider
+
+- **Context**: Completing Phase 4B.3 and Phase 7 of `infrastructure` crate: production runtime daemon, database connection lifecycle for AWS Aurora DSQL and PostgreSQL, and local OIDC identity provisioning.
+- **Decisions**:
+  1. **Dual-Signal Graceful Shutdown (`RunMode::Service`)**: Implemented HTTP service mode worker in `infrastructure/src/cli/service.rs`. Sets up Axum REST router, binds TCP listener, and uses `axum::serve(listener, router).with_graceful_shutdown()` listening concurrently for `SIGINT` (Ctrl+C) and Unix `SIGTERM` without panicking on registration failures.
+  2. **Fail-Fast Auto-Migration**: If `--auto-migrate` / `auto_migrate: true` is configured in service mode, static system migrations and dynamic schema synchronization run prior to binding the TCP listener. Any migration failure immediately aborts startup, preventing traffic on out-of-sync schemas.
+  3. **Aurora DSQL & PostgreSQL Connection Factory (`persistence::connection`)**:
+     - `detect_connection_target`: Automatically classifies URLs into `ConnectionTarget::Postgres` or `ConnectionTarget::AuroraDsql` based on host pattern (`*.dsql.[region].on.aws`) or `?dsql=true` query flag, extracting cluster endpoint, AWS region, user, and database.
+     - `DsqlTokenProvider`: Trait for dynamic IAM authentication tokens with `EnvironmentDsqlTokenProvider` (reading `LUMINAIR_DSQL_AUTH_TOKEN`) and `StaticDsqlTokenProvider`.
+     - **Connection Lifetime & TLS**: Enforces `max_lifetime = 10 minutes` (under the 15-minute DSQL IAM token expiry window), `idle_timeout = 5 minutes`, and `ssl_mode = Require` on Aurora DSQL pools.
+     - Centralized in `persistence::create_connection_pool` and reused across CLI `migrate`, `dry_run`, and `service` modes.
+  4. **Dex OIDC Provider**: Added Dex (`ghcr.io/dexidp/dex:v2.41.1`) to `docker-compose.yml` with `config/dex.yaml` configuring in-memory storage, issuer `http://localhost:5556/dex`, pre-seeded users (`admin@luminair.dev`, `editor@luminair.dev`), and public client `luminair-admin-spa` as a lightweight Keycloak alternative.

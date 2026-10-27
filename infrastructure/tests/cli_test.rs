@@ -181,6 +181,98 @@ async fn test_cli_live_database_migrate_and_dry_run_when_database_url_set() {
     );
 }
 
+#[test]
+fn test_cli_service_mode_config_parsing_and_flags() {
+    let args = [
+        "luminair",
+        "--mode",
+        "service",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "9090",
+        "--auto-migrate",
+        "--database-url",
+        "postgres://luminair:secret@localhost:5432/luminair",
+        "--oidc-jwt-secret",
+        "super-secret-key",
+        "--oidc-issuer",
+        "http://localhost:5556/dex",
+        "--oidc-audience",
+        "luminair-admin-spa",
+    ];
+
+    let config = CliConfig::parse_from_iter(args).expect("CLI arg parsing should succeed");
+    assert_eq!(config.mode, RunMode::Service);
+    assert_eq!(config.http_host, "127.0.0.1");
+    assert_eq!(config.http_port, 9090);
+    assert!(config.auto_migrate);
+    assert_eq!(
+        config.database_url.as_deref(),
+        Some("postgres://luminair:secret@localhost:5432/luminair")
+    );
+    assert_eq!(config.oidc_jwt_secret.as_deref(), Some("super-secret-key"));
+    assert_eq!(
+        config.oidc_issuer.as_deref(),
+        Some("http://localhost:5556/dex")
+    );
+    assert_eq!(
+        config.oidc_audience.as_deref(),
+        Some("luminair-admin-spa")
+    );
+}
+
+#[test]
+fn test_cli_service_mode_validation_rejects_missing_database_url() {
+    let root = workspace_root();
+    let config = CliConfig {
+        mode: RunMode::Service,
+        schema_dir: root.join("config/schemas"),
+        database_url: None,
+        ..CliConfig::default()
+    };
+    let err = config.validate().expect_err("should reject missing database_url");
+    assert!(
+        matches!(err, CliError::Config(msg) if msg.contains("database_url is required for 'service' mode"))
+    );
+}
+
+#[test]
+fn test_cli_service_mode_validation_rejects_zero_port() {
+    let root = workspace_root();
+    let config = CliConfig {
+        mode: RunMode::Service,
+        schema_dir: root.join("config/schemas"),
+        database_url: Some("postgres://localhost:5432/db".to_string()),
+        http_port: 0,
+        ..CliConfig::default()
+    };
+    let err = config.validate().expect_err("should reject port 0");
+    assert!(
+        matches!(err, CliError::Config(msg) if msg.contains("http_port must be greater than zero"))
+    );
+}
+
+#[test]
+fn test_cli_service_report_rendering() {
+    use infrastructure::cli::ServiceReport;
+
+    let report = ServiceReport {
+        bind_address: "127.0.0.1:8080".to_string(),
+        status: "Shutdown cleanly".to_string(),
+    };
+    let outcome = CliOutcome::Service(report);
+
+    let text = outcome.render(OutputFormat::Text).expect("text format");
+    assert!(text.contains("=== Luminair HTTP Service Report ==="));
+    assert!(text.contains("Bind Address: 127.0.0.1:8080"));
+    assert!(text.contains("Status:       Shutdown cleanly"));
+
+    let json = outcome.render(OutputFormat::Json).expect("json format");
+    assert!(json.contains("\"mode\": \"service\""));
+    assert!(json.contains("\"bindAddress\": \"127.0.0.1:8080\""));
+}
+
 // ---------------------------------------------------------------------------
 // Private Helpers
 // ---------------------------------------------------------------------------

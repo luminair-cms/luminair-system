@@ -20,9 +20,11 @@ rust_decimal = { workspace = true }
 sea-query = { workspace = true }
 sea-query-sqlx = { workspace = true }
 axum = { workspace = true }
+async-trait = { workspace = true }
 jsonwebtoken = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }

@@ -101,6 +101,16 @@ pub struct MigrationReport {
     pub executed_statements: Vec<String>,
 }
 
+/// Outcome report produced by the `service` execution mode upon termination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceReport {
+    /// Bind address the HTTP server was listening on (e.g. "0.0.0.0:8080").
+    pub bind_address: String,
+    /// Termination message or status description.
+    pub status: String,
+}
+
 /// Top-level outcome produced by any CLI execution mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "camelCase")]
@@ -111,6 +121,8 @@ pub enum CliOutcome {
     DryRun(DryRunReport),
     /// Result of live database migration execution.
     Migrate(MigrationReport),
+    /// Result of HTTP server daemon execution.
+    Service(ServiceReport),
 }
 
 // ---------------------------------------------------------------------------
@@ -230,12 +242,21 @@ impl fmt::Display for MigrationReport {
     }
 }
 
+impl fmt::Display for ServiceReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "=== Luminair HTTP Service Report ===")?;
+        writeln!(f, "Bind Address: {}", self.bind_address)?;
+        write!(f, "Status:       {}", self.status)
+    }
+}
+
 impl fmt::Display for CliOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Test(report) => write!(f, "{report}"),
             Self::DryRun(report) => write!(f, "{report}"),
             Self::Migrate(report) => write!(f, "{report}"),
+            Self::Service(report) => write!(f, "{report}"),
         }
     }
 }

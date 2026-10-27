@@ -27,6 +27,9 @@ pub enum RunMode {
     #[default]
     #[serde(alias = "test", alias = "test-config", alias = "validate")]
     Test,
+    /// Long-running HTTP REST API service daemon with graceful shutdown.
+    #[serde(alias = "service", alias = "serve", alias = "server")]
+    Service,
 }
 
 /// Output rendering format for CLI outcome reports.
@@ -40,6 +43,18 @@ pub enum OutputFormat {
     /// Machine-readable pretty JSON payload.
     #[serde(alias = "json")]
     Json,
+}
+
+/// Identity and role bindings associated with a static service bearer token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceTokenConfig {
+    /// Bearer token secret.
+    pub token: String,
+    /// Machine service identifier.
+    pub service_id: String,
+    /// Role identifiers assigned to the service.
+    pub roles: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +81,22 @@ pub struct CliConfig {
     pub output_format: OutputFormat,
     /// Optional file destination to write the outcome report.
     pub output_path: Option<PathBuf>,
+    /// HTTP host to bind for service mode.
+    pub http_host: String,
+    /// HTTP port to bind for service mode.
+    pub http_port: u16,
+    /// Whether to automatically apply static and dynamic migrations on service startup.
+    pub auto_migrate: bool,
+    /// Optional OIDC JWT HMAC-SHA256 secret.
+    pub oidc_jwt_secret: Option<String>,
+    /// Optional OIDC JWT RS256 public key PEM.
+    pub oidc_jwt_public_key_pem: Option<String>,
+    /// Optional expected OIDC issuer claim.
+    pub oidc_issuer: Option<String>,
+    /// Optional expected OIDC audience claim.
+    pub oidc_audience: Option<String>,
+    /// Pre-configured service bearer tokens.
+    pub service_tokens: Vec<ServiceTokenConfig>,
 }
 
 /// Partial DTO representing file-based configuration options.
@@ -80,6 +111,14 @@ struct CliConfigFileDto {
     pub offline: Option<bool>,
     pub output_format: Option<OutputFormat>,
     pub output_path: Option<PathBuf>,
+    pub http_host: Option<String>,
+    pub http_port: Option<u16>,
+    pub auto_migrate: Option<bool>,
+    pub oidc_jwt_secret: Option<String>,
+    pub oidc_jwt_public_key_pem: Option<String>,
+    pub oidc_issuer: Option<String>,
+    pub oidc_audience: Option<String>,
+    pub service_tokens: Option<Vec<ServiceTokenConfig>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +133,7 @@ impl RunMode {
             Self::Migrate => "migrate",
             Self::DryRun => "dry-run",
             Self::Test => "test",
+            Self::Service => "service",
         }
     }
 }
@@ -180,9 +220,18 @@ impl CliConfig {
             validate_database_url(db_url)?;
         }
 
-        if self.mode == RunMode::Migrate && self.database_url.is_none() {
+        if (self.mode == RunMode::Migrate || self.mode == RunMode::Service)
+            && self.database_url.is_none()
+        {
+            return Err(CliError::Config(format!(
+                "database_url is required for '{}' mode",
+                self.mode
+            )));
+        }
+
+        if self.mode == RunMode::Service && self.http_port == 0 {
             return Err(CliError::Config(
-                "database_url is required for 'migrate' mode".to_string(),
+                "http_port must be greater than zero".to_string(),
             ));
         }
 
@@ -202,8 +251,9 @@ impl FromStr for RunMode {
             "migrate" | "migration" => Ok(Self::Migrate),
             "dry-run" | "dry_run" | "dryrun" => Ok(Self::DryRun),
             "test" | "test-config" | "validate" => Ok(Self::Test),
+            "service" | "serve" | "server" => Ok(Self::Service),
             other => Err(CliError::Config(format!(
-                "unknown run mode '{other}', expected 'migrate', 'dry-run', or 'test'"
+                "unknown run mode '{other}', expected 'migrate', 'dry-run', 'test', or 'service'"
             ))),
         }
     }
@@ -246,6 +296,14 @@ impl Default for CliConfig {
             offline: false,
             output_format: OutputFormat::Text,
             output_path: None,
+            http_host: "0.0.0.0".to_string(),
+            http_port: 8080,
+            auto_migrate: false,
+            oidc_jwt_secret: None,
+            oidc_jwt_public_key_pem: None,
+            oidc_issuer: None,
+            oidc_audience: None,
+            service_tokens: Vec::new(),
         }
     }
 }
@@ -298,6 +356,30 @@ fn apply_file_dto(config: &mut CliConfig, dto: CliConfigFileDto) {
     if dto.output_path.is_some() {
         config.output_path = dto.output_path;
     }
+    if let Some(host) = dto.http_host {
+        config.http_host = host;
+    }
+    if let Some(port) = dto.http_port {
+        config.http_port = port;
+    }
+    if let Some(auto_mig) = dto.auto_migrate {
+        config.auto_migrate = auto_mig;
+    }
+    if dto.oidc_jwt_secret.is_some() {
+        config.oidc_jwt_secret = dto.oidc_jwt_secret;
+    }
+    if dto.oidc_jwt_public_key_pem.is_some() {
+        config.oidc_jwt_public_key_pem = dto.oidc_jwt_public_key_pem;
+    }
+    if dto.oidc_issuer.is_some() {
+        config.oidc_issuer = dto.oidc_issuer;
+    }
+    if dto.oidc_audience.is_some() {
+        config.oidc_audience = dto.oidc_audience;
+    }
+    if let Some(tokens) = dto.service_tokens {
+        config.service_tokens = tokens;
+    }
 }
 
 fn apply_env_overrides<F>(config: &mut CliConfig, env_lookup: &F) -> Result<(), CliError>
@@ -329,6 +411,32 @@ where
     }
     if let Some(val) = env_lookup("LUMINAIR_OUTPUT_PATH") {
         config.output_path = Some(PathBuf::from(val));
+    }
+    if let Some(val) = env_lookup("LUMINAIR_HTTP_HOST") {
+        config.http_host = val;
+    }
+    if let Some(val) = env_lookup("LUMINAIR_HTTP_PORT") {
+        config.http_port = val.parse::<u16>().map_err(|e| {
+            CliError::Config(format!("invalid LUMINAIR_HTTP_PORT '{val}': {e}"))
+        })?;
+    }
+    if let Some(val) = env_lookup("LUMINAIR_AUTO_MIGRATE") {
+        config.auto_migrate = parse_bool_val(&val)?;
+    }
+    if let Some(val) = env_lookup("LUMINAIR_OIDC_JWT_SECRET") {
+        config.oidc_jwt_secret = Some(val);
+    }
+    if let Some(val) = env_lookup("LUMINAIR_OIDC_JWT_PUBLIC_KEY_PEM") {
+        config.oidc_jwt_public_key_pem = Some(val);
+    }
+    if let Some(val) = env_lookup("LUMINAIR_OIDC_ISSUER") {
+        config.oidc_issuer = Some(val);
+    }
+    if let Some(val) = env_lookup("LUMINAIR_OIDC_AUDIENCE") {
+        config.oidc_audience = Some(val);
+    }
+    if let Some(val) = env_lookup("LUMINAIR_SERVICE_TOKENS") {
+        config.service_tokens = parse_service_tokens_env(&val)?;
     }
     Ok(())
 }
@@ -366,6 +474,10 @@ fn parse_single_arg(
         config.offline = true;
         return Ok(());
     }
+    if arg == "--auto-migrate" {
+        config.auto_migrate = true;
+        return Ok(());
+    }
     if is_valued_flag(arg) {
         let val = next_arg_value(args, index, arg)?;
         return apply_flag_value(config, arg, &val);
@@ -390,6 +502,13 @@ fn is_valued_flag(flag: &str) -> bool {
             | "-f"
             | "--output"
             | "-o"
+            | "--host"
+            | "--port"
+            | "-p"
+            | "--oidc-jwt-secret"
+            | "--oidc-jwt-public-key"
+            | "--oidc-issuer"
+            | "--oidc-audience"
     )
 }
 
@@ -407,6 +526,16 @@ fn apply_flag_value(config: &mut CliConfig, flag: &str, val: &str) -> Result<(),
         "--policy" => config.safety_policy = parse_safety_policy(val)?,
         "--format" | "-f" => config.output_format = OutputFormat::from_str(val)?,
         "--output" | "-o" => config.output_path = Some(PathBuf::from(val)),
+        "--host" => config.http_host = val.to_string(),
+        "--port" | "-p" => {
+            config.http_port = val.parse::<u16>().map_err(|e| {
+                CliError::Config(format!("invalid --port '{val}': {e}"))
+            })?;
+        }
+        "--oidc-jwt-secret" => config.oidc_jwt_secret = Some(val.to_string()),
+        "--oidc-jwt-public-key" => config.oidc_jwt_public_key_pem = Some(val.to_string()),
+        "--oidc-issuer" => config.oidc_issuer = Some(val.to_string()),
+        "--oidc-audience" => config.oidc_audience = Some(val.to_string()),
         _ => return Err(CliError::Config(format!("unknown flag '{flag}'"))),
     }
     Ok(())
@@ -429,12 +558,51 @@ fn parse_inline_arg(config: &mut CliConfig, arg: &str) -> Result<(), CliError> {
         config.output_format = OutputFormat::from_str(val)?;
     } else if let Some(val) = arg.strip_prefix("--output=").or_else(|| arg.strip_prefix("-o=")) {
         config.output_path = Some(PathBuf::from(val));
+    } else if let Some(val) = arg.strip_prefix("--host=") {
+        config.http_host = val.to_string();
+    } else if let Some(val) = arg.strip_prefix("--port=").or_else(|| arg.strip_prefix("-p=")) {
+        config.http_port = val.parse::<u16>().map_err(|e| {
+            CliError::Config(format!("invalid --port '{val}': {e}"))
+        })?;
+    } else if let Some(val) = arg.strip_prefix("--oidc-jwt-secret=") {
+        config.oidc_jwt_secret = Some(val.to_string());
+    } else if let Some(val) = arg.strip_prefix("--oidc-jwt-public-key=") {
+        config.oidc_jwt_public_key_pem = Some(val.to_string());
+    } else if let Some(val) = arg.strip_prefix("--oidc-issuer=") {
+        config.oidc_issuer = Some(val.to_string());
+    } else if let Some(val) = arg.strip_prefix("--oidc-audience=") {
+        config.oidc_audience = Some(val.to_string());
     } else if arg.strip_prefix("--config=").or_else(|| arg.strip_prefix("-c=")).is_some() {
         // Handled during pre-scan
     } else {
         return Err(CliError::Config(format!("unknown CLI argument '{arg}'")));
     }
     Ok(())
+}
+
+fn parse_service_tokens_env(val: &str) -> Result<Vec<ServiceTokenConfig>, CliError> {
+    if val.trim().starts_with('[') {
+        return serde_json::from_str(val).map_err(CliError::Serialization);
+    }
+    let mut entries = Vec::new();
+    for item in val.split(';') {
+        let parts: Vec<&str> = item.split(':').collect();
+        if parts.len() >= 3 {
+            let token = parts[0].trim().to_string();
+            let service_id = parts[1].trim().to_string();
+            let roles = parts[2]
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            entries.push(ServiceTokenConfig {
+                token,
+                service_id,
+                roles,
+            });
+        }
+    }
+    Ok(entries)
 }
 
 fn next_arg_value(
