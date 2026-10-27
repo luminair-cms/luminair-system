@@ -1,8 +1,8 @@
 //! Database identifier naming, sanitization, and SQL keyword checking.
 
-pub mod identifiers;
-pub mod registry;
-pub mod sanitize;
+mod identifiers;
+mod registry;
+mod sanitize;
 
 pub use identifiers::*;
 pub use registry::*;

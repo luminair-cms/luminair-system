@@ -71,6 +71,18 @@ impl sea_query::Iden for StaticIden {
     }
 }
 
+impl From<&'static str> for StaticIden {
+    fn from(s: &'static str) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&SchemaRegistry> for SchemaNaming {
+    fn from(registry: &SchemaRegistry) -> Self {
+        Self::new(registry)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Method Implementations
 // ---------------------------------------------------------------------------

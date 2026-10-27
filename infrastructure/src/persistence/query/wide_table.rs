@@ -35,6 +35,16 @@ pub fn select_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> SelectS
     stmt
 }
 
+/// Builds a `SELECT * FROM [table] WHERE has_pending_draft = false` query statement.
+#[must_use]
+pub fn select_clean_published_query(type_naming: &DocumentTypeNaming) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(type_naming.table_iden)
+        .column(Asterisk)
+        .and_where(Expr::col(IDEN_HAS_PENDING_DRAFT).eq(false));
+    stmt
+}
+
 /// Builds a paginated `find_published` query with field equality filters.
 ///
 /// Per ADR-004, all rows in `[type]` are published documents (modified rows retain

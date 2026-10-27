@@ -10,11 +10,14 @@ cargo test --workspace
 cargo audit
 ```
 
-## 2. Architecture & Design Patterns ([`clean-code.md`](clean-code.md), [`docs/architecture.md`](../../docs/architecture.md))
+## 2. Architecture & Design Patterns ([`clean-code.md`](clean-code.md), [`rust-patterns.md`](rust-patterns.md), [`docs/architecture.md`](../../docs/architecture.md))
 
 - [ ] Hexagonal boundaries: `domain` and `application` contain zero I/O, SQL, or HTTP imports
 - [ ] Repository traits defined in `domain`, implemented only in `infrastructure`
 - [ ] Anti-Corruption Layer (ACL): Wire DTOs strictly separated from domain types
+- [ ] Facade pattern: Internal worker modules hidden via `mod` / `pub(crate)`; only cohesive entry points and public types re-exported via `pub use`
+- [ ] Idiomatic Rust patterns: Builders for complex construction, Newtypes for type safety, Strategy closures/traits, Enum State/Command, `From`/`TryFrom` factories, `OnceLock`/`LazyLock` or startup `&'static` instead of mutable statics
+- [ ] No anti-patterns: No `Deref` inheritance, no unnecessary `.clone()` to silence the borrow checker, no `#![deny(warnings)]` in library crates
 
 ## 3. Clean Code (SRP & SLAP) ([`clean-code.md`](clean-code.md))
 

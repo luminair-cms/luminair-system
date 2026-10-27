@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use sea_query::{Asterisk, Expr, ExprTrait, Query};
 use sqlx::postgres::PgRow;
 use sqlx::{AssertSqlSafe, PgConnection, PgPool, Row};
 use uuid::Uuid;
@@ -26,7 +25,7 @@ use domain::system::SystemContext;
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{COL_ID, COL_STATUS, DocumentTypeNaming, SchemaNaming};
 use crate::persistence::query::common::{
-    IDEN_HAS_PENDING_DRAFT, compile_delete, compile_insert, compile_select, compile_update,
+    compile_delete, compile_insert, compile_select, compile_update,
 };
 use crate::persistence::query::drafts::{
     DraftUpsertParams, delete_draft_query, exists_draft_for_type_query, select_draft_by_id_query,
@@ -40,7 +39,8 @@ use crate::persistence::query::headers::{
 use crate::persistence::query::occ::with_occ_retry;
 use crate::persistence::query::wide_table::{
     count_published_query, delete_by_id_query, exists_in_wide_table_query, find_published_query,
-    select_by_id_query, update_has_pending_draft_query, upsert_wide_table_query,
+    select_by_id_query, select_clean_published_query, update_has_pending_draft_query,
+    upsert_wide_table_query,
 };
 use crate::persistence::repositories::codec::{
     publication_state_to_draft_status_str, serialize_display_values_json, serialize_fields_json,
@@ -504,11 +504,11 @@ async fn assemble_published_instances(
         .iter()
         .map(|r| r.try_get(COL_ID))
         .collect::<Result<_, _>>()?;
-    let relations_by_id = load_owning_relations_batch(pool, type_naming, &ids).await?;
+    let mut relations_by_id = load_owning_relations_batch(pool, type_naming, &ids).await?;
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
         let id: Uuid = row.try_get(COL_ID)?;
-        let relations = relations_by_id.get(&id).cloned().unwrap_or_default();
+        let relations = relations_by_id.remove(&id).unwrap_or_default();
         items.push(map_wide_table_row(row, type_naming, relations)?);
     }
     Ok(items)
@@ -560,10 +560,7 @@ async fn fetch_clean_published_instances(
     pool: &PgPool,
     type_naming: &DocumentTypeNaming,
 ) -> Result<Vec<DocumentInstance>, PersistenceError> {
-    let mut stmt = Query::select();
-    stmt.from(type_naming.table_iden)
-        .column(Asterisk)
-        .and_where(Expr::col(IDEN_HAS_PENDING_DRAFT).eq(false));
+    let stmt = select_clean_published_query(type_naming);
     let (sql, values) = compile_select(&stmt);
     let rows = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
         .fetch_all(pool)

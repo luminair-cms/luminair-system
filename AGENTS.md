@@ -28,7 +28,7 @@ Read in this order:
 |---|---|
 | Writing or modifying Rust code | [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md), [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md) |
 | Writing or modifying tests | [`.ai/skills/testing.md`](.ai/skills/testing.md), [`.ai/skills/spec-testing.md`](.ai/skills/spec-testing.md) |
-| Reviewing / self-reviewing code | [`.ai/skills/review.md`](.ai/skills/review.md), [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md) |
+| Reviewing / self-reviewing code | [`.ai/skills/review.md`](.ai/skills/review.md), [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md), [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md) |
 | Investigating a topic / drafting an ADR | [`.ai/skills/adr-process.md`](.ai/skills/adr-process.md) |
 
 ## 3. Memory (Persistent Context)
