@@ -46,27 +46,51 @@ infrastructure/
     │   └── loader.rs                         # Directory walking and SystemContext assembly
     │
     ├── persistence/                          # Database storage engine
-    │   ├── mod.rs
-    │   ├── naming/                           # SQL naming conventions (tables, junction, columns)
-    │   │   ├── mod.rs
-    │   │   ├── sanitize.rs                   # Identifier sanitization, kebab_to_snake, and reserved SQL keywords
-    │   │   └── identifiers.rs
+    │   ├── mod.rs                            # Facade re-exporting repositories, migration, naming, and PersistenceError
+    │   ├── error.rs                          # PersistenceError enum
+    │   ├── naming/                           # SQL naming conventions & precomputed static cache
+    │   │   ├── mod.rs                        # Naming Facade
+    │   │   ├── sanitize.rs                   # join_snake_segments, kebab_to_snake, RESERVED_SQL_KEYWORDS
+    │   │   ├── identifiers.rs                # Table, junction, column, index, and FK naming functions
+    │   │   └── registry.rs                   # SchemaNaming, DocumentTypeNaming, StaticIden (&'static str)
     │   ├── migration/                        # Static and dynamic schema migrations
-    │   │   ├── mod.rs
+    │   │   ├── mod.rs                        # Migration Facade
     │   │   ├── embedded.rs                   # SQLx static migrator
-    │   │   └── dynamic_sync.rs               # DDL generator for wide tables & junction tables
-    │   ├── query/                            # Dynamic query generation & OCC helpers
+    │   │   └── dynamic/                      # 9-module dynamic DDL synchronizer & preview planner
+    │   │       ├── mod.rs
+    │   │       ├── model.rs
+    │   │       ├── step.rs
+    │   │       ├── builder.rs
+    │   │       ├── introspector.rs
+    │   │       ├── diff.rs
+    │   │       ├── planner.rs
+    │   │       ├── ddl.rs
+    │   │       ├── executor.rs
+    │   │       └── sync.rs
+    │   ├── query/                            # Pure Sea-Query SQL builders & OCC retry helper
     │   │   ├── mod.rs
-    │   │   ├── wide_table.rs                 # Sea-query builder for published wide tables
-    │   │   ├── junction.rs                   # Sea-query builder for relation link tables
+    │   │   ├── common.rs                     # StaticIden constants, query compilers, filter & value mappers
+    │   │   ├── wide_table.rs                 # Published wide table queries
+    │   │   ├── drafts.rs                     # JSONB document_drafts queries
+    │   │   ├── headers.rs                    # Admin headers & UNION ALL display title queries
+    │   │   ├── junction.rs                   # Relational link table queries
+    │   │   ├── snapshots.rs                  # Immutable document_snapshots queries
+    │   │   ├── auth.rs                       # Roles, permissions, assignments & access request queries
     │   │   └── occ.rs                        # Concurrency retry loop for SQLSTATE 40001
-    │   └── repositories/                     # Domain repository implementations
-    │       ├── mod.rs
+    │   └── repositories/                     # Domain repository implementations, codecs & row mappers
+    │       ├── mod.rs                        # Repositories Facade (exports 5 Sqlx*Repository structs)
+    │       ├── codec.rs                      # Schema-driven JSONB & URN serialization/deserialization
+    │       ├── relations.rs                  # Junction table sync & batch relation loading helpers
+    │       ├── mappers/                      # Pure PgRow -> Domain entity reconstitution mappers
+    │       │   ├── mod.rs
+    │       │   ├── document_row.rs
+    │       │   ├── snapshot_row.rs
+    │       │   └── auth_row.rs
     │       ├── document_instance.rs          # SqlxDocumentInstanceRepository (ADR-004)
     │       ├── document_snapshot.rs          # SqlxDocumentSnapshotRepository (ADR-004)
-    │       ├── role.rs                       # SqlxRoleRepository (ADR-005)
-    │       ├── user_role_assignment.rs       # SqlxUserRoleAssignmentRepository (ADR-005)
-    │       └── access_request.rs             # SqlxAccessRequestRepository (ADR-005)
+    │       ├── role.rs                       # SqlxRoleRepository
+    │       ├── user_role_assignment.rs       # SqlxUserRoleAssignmentRepository
+    │       └── access_request.rs             # SqlxAccessRequestRepository
     │
     ├── auth/                                 # Authentication and security machinery
     │   ├── mod.rs
@@ -92,12 +116,15 @@ infrastructure/
     │       └── health.rs                     # /healthz and /ready endpoints
     │
     └── cli/                                  # CLI configuration and execution modes
-        ├── mod.rs
-        ├── config.rs                         # ServerConfig, RunMode, and environment parsing
-        ├── runner.rs                         # Main runner dispatcher (Service, Migrate, DryRun)
-        ├── dry_run.rs                        # Offline validation of config & schemas
-        ├── migrate.rs                        # Standalone migration execution
-        └── service.rs                        # Long-running HTTP service startup
+        ├── mod.rs                            # CLI Facade
+        ├── config.rs                         # CliConfig, RunMode, OutputFormat & layered resolution
+        ├── error.rs                          # CliError enum
+        ├── report.rs                         # CliOutcome & text/JSON report formatters
+        ├── runner.rs                         # Main runner dispatcher (Test, DryRun, Migrate, Service)
+        ├── test_config.rs                    # Offline validation of config & schemas
+        ├── dry_run.rs                        # Live/offline migration preview & DDL output
+        ├── migrate.rs                        # Standalone static + dynamic migration execution
+        └── service.rs                        # Long-running HTTP service startup (Phase 4B)
 ```
 
 ---
@@ -115,6 +142,7 @@ use domain::system::SystemContext;
 use sqlx::PgPool;
 
 use crate::auth::AuthAppState;
+use crate::persistence::naming::SchemaNaming;
 use crate::persistence::repositories::{
     SqlxAccessRequestRepository, SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository,
     SqlxRoleRepository, SqlxUserRoleAssignmentRepository,
@@ -124,6 +152,7 @@ use crate::persistence::repositories::{
 #[derive(Clone)]
 pub struct PersistenceContainer {
     pub pool: PgPool,
+    pub naming: &'static SchemaNaming,
     pub instance_repo: SqlxDocumentInstanceRepository,
     pub snapshot_repo: SqlxDocumentSnapshotRepository,
     pub role_repo: SqlxRoleRepository,
