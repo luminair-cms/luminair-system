@@ -1,10 +1,19 @@
 # ==============================================================================
 # Luminair Docker Compose Configuration
 # ==============================================================================
-# Manual CLI Invocation Commands:
+# Services:
+# 1. Start background infrastructure services (PostgreSQL + Dex OIDC provider):
+#    docker compose up -d
+#    # or individually:
+#    docker compose up -d postgres dex
 #
-# 1. Start PostgreSQL database service (background):
-#    docker compose up -d postgres
+#    Dex Authentication Provider (Lightweight alternative to Keycloak):
+#    - Issuer: http://localhost:5556/dex
+#    - Discovery: http://localhost:5556/dex/.well-known/openid-configuration
+#    - Pre-seeded local users (Password: "password"):
+#      * admin@luminair.dev  (sub: 08a1d7f3-admin-sub)
+#      * editor@luminair.dev (sub: 08a1d7f3-editor-sub)
+#    - Pre-configured client: luminair-admin-spa (redirects to :5173/callback, :3000/callback)
 #
 # 2. Run CLI commands by hand:
 #    - Test mode (in-memory schema validation, no DB required):
@@ -42,6 +51,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    container_name: luminair-dex
+    restart: unless-stopped
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./config/dex.yaml:/etc/dex/config.yaml:ro
+    command: ["serve", "/etc/dex/config.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5556/dex/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 3s
 
   cli-test:
     build:

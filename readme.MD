@@ -31,7 +31,25 @@ Luminair provides a CLI (in the `infrastructure` binary) supporting three execut
 
 ### 1. Run via Docker Compose
 
-[`docker-compose.yml`](./docker-compose.yml) defines a PostgreSQL 17 service (`postgres`) and dedicated CLI runner services (`cli` profile) that mount `./config` read-only into `/app/config`.
+[`docker-compose.yml`](./docker-compose.yml) defines background infrastructure services:
+- **`postgres`**: PostgreSQL 17 database service on port `5432`.
+- **`dex`**: Lightweight Dex OIDC identity provider (Keycloak alternative) on port `5556` configured via [`config/dex.yaml`](./config/dex.yaml).
+- **`cli-*`**: Dedicated CLI runner services (`cli` profile) that mount `./config` read-only into `/app/config`.
+
+#### Start Background Services (Postgres & Dex OIDC)
+```bash
+docker compose up -d postgres dex
+# or start all background services:
+docker compose up -d
+```
+
+**Dex Authentication Provider Details**:
+- **Issuer**: `http://localhost:5556/dex`
+- **Discovery**: `http://localhost:5556/dex/.well-known/openid-configuration`
+- **Pre-seeded Users** (Password: `password`):
+  - `admin@luminair.dev` (Subject: `08a1d7f3-admin-sub`)
+  - `editor@luminair.dev` (Subject: `08a1d7f3-editor-sub`)
+- **Configured Client**: `luminair-admin-spa` (Redirect URIs: `http://localhost:5173/callback`, `http://localhost:3000/callback`)
 
 #### A. Test Mode (Config & Schema Validation — No DB Required)
 ```bash

@@ -57,15 +57,19 @@ flowchart TD
 
 ```rust
 pub struct HttpState<
-    D = ProductionDocumentsService,
-    A = ProductionAccessRequestsService,
+    D = DocumentsServiceImpl<SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository>,
+    A = AccessRequestsServiceImpl<
+        SqlxAccessRequestRepository,
+        SqlxUserRoleAssignmentRepository,
+        SqlxRoleRepository,
+    >,
     S = SchemaServiceImpl,
     C = SystemConfigServiceImpl,
     H = SqlxHealthChecker,
-    Auth = DefaultAuthResolver,
+    Auth = SqlxAuthResolver,
 > {
     pub context: &'static SystemContext,
-    pub auth: Arc<Auth>,
+    pub auth_resolver: Arc<Auth>,
     pub documents_service: Arc<D>,
     pub access_requests_service: Arc<A>,
     pub schema_service: Arc<S>,
@@ -75,7 +79,7 @@ pub struct HttpState<
 ```
 
 - **Manual `Clone` via `Arc::clone`**: Implemented without requiring `D: Clone, A: Clone, ...` bounds on the service traits.
-- **Interface-Segregated `Has*` Traits**: Each handler module constrains only the single service trait it calls (`HasDocumentsService`, `HasAccessRequestsService`, `HasSchemaService`, `HasSystemConfigService`, `HasHealthChecker`, `HasAuthResolver`), keeping handler signatures concise and reusable across REST and GraphQL.
+- **Interface-Segregated `Has*` Traits**: Each handler module constrains only the single service trait it calls (`HasSystemContext`, `HasDocumentsService`, `HasAccessRequestsService`, `HasSchemaService`, `HasSystemConfigService`, `HasHealthChecker`, `HasAuthResolver`), keeping handler signatures concise and reusable across REST and GraphQL.
 - **Zero-Database Route Testing**: Because routers and handlers are generic over service traits, `infrastructure/tests/api_test.rs` can instantiate `HttpState` over `application::test_support` in-memory fakes for fast end-to-end HTTP verification via `axum-test`.
 
 ---
@@ -99,27 +103,35 @@ To eliminate unnecessary `.clone()` calls and intermediate `serde_json::Value` h
 
 ## 3. Canonical Error Translation (`api::error`)
 
-Luminair conforms to RFC 9457 Problem Details for all non-2xx responses. `ApiError` wraps `ApplicationError`, attaches the request URI path (`instance`) when available, and serializes `ProblemDetails` with `Content-Type: application/problem+json`:
+Luminair conforms to RFC 9457 Problem Details for all non-2xx responses. `ApiError` wraps `ApiErrorKind` (`Application(ApplicationError)`, `Unauthenticated { code, detail }`, or `BadRequest { code, detail }`), attaches the request URI path (`instance`) when available (or via `inject_problem_instance` middleware), and serializes `ApiProblemDetails` with `Content-Type: application/problem+json`:
 
 ```rust
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use application::errors::ApplicationError;
 
 pub struct ApiError {
-    pub error: ApplicationError,
+    pub kind: ApiErrorKind,
     pub instance: Option<String>,
+}
+
+pub enum ApiErrorKind {
+    Application(ApplicationError),
+    Unauthenticated { code: &'static str, detail: String },
+    BadRequest { code: &'static str, detail: String },
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = StatusCode::from_u16(self.error.status_code())
-            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        let mut problem = self.error.to_problem_details();
+        let status = self.status_code();
+        let problem = self.to_problem_details();
         (
             status,
-            [(header::CONTENT_TYPE, "application/problem+json")],
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/problem+json"),
+            )],
             Json(problem),
         )
             .into_response()
@@ -131,19 +143,20 @@ impl IntoResponse for ApiError {
 
 ## 4. Authentication Machinery (`auth`)
 
-The `auth` module extracts and verifies incoming credentials, translating them into `AuthenticatedIdentity` (for onboarding) or the domain's strongly typed `CallerContext`:
+The `auth` module extracts and verifies incoming credentials, translating them into `AuthenticatedUser` (for onboarding) or the application's strongly typed `CallerContext`:
 
 ### 4.1 Authentication Providers & `AuthContextResolver`
 
-1. **OIDC Bearer Tokens (`auth::oidc`)**:
-   - Validates incoming JWT tokens in `Authorization: Bearer <token>`.
-   - Extracts subject (`sub`) as `UserId` alongside optional `email` and `name` claims.
+1. **OIDC Bearer Tokens (`auth::oidc`, `auth::claims`)**:
+   - Validates incoming JWT tokens in `Authorization: Bearer <token>` via `OidcTokenValidator` (HS256, RS256 PEM, or disabled test mode).
+   - Extracts subject (`sub`) as `UserId` alongside optional `email` (`Email`) and `name` (`DisplayName`) claims into `AuthenticatedUser` (`AuthenticatedIdentity::User`).
+   - *Local Development / Docker Compose*: [Dex](https://dexidp.io/) is provided via [`docker-compose.yml`](../../docker-compose.yml) and [`config/dex.yaml`](../../config/dex.yaml) on port `5556` (`http://localhost:5556/dex`) as a lightweight Keycloak alternative, pre-seeded with local users (`admin@luminair.dev`, `editor@luminair.dev`) and client `luminair-admin-spa`.
 2. **Service API Tokens (`auth::service_token`)**:
-   - Validates pre-shared machine-to-machine tokens mapping to `ActorId::Service(service_id)`.
+   - Validates pre-shared machine-to-machine tokens via `ServiceTokenRegistry` (`ServiceTokenEntry`), mapping to `ActorId::Service(service_id)` and `Vec<RoleId>`.
 3. **Shadow Users (`auth::shadow_user`)**:
-   - Records first-seen OIDC identities in `shadow_users` with `first_seen` and `last_seen` timestamps.
-4. **Typestate Axum Extractors (`auth::extractor`)**:
-   - `OnboardingUser(pub AuthenticatedIdentity)`: Used by `POST /api/v1/auth/access-requests` for authenticated OIDC users who do not yet have roles.
+   - Records seen OIDC identities in `shadow_users` with `first_seen` and `last_seen` timestamps via `ShadowUserRecorder` (`SqlxShadowUserRecorder` / `NoopShadowUserRecorder`).
+4. **Typestate Axum Extractors (`auth::extractor`, `auth::resolver`)**:
+   - `OnboardingUser(pub AuthenticatedUser)`: Used by `POST /api/v1/auth/access-requests` for authenticated OIDC users who do not yet have roles.
    - `Caller(pub CallerContext)`: Used by all protected endpoints; if an authenticated OIDC user has 0 assigned roles, checks `AccessRequestRepository` and returns the canonical onboarding status error (`403 access_not_requested`, `403 access_pending`, or `403 access_rejected`).
 
 ---
