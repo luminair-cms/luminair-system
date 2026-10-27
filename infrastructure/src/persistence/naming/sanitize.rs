@@ -85,16 +85,78 @@ pub fn is_reserved_sql_keyword(name: &str) -> bool {
     RESERVED_SQL_KEYWORDS.contains(&lower.as_str())
 }
 
+/// Joins multiple string segments into a single `snake_case` identifier in a single allocation.
+///
+/// Any hyphens (`'-'`) within segments are replaced with underscores (`'_'`), and segments
+/// are separated by underscores.
+#[must_use]
+pub fn join_snake_segments(segments: &[&str]) -> String {
+    if segments.is_empty() {
+        return String::new();
+    }
+    let total_len = segments.iter().map(|s| s.len()).sum::<usize>()
+        + segments.len().saturating_sub(1);
+    let mut result = String::with_capacity(total_len);
+    for (i, segment) in segments.iter().enumerate() {
+        if i > 0 {
+            result.push('_');
+        }
+        append_sanitized_segment(&mut result, segment);
+    }
+    result
+}
+
 /// Converts a kebab-case identifier to `snake_case`.
 /// E.g. `blog-post` -> `blog_post`, `hero-image-url` -> `hero_image_url`.
 #[must_use]
 pub fn kebab_to_snake(s: &str) -> String {
-    s.replace('-', "_")
+    join_snake_segments(&[s])
 }
+
+// ---------------------------------------------------------------------------
+// Private Helpers
+// ---------------------------------------------------------------------------
+
+fn append_sanitized_segment(buffer: &mut String, segment: &str) {
+    for c in segment.chars() {
+        if c == '-' {
+            buffer.push('_');
+        } else {
+            buffer.push(c);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_join_snake_segments_empty() {
+        assert_eq!(join_snake_segments(&[]), "");
+    }
+
+    #[test]
+    fn test_join_snake_segments_single() {
+        assert_eq!(join_snake_segments(&["article"]), "article");
+        assert_eq!(join_snake_segments(&["blog-post"]), "blog_post");
+    }
+
+    #[test]
+    fn test_join_snake_segments_multiple() {
+        assert_eq!(
+            join_snake_segments(&["articles", "author-tags", "links"]),
+            "articles_author_tags_links"
+        );
+        assert_eq!(
+            join_snake_segments(&["idx", "blog-posts", "created-at"]),
+            "idx_blog_posts_created_at"
+        );
+    }
 
     #[test]
     fn test_kebab_to_snake() {

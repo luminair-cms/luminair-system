@@ -85,7 +85,7 @@ async fn fetch_candidate_tables(pool: &PgPool) -> Result<Vec<String>, Persistenc
         r"
         SELECT table_name::TEXT
         FROM information_schema.tables
-        WHERE table_schema = 'public'
+        WHERE table_schema = current_schema()
           AND table_type = 'BASE TABLE'
         ORDER BY table_name;
         ",
@@ -115,7 +115,7 @@ async fn fetch_primary_keys(
           ON tc.constraint_name = kcu.constraint_name
          AND tc.table_schema = kcu.table_schema
         WHERE tc.constraint_type = 'PRIMARY KEY'
-          AND tc.table_schema = 'public';
+          AND tc.table_schema = current_schema();
         ",
     )
     .fetch_all(pool)
@@ -144,7 +144,7 @@ async fn fetch_columns(
             numeric_precision,
             numeric_scale
         FROM information_schema.columns
-        WHERE table_schema = 'public'
+        WHERE table_schema = current_schema()
         ORDER BY table_name, ordinal_position;
         ",
     )
@@ -188,7 +188,7 @@ async fn fetch_indexes(
             indexname::TEXT,
             indexdef::TEXT
         FROM pg_indexes
-        WHERE schemaname = 'public'
+        WHERE schemaname = current_schema()
         ORDER BY tablename, indexname;
         ",
     )
@@ -255,7 +255,7 @@ async fn fetch_foreign_keys(
           ON rc.unique_constraint_name = ccu.constraint_name
          AND rc.unique_constraint_schema = ccu.table_schema
         WHERE tc.constraint_type = 'FOREIGN KEY'
-          AND tc.table_schema = 'public';
+          AND tc.table_schema = current_schema();
         ",
     )
     .fetch_all(pool)

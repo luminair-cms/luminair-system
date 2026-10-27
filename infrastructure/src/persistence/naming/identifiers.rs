@@ -4,7 +4,7 @@ use domain::schema::{
     AttributeId, DocumentKind, DocumentType, DocumentTypeId, FieldType,
 };
 
-use super::sanitize::kebab_to_snake;
+use super::sanitize::{join_snake_segments, kebab_to_snake};
 
 // ---------------------------------------------------------------------------
 // Standard Column Constants
@@ -39,6 +39,21 @@ pub const COL_DOCUMENT_ID: &str = "document_id";
 pub const COL_SOURCE_ID: &str = "source_id";
 pub const COL_TARGET_ID: &str = "target_id";
 pub const COL_ORDER_INDEX: &str = "order_index";
+
+// Auth / RBAC & Access Request specific columns
+pub const COL_NAME: &str = "name";
+pub const COL_DESCRIPTION: &str = "description";
+pub const COL_ROLE_ID: &str = "role_id";
+pub const COL_ACTION: &str = "action";
+pub const COL_USER_ID: &str = "user_id";
+pub const COL_GRANTED_AT: &str = "granted_at";
+pub const COL_GRANTED_BY: &str = "granted_by";
+pub const COL_EMAIL: &str = "email";
+pub const COL_REQUESTED_AT: &str = "requested_at";
+pub const COL_REJECTION_REASON: &str = "rejection_reason";
+pub const COL_REVIEWED_BY: &str = "reviewed_by";
+pub const COL_REVIEWED_AT: &str = "reviewed_at";
+pub const COL_ASSIGNED_ROLES: &str = "assigned_roles";
 
 // Static system table names
 pub const TABLE_ROLES: &str = "roles";
@@ -81,17 +96,26 @@ pub fn table_name_from_id(
 /// Computes the relational junction link table name: `[source_table]_[rel_attr]_links`.
 #[must_use]
 pub fn junction_table_name(source_table: &str, rel_attr: &AttributeId) -> String {
-    format!(
-        "{}_{}_links",
-        source_table,
-        kebab_to_snake(rel_attr.as_ref())
-    )
+    join_snake_segments(&[source_table, rel_attr.as_ref(), "links"])
 }
 
 /// Maps an `AttributeId` to its SQL column identifier (kebab-case to `snake_case`).
 #[must_use]
 pub fn column_name(attr_id: &AttributeId) -> String {
-    kebab_to_snake(attr_id.as_ref())
+    join_snake_segments(&[attr_id.as_ref()])
+}
+
+/// Computes a standard index or unique index identifier: `idx_[table]_[col]` or `uq_[table]_[col]`.
+#[must_use]
+pub fn index_name(table_name: &str, col_name: &str, unique: bool) -> String {
+    let prefix = if unique { "uq" } else { "idx" };
+    join_snake_segments(&[prefix, table_name, col_name])
+}
+
+/// Computes a foreign key constraint identifier: `fk_[junction_table]_[side]`.
+#[must_use]
+pub fn foreign_key_name(junction_table: &str, side: &str) -> String {
+    join_snake_segments(&["fk", junction_table, side])
 }
 
 /// Maps a domain `FieldType` to its physical SQL DDL type definition.
@@ -164,6 +188,34 @@ mod tests {
     fn test_column_name() {
         let attr = AttributeId::try_new("hero-image-url").unwrap();
         assert_eq!(column_name(&attr), "hero_image_url");
+    }
+
+    #[test]
+    fn test_index_name() {
+        assert_eq!(
+            index_name("articles", "published_at", false),
+            "idx_articles_published_at"
+        );
+        assert_eq!(
+            index_name("articles", "slug", true),
+            "uq_articles_slug"
+        );
+        assert_eq!(
+            index_name("blog-posts", "hero-image", false),
+            "idx_blog_posts_hero_image"
+        );
+    }
+
+    #[test]
+    fn test_foreign_key_name() {
+        assert_eq!(
+            foreign_key_name("articles_tags_links", "source"),
+            "fk_articles_tags_links_source"
+        );
+        assert_eq!(
+            foreign_key_name("articles_tags_links", "target"),
+            "fk_articles_tags_links_target"
+        );
     }
 
     #[test]

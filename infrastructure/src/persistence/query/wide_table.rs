@@ -1,192 +1,176 @@
 //! Sea-Query dynamic query builders for document wide tables.
 //!
 //! Provides SQL statement construction for published wide table operations:
-//! single-instance reads, visitor pagination queries, filters, counts, and upserts.
+//! single-instance reads, visitor pagination queries, filters, counts, upserts,
+//! and draft flag updates.
 
-use sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, Order, Query, SelectStatement};
+use chrono::{DateTime, Utc};
+use sea_query::{
+    Asterisk, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, OnConflict, Order, Query,
+    SelectStatement, SimpleExpr, UpdateStatement,
+};
 use uuid::Uuid;
 
+use domain::content::instance::{DocumentInstance, PublicationState};
 use domain::content::ports::{FieldFilter, Pagination};
-use domain::content::values::{DomainValue, PrimitiveValue};
 
-use crate::persistence::naming::{
-    COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES, COL_HAS_PENDING_DRAFT,
-    COL_ID, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_REVISION, COL_UPDATED_AT, COL_UPDATED_BY,
-    column_name,
+use crate::persistence::error::PersistenceError;
+use crate::persistence::naming::DocumentTypeNaming;
+use crate::persistence::query::common::{
+    apply_pagination, apply_wide_table_filters, content_value_to_sea_value,
+    IDEN_HAS_PENDING_DRAFT, IDEN_ID, IDEN_PUBLISHED_AT,
 };
 
 // ---------------------------------------------------------------------------
 // Public Wide Table Query Builders
 // ---------------------------------------------------------------------------
 
-/// Builds a `SELECT * FROM {table_name} WHERE id = $1` query statement.
+/// Builds a `SELECT * FROM [table] WHERE id = $1` query statement.
 #[must_use]
-pub fn select_by_id_query(table_name: &str, id: Uuid) -> SelectStatement {
+pub fn select_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
-    stmt.from(Alias::new(table_name))
+    stmt.from(type_naming.table_iden)
         .column(Asterisk)
-        .and_where(Expr::col(Alias::new(COL_ID)).eq(id));
+        .and_where(Expr::col(IDEN_ID).eq(id));
     stmt
-}
-
-/// Builds a parameterized SQL string for `SELECT * FROM {table_name} WHERE id = $1`.
-#[must_use]
-pub fn select_by_id_sql(table_name: &str) -> String {
-    format!("SELECT * FROM {table_name} WHERE {COL_ID} = $1;")
 }
 
 /// Builds a paginated `find_published` query with field equality filters.
-#[must_use]
+///
+/// Per ADR-004, all rows in `[type]` are published documents (modified rows retain
+/// live published data here while draft edits live in `document_drafts`), so
+/// `has_pending_draft` is NOT filtered.
 pub fn find_published_query(
-    table_name: &str,
+    type_naming: &DocumentTypeNaming,
     filters: &[FieldFilter],
     pagination: Pagination,
-) -> SelectStatement {
+) -> Result<SelectStatement, PersistenceError> {
     let mut stmt = Query::select();
-    stmt.from(Alias::new(table_name))
-        .column(Asterisk)
-        .and_where(Expr::col(Alias::new(COL_HAS_PENDING_DRAFT)).eq(false));
+    stmt.from(type_naming.table_iden).column(Asterisk);
 
-    apply_field_filters(&mut stmt, filters);
+    apply_wide_table_filters(&mut stmt, type_naming, filters)?;
 
-    let page_offset = u64::from(pagination.page.saturating_sub(1));
-    let page_size = u64::from(pagination.page_size);
-    let offset = page_offset * page_size;
-    stmt.order_by(Alias::new(COL_PUBLISHED_AT), Order::Desc)
-        .limit(page_size)
-        .offset(offset);
+    stmt.order_by(IDEN_PUBLISHED_AT, Order::Desc)
+        .order_by(IDEN_ID, Order::Asc);
 
-    stmt
+    apply_pagination(&mut stmt, pagination);
+
+    Ok(stmt)
 }
 
-/// Builds a `COUNT(*)` query for published rows matching the given filters.
-#[must_use]
-pub fn count_published_query(table_name: &str, filters: &[FieldFilter]) -> SelectStatement {
+/// Builds a `COUNT(id)` query for published rows matching the given filters.
+pub fn count_published_query(
+    type_naming: &DocumentTypeNaming,
+    filters: &[FieldFilter],
+) -> Result<SelectStatement, PersistenceError> {
     let mut stmt = Query::select();
-    stmt.from(Alias::new(table_name))
-        .expr(Func::count(Expr::col(Alias::new(COL_ID))))
-        .and_where(Expr::col(Alias::new(COL_HAS_PENDING_DRAFT)).eq(false));
+    stmt.from(type_naming.table_iden)
+        .expr(Func::count(Expr::col(IDEN_ID)));
 
-    apply_field_filters(&mut stmt, filters);
-    stmt
+    apply_wide_table_filters(&mut stmt, type_naming, filters)?;
+
+    Ok(stmt)
 }
 
-/// Builds a batch `SELECT id, display_title FROM {table_name} WHERE id IN (...)` query.
-#[must_use]
-pub fn find_display_titles_by_ids_query(table_name: &str, ids: &[Uuid]) -> SelectStatement {
-    let mut stmt = Query::select();
-    stmt.from(Alias::new(table_name))
-        .columns([Alias::new(COL_ID), Alias::new(COL_DISPLAY_TITLE)])
-        .and_where(Expr::col(Alias::new(COL_ID)).is_in(ids.to_vec()));
-    stmt
-}
+/// Builds an upsert statement for publishing a document instance into its wide table.
+pub fn upsert_wide_table_query(
+    type_naming: &DocumentTypeNaming,
+    instance: &DocumentInstance,
+    revision: u32,
+    display_values_json: serde_json::Value,
+    display_title: &str,
+) -> Result<InsertStatement, PersistenceError> {
+    let (published_at, published_by) = extract_published_audit(instance);
+    let rev_i32 = i32::try_from(revision).unwrap_or(i32::MAX);
 
-/// Builds the SQL string for updating the `has_pending_draft` flag on a wide table row.
-#[must_use]
-pub fn update_has_pending_draft_sql(table_name: &str) -> String {
-    format!("UPDATE {table_name} SET {COL_HAS_PENDING_DRAFT} = $1 WHERE {COL_ID} = $2;")
-}
+    let mut values: Vec<SimpleExpr> = Vec::with_capacity(type_naming.wide_upsert_columns.len());
+    values.push(instance.id.into_inner().into());
+    values.push(false.into());
+    values.push(display_values_json.into());
+    values.push(display_title.to_string().into());
 
-/// Builds the SQL string for deleting a row from a wide table by primary key.
-#[must_use]
-pub fn delete_by_id_sql(table_name: &str) -> String {
-    format!("DELETE FROM {table_name} WHERE {COL_ID} = $1;")
-}
-
-/// Builds the SQL string for upserting a published document into its wide table.
-#[must_use]
-pub fn build_upsert_wide_table_sql(table_name: &str, custom_columns: &[String]) -> String {
-    let mut columns = vec![
-        COL_ID.to_string(),
-        COL_HAS_PENDING_DRAFT.to_string(),
-        COL_DISPLAY_VALUES.to_string(),
-        COL_DISPLAY_TITLE.to_string(),
-    ];
-    for col in custom_columns {
-        columns.push(col.clone());
+    for (attr_id, col_naming) in &type_naming.field_columns {
+        let sea_val = content_value_to_sea_value(
+            &col_naming.field_type,
+            instance.content.get_field(attr_id),
+        )?;
+        values.push(sea_val.into());
     }
-    columns.extend([
-        COL_REVISION.to_string(),
-        COL_PUBLISHED_AT.to_string(),
-        COL_PUBLISHED_BY.to_string(),
-        COL_CREATED_AT.to_string(),
-        COL_CREATED_BY.to_string(),
-        COL_UPDATED_AT.to_string(),
-        COL_UPDATED_BY.to_string(),
-    ]);
 
-    let placeholders: Vec<String> = (1..=columns.len()).map(|i| format!("${i}")).collect();
+    values.push(rev_i32.into());
+    values.push(published_at.into());
+    values.push(published_by.into());
+    values.push(instance.audit.created_at.into());
+    values.push(instance.audit.created_by.to_urn().into());
+    values.push(instance.audit.updated_at.into());
+    values.push(instance.audit.updated_by.to_urn().into());
 
-    let mut update_clauses = vec![
-        format!("{COL_HAS_PENDING_DRAFT} = EXCLUDED.{COL_HAS_PENDING_DRAFT}"),
-        format!("{COL_DISPLAY_VALUES} = EXCLUDED.{COL_DISPLAY_VALUES}"),
-        format!("{COL_DISPLAY_TITLE} = EXCLUDED.{COL_DISPLAY_TITLE}"),
-    ];
-    for col in custom_columns {
-        update_clauses.push(format!("{col} = EXCLUDED.{col}"));
-    }
-    update_clauses.extend([
-        format!("{COL_REVISION} = EXCLUDED.{COL_REVISION}"),
-        format!("{COL_PUBLISHED_AT} = EXCLUDED.{COL_PUBLISHED_AT}"),
-        format!("{COL_PUBLISHED_BY} = EXCLUDED.{COL_PUBLISHED_BY}"),
-        format!("{COL_UPDATED_AT} = EXCLUDED.{COL_UPDATED_AT}"),
-        format!("{COL_UPDATED_BY} = EXCLUDED.{COL_UPDATED_BY}"),
-    ]);
+    let mut stmt = Query::insert();
+    stmt.into_table(type_naming.table_iden)
+        .columns(type_naming.wide_upsert_columns.iter().copied())
+        .values(values)
+        .map_err(|e| PersistenceError::Validation(e.to_string()))?
+        .on_conflict(
+            OnConflict::column(IDEN_ID)
+                .update_columns(type_naming.wide_update_columns.iter().copied())
+                .to_owned(),
+        );
 
-    format!(
-        "INSERT INTO {table_name} ({cols})\nVALUES ({vals})\nON CONFLICT ({COL_ID}) DO UPDATE SET\n    {updates};",
-        cols = columns.join(", "),
-        vals = placeholders.join(", "),
-        updates = update_clauses.join(",\n    ")
-    )
+    Ok(stmt)
+}
+
+/// Builds an `UPDATE [table] SET has_pending_draft = $1 WHERE id = $2` query statement.
+#[must_use]
+pub fn update_has_pending_draft_query(
+    type_naming: &DocumentTypeNaming,
+    id: Uuid,
+    has_pending_draft: bool,
+) -> UpdateStatement {
+    let mut stmt = Query::update();
+    stmt.table(type_naming.table_iden)
+        .value(IDEN_HAS_PENDING_DRAFT, has_pending_draft)
+        .and_where(Expr::col(IDEN_ID).eq(id));
+    stmt
+}
+
+/// Builds a `DELETE FROM [table] WHERE id = $1` query statement.
+#[must_use]
+pub fn delete_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> DeleteStatement {
+    let mut stmt = Query::delete();
+    stmt.from_table(type_naming.table_iden)
+        .and_where(Expr::col(IDEN_ID).eq(id));
+    stmt
+}
+
+/// Builds a `SELECT 1 FROM [table] LIMIT 1` query statement to check table existence/emptiness.
+#[must_use]
+pub fn exists_in_wide_table_query(type_naming: &DocumentTypeNaming) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(type_naming.table_iden)
+        .expr(Expr::val(1))
+        .limit(1);
+    stmt
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Private Helpers
 // ---------------------------------------------------------------------------
 
-fn apply_field_filters(stmt: &mut SelectStatement, filters: &[FieldFilter]) {
-    for filter in filters {
-        let col = column_name(&filter.attribute_id);
-        let sea_val = domain_value_to_sea_value(&filter.value);
-        stmt.and_where(Expr::col(Alias::new(col)).eq(sea_val));
-    }
-}
-
-/// Converts a domain value to a Sea-Query SQL parameter value.
-#[must_use]
-pub fn domain_value_to_sea_value(val: &DomainValue) -> sea_query::Value {
-    match val {
-        DomainValue::Primitive(p) => match p {
-            PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => s.clone().into(),
-            PrimitiveValue::Uuid(u) => (*u).into(),
-            PrimitiveValue::Integer(i) => (*i).into(),
-            PrimitiveValue::Decimal(d) => (*d).into(),
-            PrimitiveValue::Date(d) => (*d).into(),
-            PrimitiveValue::DateTime(dt) => (*dt).into(),
-            PrimitiveValue::Boolean(b) => (*b).into(),
-        },
-        DomainValue::Email(e) => e.as_ref().to_string().into(),
-        DomainValue::Url(u) => u.as_ref().to_string().into(),
-        DomainValue::Json(j) => {
-            let map: serde_json::Map<String, serde_json::Value> = j
-                .iter()
-                .map(|(k, v)| (k.clone(), primitive_value_to_json(v)))
-                .collect();
-            serde_json::Value::Object(map).into()
+fn extract_published_audit(instance: &DocumentInstance) -> (DateTime<Utc>, String) {
+    match &instance.content.publication_state {
+        PublicationState::Published {
+            published_at,
+            published_by,
+            ..
         }
-    }
-}
-
-fn primitive_value_to_json(p: &PrimitiveValue) -> serde_json::Value {
-    match p {
-        PrimitiveValue::Text(s) | PrimitiveValue::Uid(s) => serde_json::Value::String(s.clone()),
-        PrimitiveValue::Uuid(u) => serde_json::Value::String(u.to_string()),
-        PrimitiveValue::Integer(i) => serde_json::Value::Number((*i).into()),
-        PrimitiveValue::Decimal(d) => serde_json::Value::String(d.to_string()),
-        PrimitiveValue::Date(d) => serde_json::Value::String(d.to_string()),
-        PrimitiveValue::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339()),
-        PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
+        | PublicationState::Modified {
+            published_at,
+            published_by,
+            ..
+        } => (*published_at, published_by.to_urn()),
+        PublicationState::Draft | PublicationState::Unpublished { .. } => {
+            (instance.audit.updated_at, instance.audit.updated_by.to_urn())
+        }
     }
 }
 
@@ -197,62 +181,182 @@ fn primitive_value_to_json(p: &PrimitiveValue) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::schema::AttributeId;
+    use std::collections::{HashMap, HashSet};
+    use chrono::TimeZone;
+    use domain::auth::ActorId;
+    use domain::common::DisplayName;
+    use domain::content::instance::{
+        AuditTrail, DocumentContent, DocumentInstanceId, PublicationState,
+    };
+    use domain::content::values::{ContentValue, DomainValue, PrimitiveValue};
+    use domain::schema::{
+        AttributeId, DocumentKind, DocumentType, DocumentTypeId, DocumentTypeInfo,
+        DocumentTypeOptions, FieldDefinition, FieldType, IntegerSize, PrimitiveType,
+        SchemaRegistry,
+    };
     use sea_query::PostgresQueryBuilder;
+
+    fn make_test_type_naming() -> DocumentTypeNaming {
+        let title_field = FieldDefinition {
+            id: AttributeId::try_new("title").unwrap(),
+            field_type: FieldType::Primitive(PrimitiveType::Text),
+            unique: false,
+            required: true,
+            constraints: HashSet::new(),
+        };
+        let views_field = FieldDefinition {
+            id: AttributeId::try_new("views").unwrap(),
+            field_type: FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32)),
+            unique: false,
+            required: false,
+            constraints: HashSet::new(),
+        };
+        let type_id = DocumentTypeId::try_new("article").unwrap();
+        let plural_id = DocumentTypeId::try_new("articles").unwrap();
+        let doc_type = DocumentType {
+            id: type_id.clone(),
+            kind: DocumentKind::Collection,
+            info: DocumentTypeInfo {
+                title: DisplayName::try_new("Article").unwrap(),
+                singular_name: type_id,
+                plural_name: plural_id,
+                description: None,
+                display_fields: vec![],
+            },
+            options: DocumentTypeOptions {
+                draft_and_publish: true,
+            },
+            fields: [title_field, views_field].into_iter().collect(),
+            relations: Default::default(),
+        };
+
+        let registry = SchemaRegistry::new(vec![doc_type]);
+        let schema_naming = crate::persistence::naming::SchemaNaming::new(&registry);
+        schema_naming
+            .get(&DocumentTypeId::try_new("article").unwrap())
+            .unwrap()
+            .clone()
+    }
 
     #[test]
     fn test_select_by_id_query() {
+        let type_naming = make_test_type_naming();
         let id = Uuid::nil();
-        let stmt = select_by_id_query("articles", id);
+        let stmt = select_by_id_query(&type_naming, id);
         let sql = stmt.to_string(PostgresQueryBuilder);
-        assert!(sql.contains("SELECT * FROM \"articles\""));
-        assert!(sql.contains("\"id\" ="));
+        assert!(sql.contains("SELECT * FROM \"articles\" WHERE \"id\" ="));
     }
 
     #[test]
     fn test_find_published_query() {
+        let type_naming = make_test_type_naming();
         let filter = FieldFilter {
-            attribute_id: AttributeId::try_new("slug").unwrap(),
-            value: DomainValue::Primitive(PrimitiveValue::Uid("rust-rocks".to_string())),
+            attribute_id: AttributeId::try_new("title").unwrap(),
+            value: DomainValue::Primitive(PrimitiveValue::Text("Rust News".to_string())),
         };
         let pagination = Pagination {
             page: 2,
             page_size: 10,
         };
-        let stmt = find_published_query("articles", &[filter], pagination);
+        let stmt = find_published_query(&type_naming, &[filter], pagination).unwrap();
         let sql = stmt.to_string(PostgresQueryBuilder);
 
         assert!(sql.contains("SELECT * FROM \"articles\""));
-        assert!(sql.contains("\"has_pending_draft\" = FALSE"));
-        assert!(sql.contains("\"slug\" = 'rust-rocks'"));
-        assert!(sql.contains("ORDER BY \"published_at\" DESC"));
-        assert!(sql.contains("LIMIT 10"));
-        assert!(sql.contains("OFFSET 10"));
+        assert!(!sql.contains("\"has_pending_draft\" = FALSE"));
+        assert!(sql.contains("\"title\" = 'Rust News'"));
+        assert!(sql.contains("ORDER BY \"published_at\" DESC, \"id\" ASC"));
+        assert!(sql.contains("LIMIT 10 OFFSET 10"));
     }
 
     #[test]
     fn test_count_published_query() {
-        let stmt = count_published_query("articles", &[]);
+        let type_naming = make_test_type_naming();
+        let stmt = count_published_query(&type_naming, &[]).unwrap();
         let sql = stmt.to_string(PostgresQueryBuilder);
-        assert!(sql.contains("COUNT(\"id\")"));
-        assert!(sql.contains("\"has_pending_draft\" = FALSE"));
+        assert!(sql.contains("SELECT COUNT(\"id\") FROM \"articles\""));
+        assert!(!sql.contains("\"has_pending_draft\""));
     }
 
     #[test]
-    fn test_build_upsert_wide_table_sql() {
-        let sql = build_upsert_wide_table_sql("articles", &["slug".into(), "title".into()]);
-        assert!(sql.starts_with("INSERT INTO articles (id, has_pending_draft, display_values, display_title, slug, title, revision, published_at, published_by, created_at, created_by, updated_at, updated_by)"));
-        assert!(sql.contains("ON CONFLICT (id) DO UPDATE SET"));
-        assert!(sql.contains("slug = EXCLUDED.slug"));
-        assert!(sql.contains("title = EXCLUDED.title"));
+    fn test_upsert_wide_table_query() {
+        let type_naming = make_test_type_naming();
+        let id = Uuid::nil();
+        let fixed_time = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        let user = ActorId::User(domain::auth::UserId::try_new("alice").unwrap());
+
+        let mut fields = HashMap::new();
+        fields.insert(
+            AttributeId::try_new("title").unwrap(),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
+                "My Post".to_string(),
+            ))),
+        );
+        fields.insert(
+            AttributeId::try_new("views").unwrap(),
+            ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(42))),
+        );
+
+        let instance = DocumentInstance {
+            id: DocumentInstanceId::new(id),
+            document_type_id: DocumentTypeId::try_new("article").unwrap(),
+            content: DocumentContent::new(
+                fields,
+                PublicationState::Published {
+                    revision: 1,
+                    published_at: fixed_time,
+                    published_by: user.clone(),
+                },
+            ),
+            relations: HashMap::new(),
+            populated_relations: HashMap::new(),
+            audit: AuditTrail {
+                created_at: fixed_time,
+                created_by: user.clone(),
+                updated_at: fixed_time,
+                updated_by: user,
+                version: 1,
+            },
+        };
+
+        let stmt = upsert_wide_table_query(
+            &type_naming,
+            &instance,
+            1,
+            serde_json::json!({"title": "My Post"}),
+            "My Post",
+        )
+        .unwrap();
+
+        let sql = stmt.to_string(PostgresQueryBuilder);
+        assert!(sql.starts_with("INSERT INTO \"articles\" (\"id\", \"has_pending_draft\", \"display_values\", \"display_title\", \"title\", \"views\", \"revision\", \"published_at\", \"published_by\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\")"));
+        assert!(sql.contains("ON CONFLICT (\"id\") DO UPDATE SET"));
+        assert!(sql.contains("\"title\" = \"excluded\".\"title\""));
+        assert!(sql.contains("\"views\" = \"excluded\".\"views\""));
     }
 
     #[test]
-    fn test_find_display_titles_by_ids_query() {
-        let u1 = Uuid::nil();
-        let stmt = find_display_titles_by_ids_query("articles", &[u1]);
+    fn test_update_has_pending_draft_query() {
+        let type_naming = make_test_type_naming();
+        let id = Uuid::nil();
+        let stmt = update_has_pending_draft_query(&type_naming, id, true);
         let sql = stmt.to_string(PostgresQueryBuilder);
-        assert!(sql.contains("\"id\", \"display_title\""));
-        assert!(sql.contains("\"id\" IN"));
+        assert!(sql.contains("UPDATE \"articles\" SET \"has_pending_draft\" = TRUE WHERE \"id\" ="));
+    }
+
+    #[test]
+    fn test_delete_by_id_query() {
+        let type_naming = make_test_type_naming();
+        let id = Uuid::nil();
+        let stmt = delete_by_id_query(&type_naming, id);
+        let sql = stmt.to_string(PostgresQueryBuilder);
+        assert!(sql.contains("DELETE FROM \"articles\" WHERE \"id\" ="));
+    }
+
+    #[test]
+    fn test_exists_in_wide_table_query() {
+        let type_naming = make_test_type_naming();
+        let stmt = exists_in_wide_table_query(&type_naming);
+        let sql = stmt.to_string(PostgresQueryBuilder);
+        assert!(sql.contains("SELECT 1 FROM \"articles\" LIMIT 1"));
     }
 }

@@ -14,8 +14,8 @@ use super::model::{
 use crate::persistence::naming::{
     COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES, COL_HAS_PENDING_DRAFT,
     COL_ID, COL_ORDER_INDEX, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_REVISION, COL_SOURCE_ID,
-    COL_TARGET_ID, COL_UPDATED_AT, COL_UPDATED_BY, column_name, junction_table_name,
-    kebab_to_snake, table_name_for_document_type,
+    COL_TARGET_ID, COL_UPDATED_AT, COL_UPDATED_BY, column_name, foreign_key_name, index_name,
+    junction_table_name, kebab_to_snake, table_name_for_document_type,
 };
 
 // ---------------------------------------------------------------------------
@@ -172,14 +172,14 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
 
 fn append_standard_indexes(table: &mut TableDefinition, table_name: &str, doc_type: &DocumentType) {
     table.indexes.insert(IndexDefinition::new(
-        format!("idx_{table_name}_{COL_PUBLISHED_AT}"),
+        index_name(table_name, COL_PUBLISHED_AT, false),
         table_name,
         vec![COL_PUBLISHED_AT.into()],
         false,
     ));
 
     table.indexes.insert(IndexDefinition::new(
-        format!("idx_{table_name}_{COL_UPDATED_AT}"),
+        index_name(table_name, COL_UPDATED_AT, false),
         table_name,
         vec![COL_UPDATED_AT.into()],
         false,
@@ -189,7 +189,7 @@ fn append_standard_indexes(table: &mut TableDefinition, table_name: &str, doc_ty
         if field.unique {
             let col = column_name(&field.id);
             table.indexes.insert(IndexDefinition::new(
-                format!("uq_{table_name}_{col}"),
+                index_name(table_name, &col, true),
                 table_name,
                 vec![col],
                 true,
@@ -232,7 +232,7 @@ fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<
         });
 
         link.foreign_keys.insert(ForeignKeyDefinition::new(
-            format!("fk_{j_table_name}_source"),
+            foreign_key_name(&j_table_name, "source"),
             vec![COL_SOURCE_ID.into()],
             &source_table,
             vec![COL_ID.into()],
@@ -241,7 +241,7 @@ fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<
         ));
 
         link.foreign_keys.insert(ForeignKeyDefinition::new(
-            format!("fk_{j_table_name}_target"),
+            foreign_key_name(&j_table_name, "target"),
             vec![COL_TARGET_ID.into()],
             &target_table,
             vec![COL_ID.into()],
@@ -250,7 +250,7 @@ fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<
         ));
 
         link.indexes.insert(IndexDefinition::new(
-            format!("idx_{j_table_name}_{COL_TARGET_ID}"),
+            index_name(&j_table_name, COL_TARGET_ID, false),
             &j_table_name,
             vec![COL_TARGET_ID.into()],
             false,

@@ -42,6 +42,16 @@
         }
       ]
     },
+    "body": {
+      "type": "text",
+      "required": false
+    },
+    "views": {
+      "type": {
+        "integer": "int32"
+      },
+      "required": false
+    },
     "priority": {
       "type": {
         "integer": "int32"

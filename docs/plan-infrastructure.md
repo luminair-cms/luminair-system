@@ -7,8 +7,8 @@
   - Database Persistence & Adapters: [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md)
   - REST API & Authentication: [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md)
   - Canonical API Reference: [`docs/api.md`](./api.md)
-- **Status**: Phase 1 Complete — Ready for Phase 2 Execution
-- **Last Updated**: 2026-10-23
+- **Status**: Phases 1–3 Complete — Ready for Phase 4 Execution
+- **Last Updated**: 2026-10-27
 
 ---
 
@@ -85,16 +85,16 @@ flowchart TD
 
 ---
 
-### Phase 3: Repository Adapters
+### Phase 3: Repository Adapters (Complete)
 
 > **Detailed Specification**: See [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md#5-repository-adapters-persistencerepositories).
 
-- [ ] **Step 3.1: Content Repositories (`infrastructure/src/persistence/repositories/`)**
+- [x] **Step 3.1: Content Repositories (`infrastructure/src/persistence/repositories/`)**
   - Implement `SqlxDocumentInstanceRepository` conforming to ADR-004 Asymmetric Hybrid pattern (`save_draft`, `publish`, `unpublish`, `discard_draft`, `find_by_id`, `list_admin_headers`, `find_display_titles_by_ids`).
   - Implement `SqlxDocumentSnapshotRepository` (`save_snapshot`, `list_snapshots`, `get_snapshot`).
-- [ ] **Step 3.2: Auth Repositories**
+- [x] **Step 3.2: Auth Repositories**
   - Implement `SqlxRoleRepository`, `SqlxUserRoleAssignmentRepository`, and `SqlxAccessRequestRepository`.
-- [ ] **Step 3.3: Integration Test Suite (`infrastructure/tests/persistence_test.rs`)**
+- [x] **Step 3.3: Integration Test Suite (`infrastructure/tests/persistence_test.rs`)**
   - Test all repository operations against a live PostgreSQL test database.
 
 ---

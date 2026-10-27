@@ -14,28 +14,103 @@ Luminair targets **AWS Aurora DSQL** (distributed, active-active PostgreSQL-comp
 
 Client-side `Uuid::now_v7()` primary keys, JSONB serialization for drafts/snapshots, parameterized queries via `sea-query`, and an OCC retry loop (`SQLSTATE 40001`) ensure active-active high concurrency. See [`docs/design-infrastructure-persistence.md`](../design-infrastructure-persistence.md) §1 for technology stack details and driver contracts.
 
+### 1.1 Module Layout & Responsibility Matrix
+
+```mermaid
+flowchart TD
+    subgraph Facade["infrastructure::persistence (Public Facade)"]
+        PMod["persistence/mod.rs"]
+    end
+
+    subgraph Naming["persistence::naming (Generalized Rules & Precomputed Cache)"]
+        NMod["naming/mod.rs"]
+        NSanitize["naming/sanitize.rs<br/>(join_snake_segments, kebab_to_snake, RESERVED_SQL_KEYWORDS)"]
+        NIdent["naming/identifiers.rs<br/>(System Constants & Generalized Name Builders)"]
+        NReg["naming/registry.rs<br/>(SchemaNaming, DocumentTypeNaming, FieldColumnNaming, RelationNaming)"]
+    end
+
+    subgraph Query["persistence::query (Sea-Query SQL Builders)"]
+        QMod["query/mod.rs"]
+        QCommon["query/common.rs<br/>(StaticIden, SqlxBinder Helpers, Filters, Pagination, Value Mapping)"]
+        QWide["query/wide_table.rs<br/>(Dynamic Wide Table SELECT, COUNT, UPSERT, UPDATE, DELETE)"]
+        QDrafts["query/drafts.rs<br/>(document_drafts SELECT, UPSERT, DELETE, EXISTS)"]
+        QHeaders["query/headers.rs<br/>(Admin Headers UNION ALL & Display Title Batch Lookup)"]
+        QJunction["query/junction.rs<br/>(Junction Link Batch INSERT, DELETE, Owning & Inverse SELECT)"]
+        QSnap["query/snapshots.rs<br/>(document_snapshots INSERT, LIST HEADERS, GET BY REVISION)"]
+        QAuth["query/auth.rs<br/>(roles, role_permissions, user_role_assignments, access_requests)"]
+        QOcc["query/occ.rs<br/>(with_occ_retry exponential backoff)"]
+    end
+
+    subgraph Repos["persistence::repositories (Thin Adapters + Helpers)"]
+        RMod["repositories/mod.rs"]
+        RCodec["repositories/codec.rs<br/>(JSONB Content/Relations DTOs, ActorId URN, Status/Reason)"]
+        RMappers["repositories/mappers/<br/>(document_row.rs, snapshot_row.rs, auth_row.rs)"]
+        RRel["repositories/relations.rs<br/>(Junction Sync & 2-Phase Owning/Inverse Relation Enrichment)"]
+        RDoc["repositories/document_instance.rs<br/>(SqlxDocumentInstanceRepository)"]
+        RSnap["repositories/document_snapshot.rs<br/>(SqlxDocumentSnapshotRepository)"]
+        RRole["repositories/role.rs<br/>(SqlxRoleRepository)"]
+        RAssign["repositories/user_role_assignment.rs<br/>(SqlxUserRoleAssignmentRepository)"]
+        RAccess["repositories/access_request.rs<br/>(SqlxAccessRequestRepository)"]
+    end
+
+    PMod --> NMod & QMod & RMod
+    NReg --> NIdent --> NSanitize
+    QWide & QHeaders & QJunction --> NReg & QCommon
+    QDrafts & QSnap & QAuth --> NIdent & QCommon
+    RDoc --> NReg & QWide & QDrafts & QHeaders & QJunction & QSnap & QOcc
+    RDoc --> RMappers & RCodec & RRel
+    RSnap --> NReg & QSnap & RMappers & RCodec & QOcc
+    RRole & RAssign & RAccess --> QAuth & RMappers & QOcc
+```
+
+| Submodule | File | Single Responsibility |
+|---|---|---|
+| **`persistence::naming`** | `sanitize.rs` | Single-pass `join_snake_segments` builder, `kebab_to_snake`, and `RESERVED_SQL_KEYWORDS` checking. |
+| | `identifiers.rs` | System table/column constants and generalized name constructors (`table_name_for_document_type`, `column_name`, `junction_table_name`, `index_name`, `foreign_key_name`). |
+| | `registry.rs` | Startup-precomputed zero-allocation `SchemaNaming` cache (`DocumentTypeNaming`, `FieldColumnNaming`, `RelationNaming`, `StaticIden(&'static str)`). |
+| **`persistence::query`** | `common.rs` | `SqlxBinder` compilation helpers (`compile_select`, `compile_insert`, `compile_update`, `compile_delete`), shared `StaticIden` constants, pagination, filter application, and `ContentValue`/`DomainValue` $\rightarrow$ `sea_query::Value` conversion. |
+| | `wide_table.rs` | `sea-query` AST builders for dynamic wide tables `[type]` (`select_by_id`, `find_published`, `count_published`, `upsert_wide_table`, `update_has_pending_draft`, `delete_by_id`, `exists_in_wide_table`). |
+| | `drafts.rs` | `sea-query` AST builders for `document_drafts` (`select_draft_by_id`, `select_drafts_by_type`, `upsert_draft`, `delete_draft`, `exists_draft_for_type`). |
+| | `headers.rs` | `sea-query` AST builders for Admin Studio `list_admin_headers` (`UNION ALL` of drafts and clean published rows) and batched `find_display_titles_by_ids`. |
+| | `junction.rs` | `sea-query` AST builders for `[source]_[rel]_links` junction tables (`insert_links_batch`, `delete_links_by_source`, `select_targets_by_source`, `select_links_by_sources`, `select_links_by_targets`). |
+| | `snapshots.rs` | `sea-query` AST builders for `document_snapshots` (`insert_snapshot`, `list_snapshot_headers`, `get_snapshot_by_revision`). |
+| | `auth.rs` | `sea-query` AST builders for `roles`, `role_permissions`, `user_role_assignments`, and `access_requests`. |
+| | `occ.rs` | `with_occ_retry` exponential backoff wrapper for Aurora DSQL `SQLSTATE 40001`. |
+| **`persistence::repositories`** | `codec.rs` | Schema-driven JSONB serialization/deserialization (`ContentValue`, `ResolvedRelation`, `display_values`), `ActorId` URN formatting/parsing, and `DocumentStatus`/`SnapshotReason` string mapping. |
+| | `mappers/*` | Pure `sqlx::postgres::PgRow` $\rightarrow$ Domain entity reconstitution (`document_row.rs`, `snapshot_row.rs`, `auth_row.rs`). |
+| | `relations.rs` | Transactional junction table synchronization (`sync_owning_relations_in_tx`) and two-phase batch relation enrichment (`batch_fetch_relations` for both owning and pre-resolved inverse relations). |
+| | `document_instance.rs`, `document_snapshot.rs`, `role.rs`, `user_role_assignment.rs`, `access_request.rs` | Ultra-thin repository trait adapters (5–20 lines per method) orchestrating `query`, `mappers`, `codec`, `relations`, and `with_occ_retry`. |
+
 ---
 
-## 2. Naming Engine (`persistence::naming`)
+## 2. Naming Engine & Precomputed Cache (`persistence::naming`)
 
-The naming engine provides deterministic mapping from schema identifiers to SQL database identifiers conforming to PostgreSQL and Aurora DSQL length limits (max 63 bytes) and reserved keyword rules (`persistence::naming::sanitize`):
+The naming engine provides deterministic mapping from schema identifiers to SQL database identifiers conforming to PostgreSQL and Aurora DSQL length limits (max 63 bytes) and reserved keyword rules, while eliminating per-request string allocations via a startup-precomputed cache:
 
-- **Sanitization & Keyword Defense (`sanitize.rs`)**:
+- **Generalized Single-Pass Sanitization (`sanitize.rs` & `identifiers.rs`)**:
   - `RESERVED_SQL_KEYWORDS` & `is_reserved_sql_keyword(name)`: Prevents collision with ANSI and PostgreSQL reserved keywords (e.g. `user`, `order`, `table`, `select`). Also consumed by `schema_loader` during startup validation.
-  - `kebab_to_snake(name)`: Converts kebab-case identifiers to database snake_case.
-- **Document Wide Table**: `[type_id]` converted to snake_case and pluralized (e.g. `article` -> `articles`, `blog-post` -> `blog_posts`).
-- **Junction Link Table**: `[source_table]_[rel_attr]_links` (e.g. `articles_tags_links`, `articles_category_links`).
-- **Column Identifiers**: `[attr_id]` converted from kebab-case to snake-case (e.g. `hero-image-url` -> `hero_image_url`).
+  - `join_snake_segments(segments: &[&str]) -> String`: Single-pass, exact-capacity builder that joins segments with `'_'` and converts any `'-'` to `'_'` in one allocation.
+  - All identifier constructors delegate to `join_snake_segments`:
+    - **Document Wide Table (`table_name_for_document_type`)**: `[type_id]` pluralized (collections) or singular (singletons) in `snake_case` (e.g. `article` -> `articles`, `blog-post` -> `blog_posts`).
+    - **Junction Link Table (`junction_table_name`)**: `[source_table]_[rel_attr]_links` (e.g. `articles_tags_links`, `articles_category_links`).
+    - **Column Identifiers (`column_name`)**: `[attr_id]` in `snake_case` (e.g. `hero-image-url` -> `hero_image_url`).
+    - **Index & Foreign Key Identifiers (`index_name`, `foreign_key_name`)**: `idx_[table]_[col]`, `uq_[table]_[col]`, and `fk_[junction]_[side]`.
+- **Startup-Precomputed Zero-Allocation Cache (`naming/registry.rs`)**:
+  - Because `SchemaRegistry` (`&'static SystemContext`) is immutable after startup, `SchemaNaming::from_registry(registry)` precomputes and leaks (`Box::leak`) all SQL identifiers once at startup:
+    - `StaticIden(pub &'static str)`: Copyable zero-allocation `sea_query::Iden` wrapper around `&'static str` (avoids `Arc<str>` allocation in `Alias::new`).
+    - `DocumentTypeNaming`: Precomputed `table_name: &'static str`, `table_iden: StaticIden`, `field_columns: IndexMap<AttributeId, FieldColumnNaming>`, `wide_upsert_columns: &'static [StaticIden]`, `wide_update_columns: &'static [StaticIden]`, and `relations: IndexMap<AttributeId, RelationNaming>` (which pre-resolves junction tables for both owning `HasOne`/`HasMany` and inverse `BelongsToOne`/`BelongsToMany` relations).
 - **Standard Lifecycle Columns**:
   - `id UUID PRIMARY KEY`
+  - `has_pending_draft BOOLEAN NOT NULL DEFAULT FALSE`
+  - `display_values JSONB NOT NULL DEFAULT '{}'::jsonb`
+  - `display_title VARCHAR(255) NOT NULL`
   - `revision INT NOT NULL DEFAULT 1`
+  - `published_at TIMESTAMPTZ NOT NULL`
+  - `published_by VARCHAR(255) NOT NULL`
   - `created_at TIMESTAMPTZ NOT NULL`
   - `created_by VARCHAR(255) NOT NULL`
   - `updated_at TIMESTAMPTZ NOT NULL`
   - `updated_by VARCHAR(255) NOT NULL`
-  - `published_at TIMESTAMPTZ NOT NULL`
-  - `published_by VARCHAR(255) NOT NULL`
-  - `has_pending_draft BOOLEAN NOT NULL DEFAULT FALSE`
 
 ---
 
