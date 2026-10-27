@@ -1,0 +1,10 @@
+{
+  "defaultLocale": "en",
+  "availableLocales": [
+    "en",
+    "uk",
+    "fr",
+    "de"
+  ],
+  "instanceName": "Luminair Local Studio"
+}

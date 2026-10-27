@@ -1,0 +1,87 @@
+{
+  "kind": "collection",
+  "info": {
+    "singularName": "article",
+    "pluralName": "articles",
+    "displayName": "Blog Article",
+    "displayFields": [
+      "title",
+      "category"
+    ]
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "attributes": {
+    "title": {
+      "type": "text",
+      "required": true,
+      "constraints": [
+        {
+          "minLength": 5
+        },
+        {
+          "maxLength": 100
+        }
+      ]
+    },
+    "slug": {
+      "type": "uid",
+      "required": true,
+      "unique": true
+    },
+    "summary": {
+      "type": "localizedText",
+      "required": true,
+      "constraints": [
+        {
+          "minLength": 10
+        },
+        {
+          "maxLength": 500
+        }
+      ]
+    },
+    "priority": {
+      "type": {
+        "integer": "int32"
+      },
+      "required": true,
+      "unique": true,
+      "constraints": [
+        {
+          "min": 1
+        },
+        {
+          "max": 10
+        }
+      ]
+    },
+    "price": {
+      "type": {
+        "decimal": {
+          "precision": 10,
+          "scale": 2
+        }
+      },
+      "required": false,
+      "constraints": [
+        {
+          "minDecimal": "0.00"
+        }
+      ]
+    },
+    "metadata": {
+      "type": "json",
+      "required": false
+    },
+    "category": {
+      "relation": "hasOne",
+      "target": "category"
+    },
+    "tags": {
+      "relation": "hasMany",
+      "target": "tag"
+    }
+  }
+}

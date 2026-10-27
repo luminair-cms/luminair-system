@@ -1,0 +1,29 @@
+{
+  "kind": "collection",
+  "info": {
+    "singularName": "tag",
+    "pluralName": "tags",
+    "displayName": "Content Tag",
+    "displayFields": [
+      "name"
+    ]
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "name": {
+      "type": "text",
+      "required": true,
+      "unique": true,
+      "constraints": [
+        {
+          "minLength": 2
+        },
+        {
+          "maxLength": 32
+        }
+      ]
+    }
+  }
+}

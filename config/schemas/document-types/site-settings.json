@@ -1,0 +1,32 @@
+{
+  "kind": "singleton",
+  "info": {
+    "singularName": "site-settings",
+    "pluralName": "site-settings",
+    "displayName": "Global Site Settings",
+    "displayFields": [
+      "site-name"
+    ]
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "attributes": {
+    "site-name": {
+      "type": "text",
+      "required": true,
+      "constraints": [
+        {
+          "minLength": 2
+        },
+        {
+          "maxLength": 80
+        }
+      ]
+    },
+    "maintenance-mode": {
+      "type": "boolean",
+      "required": false
+    }
+  }
+}

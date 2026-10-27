@@ -1,0 +1,33 @@
+{
+  "kind": "collection",
+  "info": {
+    "singularName": "category",
+    "pluralName": "categories",
+    "displayName": "Article Category",
+    "displayFields": [
+      "name"
+    ]
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "name": {
+      "type": "text",
+      "required": true,
+      "unique": true,
+      "constraints": [
+        {
+          "minLength": 2
+        },
+        {
+          "maxLength": 50
+        }
+      ]
+    },
+    "articles": {
+      "relation": "belongsToMany",
+      "target": "article"
+    }
+  }
+}

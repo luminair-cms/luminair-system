@@ -13,6 +13,6 @@ mod sync;
 pub(crate) use model::SqlColumnType;
 pub use step::SafetyPolicy;
 pub use sync::{
-    SchemaSyncResult, generate_ddl_for_registry, sync_dynamic_schemas,
-    sync_dynamic_schemas_from_dir,
+    PlannedMigrationStep, SchemaSyncResult, generate_ddl_for_registry, preview_dynamic_schemas,
+    sync_dynamic_schemas, sync_dynamic_schemas_from_dir,
 };

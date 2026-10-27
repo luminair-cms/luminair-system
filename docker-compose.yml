@@ -1,0 +1,97 @@
+# ==============================================================================
+# Luminair Docker Compose Configuration
+# ==============================================================================
+# Manual CLI Invocation Commands:
+#
+# 1. Start PostgreSQL database service (background):
+#    docker compose up -d postgres
+#
+# 2. Run CLI commands by hand:
+#    - Test mode (in-memory schema validation, no DB required):
+#      docker compose run --rm cli-test
+#
+#    - Offline dry-run mode (offline schema & config validation, no DB required):
+#      docker compose run --rm cli-dry-run-offline
+#
+#    - Dry-run mode (connects to Postgres and validates schema diffs):
+#      docker compose run --rm cli-dry-run
+#
+#    - Migrate mode (applies static & dynamic migrations to Postgres):
+#      docker compose run --rm cli-migrate
+#
+# 3. Stop containers and cleanup:
+#    docker compose down
+#    docker compose down -v   # also removes named volumes
+# ==============================================================================
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: luminair-postgres
+    environment:
+      POSTGRES_USER: luminair
+      POSTGRES_PASSWORD: luminair
+      POSTGRES_DB: luminair
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U luminair -d luminair"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  cli-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - "cli"
+    volumes:
+      - ./config:/app/config:ro
+    command: ["--config", "/app/config/cli-config.json", "--mode", "test"]
+
+  cli-dry-run-offline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - "cli"
+    volumes:
+      - ./config:/app/config:ro
+    command: ["--config", "/app/config/cli-config.json", "--mode", "dry-run", "--offline"]
+
+  cli-dry-run:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - "cli"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LUMINAIR_DATABASE_URL: postgres://luminair:luminair@postgres:5432/luminair
+    volumes:
+      - ./config:/app/config:ro
+    command: ["--config", "/app/config/cli-config.json", "--mode", "dry-run"]
+
+  cli-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles:
+      - "cli"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LUMINAIR_DATABASE_URL: postgres://luminair:luminair@postgres:5432/luminair
+    volumes:
+      - ./config:/app/config:ro
+    command: ["--config", "/app/config/cli-config.json", "--mode", "migrate"]
+
+volumes:
+  postgres_data:
