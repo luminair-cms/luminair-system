@@ -13,21 +13,27 @@ use super::model::{
     SqlColumnType, TableDefinition, TableKind,
 };
 use crate::persistence::error::PersistenceError;
+use crate::persistence::naming::{
+    TABLE_ACCESS_REQUESTS, TABLE_DOCUMENT_DRAFTS, TABLE_DOCUMENT_SNAPSHOTS,
+    TABLE_DOCUMENT_TOMBSTONES, TABLE_ROLE_PERMISSIONS, TABLE_ROLES, TABLE_SHADOW_USERS,
+    TABLE_USER_ROLE_ASSIGNMENTS,
+};
 
 // ---------------------------------------------------------------------------
 // Constants & Types
 // ---------------------------------------------------------------------------
 
 /// Internal system and static migration tables excluded from dynamic schema management.
-pub const SYSTEM_TABLES: &[&str] = &[
+pub(super) const SYSTEM_TABLES: &[&str] = &[
     "_sqlx_migrations",
-    "roles",
-    "role_permissions",
-    "user_role_assignments",
-    "access_requests",
-    "shadow_users",
-    "document_drafts",
-    "document_snapshots",
+    TABLE_ROLES,
+    TABLE_ROLE_PERMISSIONS,
+    TABLE_USER_ROLE_ASSIGNMENTS,
+    TABLE_ACCESS_REQUESTS,
+    TABLE_SHADOW_USERS,
+    TABLE_DOCUMENT_DRAFTS,
+    TABLE_DOCUMENT_SNAPSHOTS,
+    TABLE_DOCUMENT_TOMBSTONES,
 ];
 
 type RawColumnRow = (
@@ -51,7 +57,7 @@ type RawFkRow = (String, String, String, String, String, String);
 ///
 /// # Errors
 /// Returns [`PersistenceError`] if database queries fail.
-pub async fn introspect_database_schema(pool: &PgPool) -> Result<DatabaseSchema, PersistenceError> {
+pub(super) async fn introspect_database_schema(pool: &PgPool) -> Result<DatabaseSchema, PersistenceError> {
     let candidate_tables = fetch_candidate_tables(pool).await?;
     if candidate_tables.is_empty() {
         return Ok(DatabaseSchema::new());
@@ -164,7 +170,6 @@ async fn fetch_columns(
             nullable,
             is_primary_key: is_pk,
             default_value: col_def,
-            unique: false,
         };
 
         map.entry(tbl).or_default().insert(col);
@@ -300,7 +305,7 @@ fn assemble_schema(
             TableKind::Entity
         };
 
-        let mut table = TableDefinition::new(&table_name, kind, false);
+        let mut table = TableDefinition::new(&table_name, kind);
         if let Some(cols) = columns_by_table.remove(&table_name) {
             table.columns = cols;
         }

@@ -8,13 +8,13 @@ pub async fn migrate(config: &ServerConfig) -> Result<MigrationSummary, CliError
         .await?;
 
     tracing::info!("Running static system migrations...");
-    run_migrations(&pool).await?;
+    run_static_migrations(&pool).await?;
 
     tracing::info!(
         "Synchronizing document schemas from '{}'...",
         config.schema_dir.display()
     );
-    let sync_result = sync_schemas(&pool, &config.schema_dir, SafetyPolicy::AdditiveOnly).await?;
+    let sync_result = sync_dynamic_schemas_from_dir(&pool, &config.schema_dir, SafetyPolicy::AdditiveOnly).await?;
 
     tracing::info!(
         "Migrations completed: {} dynamic DDL statements executed.",

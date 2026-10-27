@@ -20,9 +20,6 @@ pub enum PersistenceError {
     #[error("optimistic concurrency conflict exhausted after {attempts} attempts")]
     OccConflictExhausted { attempts: usize },
 
-    #[error("schema synchronizer safety policy violation: {0}")]
-    SafetyViolation(String),
-
     #[error("schema dependency cycle detected: {0}")]
     DependencyCycle(String),
 

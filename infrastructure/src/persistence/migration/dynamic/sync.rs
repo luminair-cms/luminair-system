@@ -4,11 +4,11 @@ use std::path::Path;
 
 use sqlx::PgPool;
 
-use domain::schema::{DocumentType, SchemaRegistry};
+use domain::schema::SchemaRegistry;
 
-use super::builder::{build_desired_schema, build_document_type_tables};
+use super::builder::build_desired_schema;
 use super::ddl::step_to_sql;
-use super::diff::{DiffError, compute_diff};
+use super::diff::compute_diff;
 use super::executor::execute_migration_plan;
 use super::introspector::introspect_database_schema;
 use super::model::DatabaseSchema;
@@ -65,11 +65,7 @@ pub async fn sync_dynamic_schemas(
 ) -> Result<SchemaSyncResult, PersistenceError> {
     let desired = build_desired_schema(registry);
     let actual = introspect_database_schema(pool).await?;
-    let raw_steps = compute_diff(&actual, &desired, policy).map_err(|e| match e {
-        DiffError::DestructiveOperationBlocked { operation } => {
-            PersistenceError::SafetyViolation(operation)
-        }
-    })?;
+    let raw_steps = compute_diff(&actual, &desired, policy);
 
     if raw_steps.is_empty() {
         return Ok(SchemaSyncResult::default());
@@ -91,6 +87,20 @@ pub async fn sync_dynamic_schemas(
     })
 }
 
+/// Generates all additive DDL statements for all document types in the registry without executing them.
+#[must_use]
+pub fn generate_ddl_for_registry(registry: &SchemaRegistry) -> Vec<String> {
+    let desired = build_desired_schema(registry);
+    let actual = DatabaseSchema::new();
+    let raw_steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly);
+    let plan = plan_migrations(raw_steps).unwrap_or_default();
+    plan.steps.iter().map(step_to_sql).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Private Helpers
+// ---------------------------------------------------------------------------
+
 fn calculate_step_counts(steps: &[MigrationStep]) -> (usize, usize, usize) {
     let mut tables = 0;
     let mut cols = 0;
@@ -108,33 +118,6 @@ fn calculate_step_counts(steps: &[MigrationStep]) -> (usize, usize, usize) {
     (tables, cols, idxs)
 }
 
-/// Generates all additive DDL statements for all document types in the registry without executing them.
-pub fn generate_ddl_for_registry(registry: &SchemaRegistry) -> Vec<String> {
-    let desired = build_desired_schema(registry);
-    let actual = DatabaseSchema::new();
-    let raw_steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap_or_default();
-    let plan = plan_migrations(raw_steps).unwrap_or_default();
-    plan.steps.iter().map(step_to_sql).collect()
-}
-
-/// Generates DDL statements for a single `DocumentType`.
-pub fn generate_ddl_for_document_type(
-    doc_type: &DocumentType,
-    registry: &SchemaRegistry,
-) -> Vec<String> {
-    let (entity_table, link_tables) = build_document_type_tables(doc_type, registry);
-    let mut desired = DatabaseSchema::new();
-    desired.insert_table(entity_table);
-    for link in link_tables {
-        desired.insert_table(link);
-    }
-
-    let actual = DatabaseSchema::new();
-    let raw_steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap_or_default();
-    let plan = plan_migrations(raw_steps).unwrap_or_default();
-    plan.steps.iter().map(step_to_sql).collect()
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -144,8 +127,9 @@ mod tests {
     use super::*;
     use domain::common::DisplayName;
     use domain::schema::{
-        AttributeId, DocumentKind, DocumentTypeId, DocumentTypeInfo, DocumentTypeOptions,
-        FieldDefinition, FieldType, IntegerSize, PrimitiveType, RelationDefinition, RelationType,
+        AttributeId, DocumentKind, DocumentType, DocumentTypeId, DocumentTypeInfo,
+        DocumentTypeOptions, FieldDefinition, FieldType, IntegerSize, PrimitiveType,
+        RelationDefinition, RelationType,
     };
     use std::collections::HashSet;
 
@@ -214,6 +198,11 @@ mod tests {
             create_articles
                 .unwrap()
                 .contains(r#""has_pending_draft" bool NOT NULL DEFAULT FALSE"#)
+        );
+        assert!(
+            create_articles
+                .unwrap()
+                .contains(r#""display_values" jsonb NOT NULL DEFAULT '{}'::jsonb"#)
         );
 
         let create_links = ddl_statements

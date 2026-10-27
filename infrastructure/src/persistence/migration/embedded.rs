@@ -23,6 +23,6 @@ pub const ROLE_WRITER_ID: Uuid = uuid!("01920000-0000-7000-8000-000000000004");
 ///
 /// # Errors
 /// Returns [`MigrateError`] if applying any migration statement fails.
-pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
+pub async fn run_static_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     MIGRATOR.run(pool).await
 }

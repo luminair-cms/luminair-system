@@ -29,25 +29,20 @@ use super::step::MigrationStep;
 
 /// Errors encountered during migration planning.
 #[derive(Debug, Error, PartialEq, Eq)]
-pub enum PlannerError {
+pub(super) enum PlannerError {
     #[error("circular dependency detected involving tables: {0:?}")]
     CircularDependency(Vec<String>),
 }
 
 /// An ordered execution plan of DDL statements.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MigrationPlan {
-    pub steps: Vec<MigrationStep>,
+pub(super) struct MigrationPlan {
+    pub(super) steps: Vec<MigrationStep>,
 }
 
 impl MigrationPlan {
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.steps.is_empty()
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
+    pub(super) fn len(&self) -> usize {
         self.steps.len()
     }
 }
@@ -63,7 +58,7 @@ impl MigrationPlan {
 ///
 /// # Errors
 /// Returns [`PlannerError::CircularDependency`] if a cycle of foreign key references is detected.
-pub fn plan_migrations(raw_steps: Vec<MigrationStep>) -> Result<MigrationPlan, PlannerError> {
+pub(super) fn plan_migrations(raw_steps: Vec<MigrationStep>) -> Result<MigrationPlan, PlannerError> {
     let partitioned = partition_steps(raw_steps);
     let ordered_create_tables = sort_create_tables(partitioned.create_tables)?;
 
@@ -178,10 +173,11 @@ fn sort_create_tables(tables: Vec<TableDefinition>) -> Result<Vec<TableDefinitio
     while let Some(name) = queue.pop_front() {
         if let Some(deps) = dependents.get(&name) {
             for dep in deps {
-                let deg = in_degree.get_mut(dep).unwrap();
-                *deg -= 1;
-                if *deg == 0 {
-                    queue.push_back(dep.clone());
+                if let Some(deg) = in_degree.get_mut(dep) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push_back(dep.clone());
+                    }
                 }
             }
         }
@@ -204,7 +200,7 @@ fn sort_create_tables(tables: Vec<TableDefinition>) -> Result<Vec<TableDefinitio
 
     let ordered = ordered_names
         .into_iter()
-        .map(|name| map.remove(&name).expect("table exists"))
+        .filter_map(|name| map.remove(&name))
         .collect();
 
     Ok(ordered)
@@ -222,7 +218,7 @@ mod tests {
     };
 
     fn make_table_with_fk(name: &str, kind: TableKind, ref_table: Option<&str>) -> TableDefinition {
-        let mut table = TableDefinition::new(name, kind, false);
+        let mut table = TableDefinition::new(name, kind);
         if let Some(target) = ref_table {
             table.foreign_keys.insert(ForeignKeyDefinition::new(
                 format!("fk_{name}_{target}"),

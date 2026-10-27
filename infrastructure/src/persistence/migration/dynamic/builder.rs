@@ -5,10 +5,7 @@
 //! - B-Tree indexes for lifecycle ordering and unique constraints.
 //! - Relational junction link tables for relations with cascading foreign keys.
 
-use domain::schema::{
-    DocumentKind, DocumentType, FieldType, IntegerSize, PrimitiveType, RelationDefinition,
-    SchemaRegistry,
-};
+use domain::schema::{DocumentType, RelationDefinition, SchemaRegistry};
 
 use super::model::{
     ColumnDefinition, DatabaseSchema, ForeignKeyAction, ForeignKeyDefinition, IndexDefinition,
@@ -27,7 +24,7 @@ use crate::persistence::naming::{
 
 /// Builds the desired `DatabaseSchema` AST projection from the domain `SchemaRegistry`.
 #[must_use]
-pub fn build_desired_schema(registry: &SchemaRegistry) -> DatabaseSchema {
+pub(super) fn build_desired_schema(registry: &SchemaRegistry) -> DatabaseSchema {
     let mut schema = DatabaseSchema::new();
 
     for doc_type in registry.iterate() {
@@ -42,8 +39,7 @@ pub fn build_desired_schema(registry: &SchemaRegistry) -> DatabaseSchema {
 }
 
 /// Builds the desired table definitions for a single `DocumentType`.
-#[must_use]
-pub fn build_document_type_tables(
+fn build_document_type_tables(
     doc_type: &DocumentType,
     registry: &SchemaRegistry,
 ) -> (TableDefinition, Vec<TableDefinition>) {
@@ -58,8 +54,7 @@ pub fn build_document_type_tables(
 
 fn build_entity_table(doc_type: &DocumentType) -> TableDefinition {
     let table_name = table_name_for_document_type(doc_type);
-    let is_singleton = doc_type.kind == DocumentKind::Singleton;
-    let mut table = TableDefinition::new(&table_name, TableKind::Entity, is_singleton);
+    let mut table = TableDefinition::new(&table_name, TableKind::Entity);
 
     append_standard_lifecycle_columns(&mut table);
     append_user_field_columns(&mut table, doc_type);
@@ -76,7 +71,6 @@ fn append_standard_lifecycle_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: true,
         default_value: None,
-        unique: true,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -85,7 +79,6 @@ fn append_standard_lifecycle_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: Some("FALSE".into()),
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -94,7 +87,6 @@ fn append_standard_lifecycle_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: Some("'{}'::jsonb".into()),
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -103,44 +95,20 @@ fn append_standard_lifecycle_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: None,
-        unique: false,
     });
 }
 
 fn append_user_field_columns(table: &mut TableDefinition, doc_type: &DocumentType) {
     for field in &doc_type.fields {
         let col_name = column_name(&field.id);
-        let data_type = field_type_to_sql_column_type(field.field_type);
+        let data_type = SqlColumnType::from(field.field_type);
         table.columns.insert(ColumnDefinition {
             name: col_name,
             data_type,
             nullable: !field.required,
             is_primary_key: false,
             default_value: None,
-            unique: field.unique,
         });
-    }
-}
-
-fn field_type_to_sql_column_type(field_type: FieldType) -> SqlColumnType {
-    match field_type {
-        FieldType::Primitive(prim) => match prim {
-            PrimitiveType::Uid => SqlColumnType::Varchar(Some(255)),
-            PrimitiveType::Uuid => SqlColumnType::Uuid,
-            PrimitiveType::Text => SqlColumnType::Text,
-            PrimitiveType::Integer(size) => match size {
-                IntegerSize::I16 => SqlColumnType::SmallInt,
-                IntegerSize::I32 => SqlColumnType::Integer,
-                IntegerSize::I64 => SqlColumnType::BigInt,
-            },
-            PrimitiveType::Decimal { precision, scale } => SqlColumnType::Decimal(precision, scale),
-            PrimitiveType::Date => SqlColumnType::Date,
-            PrimitiveType::DateTime => SqlColumnType::Timestamptz,
-            PrimitiveType::Boolean => SqlColumnType::Boolean,
-        },
-        FieldType::Email => SqlColumnType::Varchar(Some(320)),
-        FieldType::Url => SqlColumnType::Text,
-        FieldType::Json | FieldType::LocalizedText => SqlColumnType::Jsonb,
     }
 }
 
@@ -151,7 +119,6 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: Some("1".into()),
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -160,7 +127,6 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: None,
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -169,7 +135,6 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: None,
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -178,7 +143,6 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: None,
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -187,7 +151,6 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: None,
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -196,7 +159,6 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: None,
-        unique: false,
     });
 
     table.columns.insert(ColumnDefinition {
@@ -205,7 +167,6 @@ fn append_trailing_audit_columns(table: &mut TableDefinition) {
         nullable: false,
         is_primary_key: false,
         default_value: None,
-        unique: false,
     });
 }
 
@@ -244,7 +205,7 @@ fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<
     for relation in &doc_type.relations {
         let j_table_name = junction_table_name(&source_table, &relation.id);
         let target_table = resolve_target_table(relation, registry);
-        let mut link = TableDefinition::new(&j_table_name, TableKind::Link, false);
+        let mut link = TableDefinition::new(&j_table_name, TableKind::Link);
 
         link.columns.insert(ColumnDefinition {
             name: COL_SOURCE_ID.into(),
@@ -252,7 +213,6 @@ fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<
             nullable: false,
             is_primary_key: true,
             default_value: None,
-            unique: false,
         });
 
         link.columns.insert(ColumnDefinition {
@@ -261,7 +221,6 @@ fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<
             nullable: false,
             is_primary_key: true,
             default_value: None,
-            unique: false,
         });
 
         link.columns.insert(ColumnDefinition {
@@ -270,7 +229,6 @@ fn build_link_tables(doc_type: &DocumentType, registry: &SchemaRegistry) -> Vec<
             nullable: false,
             is_primary_key: false,
             default_value: Some("0".into()),
-            unique: false,
         });
 
         link.foreign_keys.insert(ForeignKeyDefinition::new(
@@ -321,7 +279,7 @@ mod tests {
     use domain::common::DisplayName;
     use domain::schema::{
         AttributeId, DocumentKind, DocumentTypeId, DocumentTypeInfo, DocumentTypeOptions,
-        FieldDefinition, RelationType,
+        FieldDefinition, FieldType, PrimitiveType, RelationType,
     };
     use std::collections::HashSet;
 
@@ -386,7 +344,6 @@ mod tests {
         assert!(articles.find_column("id").unwrap().is_primary_key);
         assert!(articles.find_column("has_pending_draft").is_some());
         assert!(articles.find_column("display_title").is_some());
-        assert!(articles.find_column("slug").unwrap().unique);
         assert!(articles.find_index("idx_articles_published_at").is_some());
         assert!(articles.find_index("uq_articles_slug").is_some());
 

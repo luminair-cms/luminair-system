@@ -23,7 +23,7 @@ pub enum SafetyPolicy {
 
 /// A discrete DDL migration operation AST.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MigrationStep {
+pub(super) enum MigrationStep {
     /// Create a new relational table with its columns, primary keys, and foreign keys.
     CreateTable(TableDefinition),
     /// Drop an existing table.
@@ -46,6 +46,5 @@ pub enum MigrationStep {
     /// Drop an index.
     DropIndex {
         name: String,
-        table: String,
     },
 }

@@ -5,7 +5,7 @@
 
 use sqlx::PgPool;
 
-pub use super::ddl::{build_column_def, step_to_sql};
+use super::ddl::step_to_sql;
 use super::planner::MigrationPlan;
 use crate::persistence::error::PersistenceError;
 
@@ -15,8 +15,8 @@ use crate::persistence::error::PersistenceError;
 
 /// Result summary of executing a migration plan.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ExecutionSummary {
-    pub executed_statements: Vec<String>,
+pub(super) struct ExecutionSummary {
+    pub(super) executed_statements: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ pub struct ExecutionSummary {
 ///
 /// # Errors
 /// Returns [`PersistenceError`] if any DDL statement fails execution.
-pub async fn execute_migration_plan(
+pub(super) async fn execute_migration_plan(
     pool: &PgPool,
     plan: &MigrationPlan,
 ) -> Result<ExecutionSummary, PersistenceError> {

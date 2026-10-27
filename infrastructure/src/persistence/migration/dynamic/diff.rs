@@ -3,40 +3,26 @@
 //! Compares `ActualSchema` against `DesiredSchema` and generates a list of `MigrationStep`s.
 //! Enforces `SafetyPolicy` (`AdditiveOnly` vs `AllowDestructive`).
 
-use thiserror::Error;
-
 use super::model::{DatabaseSchema, TableDefinition};
 use super::step::{MigrationStep, SafetyPolicy};
-
-// ---------------------------------------------------------------------------
-// Diff Errors
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum DiffError {
-    #[error("destructive operation blocked by SafetyPolicy::AdditiveOnly: {operation}")]
-    DestructiveOperationBlocked { operation: String },
-}
 
 // ---------------------------------------------------------------------------
 // Public Diffing Engine
 // ---------------------------------------------------------------------------
 
 /// Computes the difference between the actual live schema and the desired schema AST.
-///
-/// # Errors
-/// Returns [`DiffError`] if schema validation detects an irreconcilable diff violation.
-pub fn compute_diff(
+#[must_use]
+pub(super) fn compute_diff(
     actual: &DatabaseSchema,
     desired: &DatabaseSchema,
     policy: SafetyPolicy,
-) -> Result<Vec<MigrationStep>, DiffError> {
+) -> Vec<MigrationStep> {
     let mut steps = Vec::new();
 
     diff_desired_tables(actual, desired, policy, &mut steps);
     diff_removed_tables(actual, desired, policy, &mut steps);
 
-    Ok(steps)
+    steps
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +104,6 @@ fn diff_table_indexes(
                 SafetyPolicy::AllowDestructive => {
                     steps.push(MigrationStep::DropIndex {
                         name: actual_idx.name.clone(),
-                        table: actual_table.name.clone(),
                     });
                 }
             }
@@ -162,10 +147,10 @@ mod tests {
     fn test_compute_diff_creates_table_when_missing() {
         let actual = DatabaseSchema::new();
         let mut desired = DatabaseSchema::new();
-        let table = TableDefinition::new("articles", TableKind::Entity, false);
+        let table = TableDefinition::new("articles", TableKind::Entity);
         desired.insert_table(table.clone());
 
-        let steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap();
+        let steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly);
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0], MigrationStep::CreateTable(table));
     }
@@ -173,7 +158,7 @@ mod tests {
     #[test]
     fn test_compute_diff_adds_column_when_table_exists() {
         let mut actual = DatabaseSchema::new();
-        let mut table_actual = TableDefinition::new("articles", TableKind::Entity, false);
+        let mut table_actual = TableDefinition::new("articles", TableKind::Entity);
         table_actual.columns.insert(ColumnDefinition::new(
             "id",
             SqlColumnType::Uuid,
@@ -183,7 +168,7 @@ mod tests {
         actual.insert_table(table_actual);
 
         let mut desired = DatabaseSchema::new();
-        let mut table_desired = TableDefinition::new("articles", TableKind::Entity, false);
+        let mut table_desired = TableDefinition::new("articles", TableKind::Entity);
         table_desired.columns.insert(ColumnDefinition::new(
             "id",
             SqlColumnType::Uuid,
@@ -198,7 +183,7 @@ mod tests {
         ));
         desired.insert_table(table_desired);
 
-        let steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap();
+        let steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly);
         assert_eq!(steps.len(), 1);
         assert!(matches!(
             &steps[0],
@@ -209,20 +194,20 @@ mod tests {
     #[test]
     fn test_compute_diff_additive_policy_ignores_extra_actual_tables() {
         let mut actual = DatabaseSchema::new();
-        actual.insert_table(TableDefinition::new("old_table", TableKind::Entity, false));
+        actual.insert_table(TableDefinition::new("old_table", TableKind::Entity));
 
         let desired = DatabaseSchema::new();
-        let steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly).unwrap();
+        let steps = compute_diff(&actual, &desired, SafetyPolicy::AdditiveOnly);
         assert!(steps.is_empty());
     }
 
     #[test]
     fn test_compute_diff_destructive_policy_drops_extra_actual_tables() {
         let mut actual = DatabaseSchema::new();
-        actual.insert_table(TableDefinition::new("old_table", TableKind::Entity, false));
+        actual.insert_table(TableDefinition::new("old_table", TableKind::Entity));
 
         let desired = DatabaseSchema::new();
-        let steps = compute_diff(&actual, &desired, SafetyPolicy::AllowDestructive).unwrap();
+        let steps = compute_diff(&actual, &desired, SafetyPolicy::AllowDestructive);
         assert_eq!(steps.len(), 1);
         assert_eq!(
             steps[0],

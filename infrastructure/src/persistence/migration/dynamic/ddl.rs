@@ -20,14 +20,14 @@ use super::step::MigrationStep;
 
 /// Translates a single `MigrationStep` into a PostgreSQL DDL string using `sea-query`.
 #[must_use]
-pub fn step_to_sql(step: &MigrationStep) -> String {
+pub(super) fn step_to_sql(step: &MigrationStep) -> String {
     match step {
         MigrationStep::CreateTable(table) => build_create_table_sql(table),
         MigrationStep::DropTable { name, .. } => build_drop_table_sql(name),
         MigrationStep::AddColumn { table, column } => build_add_column_sql(table, column),
         MigrationStep::DropColumn { table, column } => build_drop_column_sql(table, column),
         MigrationStep::CreateIndex(index) => build_create_index_sql(index),
-        MigrationStep::DropIndex { name, .. } => build_drop_index_sql(name),
+        MigrationStep::DropIndex { name } => build_drop_index_sql(name),
     }
 }
 
@@ -36,8 +36,7 @@ pub fn step_to_sql(step: &MigrationStep) -> String {
 /// Automatically determines whether to emit inline `PRIMARY KEY` (for single PK columns)
 /// or a table-level composite `PRIMARY KEY (...)` constraint (for multiple PK columns)
 /// without requiring table-kind branching.
-#[must_use]
-pub fn build_create_table_sql(table: &TableDefinition) -> String {
+fn build_create_table_sql(table: &TableDefinition) -> String {
     let mut stmt = Table::create();
     stmt.table(Alias::new(&table.name)).if_not_exists();
 
@@ -66,8 +65,7 @@ pub fn build_create_table_sql(table: &TableDefinition) -> String {
 }
 
 /// Generates a `DROP TABLE IF EXISTS` statement.
-#[must_use]
-pub fn build_drop_table_sql(table_name: &str) -> String {
+fn build_drop_table_sql(table_name: &str) -> String {
     Table::drop()
         .table(Alias::new(table_name))
         .if_exists()
@@ -75,8 +73,7 @@ pub fn build_drop_table_sql(table_name: &str) -> String {
 }
 
 /// Generates an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statement.
-#[must_use]
-pub fn build_add_column_sql(table_name: &str, column: &ColumnDefinition) -> String {
+fn build_add_column_sql(table_name: &str, column: &ColumnDefinition) -> String {
     let mut col_def = build_column_def(column);
     Table::alter()
         .table(Alias::new(table_name))
@@ -85,8 +82,7 @@ pub fn build_add_column_sql(table_name: &str, column: &ColumnDefinition) -> Stri
 }
 
 /// Generates an `ALTER TABLE ... DROP COLUMN IF EXISTS` statement.
-#[must_use]
-pub fn build_drop_column_sql(table_name: &str, column_name: &str) -> String {
+fn build_drop_column_sql(table_name: &str, column_name: &str) -> String {
     Table::alter()
         .table(Alias::new(table_name))
         .drop_column_if_exists(Alias::new(column_name))
@@ -94,8 +90,7 @@ pub fn build_drop_column_sql(table_name: &str, column_name: &str) -> String {
 }
 
 /// Generates a `CREATE [UNIQUE] INDEX IF NOT EXISTS` statement from an `IndexDefinition`.
-#[must_use]
-pub fn build_create_index_sql(index: &IndexDefinition) -> String {
+fn build_create_index_sql(index: &IndexDefinition) -> String {
     let mut stmt = Index::create();
     stmt.if_not_exists()
         .name(&index.name)
@@ -113,8 +108,7 @@ pub fn build_create_index_sql(index: &IndexDefinition) -> String {
 }
 
 /// Generates a `DROP INDEX IF EXISTS` statement.
-#[must_use]
-pub fn build_drop_index_sql(index_name: &str) -> String {
+fn build_drop_index_sql(index_name: &str) -> String {
     Index::drop()
         .name(index_name)
         .if_exists()
@@ -122,8 +116,7 @@ pub fn build_drop_index_sql(index_name: &str) -> String {
 }
 
 /// Maps a `ColumnDefinition` to a typed `sea_query::ColumnDef`.
-#[must_use]
-pub fn build_column_def(col: &ColumnDefinition) -> ColumnDef {
+fn build_column_def(col: &ColumnDefinition) -> ColumnDef {
     build_column_def_internal(col, col.is_primary_key)
 }
 
@@ -200,6 +193,8 @@ fn apply_default_value(def: &mut ColumnDef, default_val: Option<&str>) {
             def.default(false);
         } else if let Ok(n) = val.parse::<i64>() {
             def.default(n);
+        } else {
+            def.extra(format!("DEFAULT {val}"));
         }
     }
 }
@@ -245,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_step_to_sql_create_table() {
-        let mut table = TableDefinition::new("articles", TableKind::Entity, false);
+        let mut table = TableDefinition::new("articles", TableKind::Entity);
         table.columns.insert(ColumnDefinition::new(
             "id",
             SqlColumnType::Uuid,
@@ -269,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_step_to_sql_link_table_with_composite_pk_and_fk() {
-        let mut table = TableDefinition::new("articles_tags_links", TableKind::Link, false);
+        let mut table = TableDefinition::new("articles_tags_links", TableKind::Link);
         table.columns.insert(ColumnDefinition::new(
             "source_id",
             SqlColumnType::Uuid,
@@ -369,10 +364,22 @@ mod tests {
     fn test_step_to_sql_drop_index() {
         let step = MigrationStep::DropIndex {
             name: "idx_old".into(),
-            table: "articles".into(),
         };
         let sql = step_to_sql(&step);
 
         assert_eq!(sql, r#"DROP INDEX IF EXISTS "idx_old""#);
+    }
+
+    #[test]
+    fn test_step_to_sql_jsonb_default_value() {
+        let mut col = ColumnDefinition::new("metadata", SqlColumnType::Jsonb, false, false);
+        col.default_value = Some("'{}'::jsonb".into());
+        let step = MigrationStep::AddColumn {
+            table: "articles".into(),
+            column: col,
+        };
+        let sql = step_to_sql(&step);
+
+        assert!(sql.contains("DEFAULT '{}'::jsonb"));
     }
 }

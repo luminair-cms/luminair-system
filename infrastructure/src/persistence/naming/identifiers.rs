@@ -1,7 +1,7 @@
 //! SQL database identifier generation, table naming conventions, and column mapping.
 
 use domain::schema::{
-    AttributeId, DocumentKind, DocumentType, DocumentTypeId, FieldType, PrimitiveType,
+    AttributeId, DocumentKind, DocumentType, DocumentTypeId, FieldType,
 };
 
 use super::sanitize::kebab_to_snake;
@@ -48,6 +48,7 @@ pub const TABLE_ACCESS_REQUESTS: &str = "access_requests";
 pub const TABLE_SHADOW_USERS: &str = "shadow_users";
 pub const TABLE_DOCUMENT_DRAFTS: &str = "document_drafts";
 pub const TABLE_DOCUMENT_SNAPSHOTS: &str = "document_snapshots";
+pub const TABLE_DOCUMENT_TOMBSTONES: &str = "document_tombstones";
 
 // ---------------------------------------------------------------------------
 // Public Identifier Generation Functions
@@ -96,27 +97,7 @@ pub fn column_name(attr_id: &AttributeId) -> String {
 /// Maps a domain `FieldType` to its physical SQL DDL type definition.
 #[must_use]
 pub fn sql_type_for_field(field_type: &FieldType) -> String {
-    match field_type {
-        FieldType::Primitive(prim) => match prim {
-            PrimitiveType::Uid => "VARCHAR(255)".to_string(),
-            PrimitiveType::Uuid => "UUID".to_string(),
-            PrimitiveType::Text => "TEXT".to_string(),
-            PrimitiveType::Integer(size) => match size {
-                domain::schema::IntegerSize::I16 => "SMALLINT".to_string(),
-                domain::schema::IntegerSize::I32 => "INTEGER".to_string(),
-                domain::schema::IntegerSize::I64 => "BIGINT".to_string(),
-            },
-            PrimitiveType::Decimal { precision, scale } => {
-                format!("NUMERIC({precision}, {scale})")
-            }
-            PrimitiveType::Date => "DATE".to_string(),
-            PrimitiveType::DateTime => "TIMESTAMPTZ".to_string(),
-            PrimitiveType::Boolean => "BOOLEAN".to_string(),
-        },
-        FieldType::Email => "VARCHAR(320)".to_string(),
-        FieldType::Url => "TEXT".to_string(),
-        FieldType::Json | FieldType::LocalizedText => "JSONB".to_string(),
-    }
+    crate::persistence::migration::SqlColumnType::from(*field_type).to_sql_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +108,7 @@ pub fn sql_type_for_field(field_type: &FieldType) -> String {
 mod tests {
     use super::*;
     use domain::common::DisplayName;
-    use domain::schema::{DocumentTypeInfo, DocumentTypeOptions, IntegerSize};
+    use domain::schema::{DocumentTypeInfo, DocumentTypeOptions, IntegerSize, PrimitiveType};
     use indexmap::IndexSet;
 
     fn make_test_doc_type(id: &str, plural: &str, kind: DocumentKind) -> DocumentType {
