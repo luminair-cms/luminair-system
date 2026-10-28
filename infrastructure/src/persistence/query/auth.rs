@@ -1,4 +1,4 @@
-//! Sea-Query dynamic query builders for RBAC (`roles`, `role_permissions`, `user_role_assignments`) and `access_requests`.
+//! Sea-Query dynamic query builders for RBAC (`roles`, `role_permissions`, `user_role_assignments`), `access_requests`, and `user_profiles`.
 
 use sea_query::{
     Condition, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, OnConflict, Order, Query,

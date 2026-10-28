@@ -1,6 +1,5 @@
 //! System configuration and localization route handlers.
 
-use axum::Json;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 
@@ -24,7 +23,7 @@ where
     St: HasSystemConfigService + HasAuthResolver,
 {
     let config = state.system_config_service().get_config();
-    Json(JsonData::new(SystemConfigDto::from(config))).into_response()
+    JsonData::new(SystemConfigDto::from(config)).into_response()
 }
 
 /// Returns default and available system locales (`GET /api/v1/system/locales`).
@@ -36,10 +35,10 @@ where
     St: HasSystemConfigService + HasAuthResolver,
 {
     let svc = state.system_config_service();
-    Json(JsonData::new(LocalesDto::new(
+    JsonData::new(LocalesDto::new(
         svc.default_locale(),
         svc.available_locales(),
-    )))
+    ))
     .into_response()
 }
 

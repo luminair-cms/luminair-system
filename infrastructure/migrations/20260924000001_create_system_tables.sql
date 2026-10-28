@@ -2,7 +2,7 @@
 -- Migration: 20260924000001_create_system_tables.sql
 -- Description: Create all static system tables for Luminair (DSQL-compatible)
 
--- 1. Roles (RBAC definitions, ADR-005)
+-- 1. Roles (RBAC definitions, ADR-002)
 CREATE TABLE IF NOT EXISTS roles (
     id          UUID PRIMARY KEY,
     name        VARCHAR(64) NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS roles (
     CONSTRAINT uq_roles_name UNIQUE (name)
 );
 
--- 3. Role Permissions (Granular and wildcard permission grants)
+-- 2. Role Permissions (Granular and wildcard permission grants, ADR-002)
 CREATE TABLE IF NOT EXISTS role_permissions (
     id               UUID PRIMARY KEY,
     role_id          UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 CREATE INDEX IF NOT EXISTS idx_role_permissions_role_id
     ON role_permissions (role_id);
 
--- 4. User Role Assignments (OIDC identity to role mapping)
+-- 3. User Role Assignments (OIDC identity to role mapping, ADR-002)
 CREATE TABLE IF NOT EXISTS user_role_assignments (
     id         UUID PRIMARY KEY,
     user_id    VARCHAR(255) NOT NULL,
@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_user_role_assignments_user_id
 CREATE INDEX IF NOT EXISTS idx_user_role_assignments_role_id
     ON user_role_assignments (role_id);
 
--- 5. Access Requests (User onboarding queue, ADR-005)
+-- 4. Access Requests (User onboarding queue, ADR-006)
 CREATE TABLE IF NOT EXISTS access_requests (
     id               UUID PRIMARY KEY,
     user_id          VARCHAR(255) NOT NULL,
@@ -77,7 +77,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_access_requests_active_user
     ON access_requests (user_id)
     WHERE status IN ('pending', 'approved');
 
--- 6. User Profiles (Local directory of verified OIDC identities, ADR-006)
+-- 5. User Profiles (Local directory of verified OIDC identities, ADR-006)
 CREATE TABLE IF NOT EXISTS user_profiles (
     user_id       VARCHAR(255) PRIMARY KEY,
     email         VARCHAR(320),

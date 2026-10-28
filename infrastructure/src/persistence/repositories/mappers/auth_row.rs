@@ -1,4 +1,4 @@
-//! Row mappers for `Role`, `Permission`, `UserRoleAssignment`, and `AccessRequest`.
+//! Row mappers for `Role`, `Permission`, `UserRoleAssignment`, `AccessRequest`, and `UserProfile`.
 
 use std::collections::HashMap;
 

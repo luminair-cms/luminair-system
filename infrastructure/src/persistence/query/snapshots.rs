@@ -39,17 +39,7 @@ const SNAPSHOT_HEADER_COLUMNS: [StaticIden; 7] = [
     COL_REASON_IDEN,
 ];
 
-const SNAPSHOT_FULL_COLUMNS: [StaticIden; 9] = [
-    COL_ID_IDEN,
-    COL_DOCUMENT_TYPE_ID_IDEN,
-    COL_DOCUMENT_ID_IDEN,
-    COL_REVISION_IDEN,
-    COL_CONTENT_IDEN,
-    COL_RELATIONS_IDEN,
-    COL_CREATED_AT_IDEN,
-    COL_CREATED_BY_IDEN,
-    COL_REASON_IDEN,
-];
+const SNAPSHOT_FULL_COLUMNS: [StaticIden; 9] = SNAPSHOT_INSERT_COLUMNS;
 
 // ---------------------------------------------------------------------------
 // Public Query Builders

@@ -22,7 +22,7 @@ pub const COL_UPDATED_BY: &str = "updated_by";
 pub const COL_PUBLISHED_AT: &str = "published_at";
 pub const COL_PUBLISHED_BY: &str = "published_by";
 
-// Drafts table specific columns
+// Drafts & headers specific columns and aliases
 pub const COL_STATUS: &str = "status";
 pub const COL_DOCUMENT_TYPE_ID: &str = "document_type_id";
 pub const COL_CONTENT: &str = "content";
@@ -30,6 +30,9 @@ pub const COL_RELATIONS: &str = "relations";
 pub const COL_SCHEMA_VERSION: &str = "schema_version";
 pub const COL_VERSION: &str = "version";
 pub const COL_LAST_PUBLISHED_REVISION: &str = "last_published_revision";
+pub const COL_SLUG: &str = "slug";
+pub const COL_DRAFT_VERSION: &str = "draft_version";
+pub const ALIAS_COMBINED: &str = "combined";
 
 // Snapshots table specific columns
 pub const COL_REASON: &str = "reason";
@@ -67,6 +70,7 @@ pub const TABLE_ACCESS_REQUESTS: &str = "access_requests";
 pub const TABLE_USER_PROFILES: &str = "user_profiles";
 pub const TABLE_DOCUMENT_DRAFTS: &str = "document_drafts";
 pub const TABLE_DOCUMENT_SNAPSHOTS: &str = "document_snapshots";
+/// Reserved table name for document trash/tombstones (proposed ADR-005).
 pub const TABLE_DOCUMENT_TOMBSTONES: &str = "document_tombstones";
 
 // ---------------------------------------------------------------------------

@@ -76,10 +76,16 @@ pub struct ListUsersQuery {
 // ---------------------------------------------------------------------------
 
 impl PaginationQuery {
+    /// Extracts bounded domain [`Pagination`] from the query.
+    #[must_use]
+    pub fn pagination(&self) -> Pagination {
+        compute_bounded_pagination(self.page, self.page_size)
+    }
+
     /// Converts optional page and page_size parameters into bounded domain [`Pagination`].
     #[must_use]
     pub fn into_pagination(self) -> Pagination {
-        compute_bounded_pagination(self.page, self.page_size)
+        self.pagination()
     }
 }
 

@@ -8,22 +8,15 @@ use uuid::Uuid;
 use domain::content::header::DocumentStatus;
 use domain::content::ports::Pagination;
 
-use crate::persistence::naming::{DocumentTypeNaming, StaticIden};
+use crate::persistence::naming::DocumentTypeNaming;
 use super::common::{
-    apply_pagination, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN, COL_DISPLAY_TITLE_IDEN,
-    COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_HAS_PENDING_DRAFT_IDEN,
-    COL_ID_IDEN, COL_LAST_PUBLISHED_REVISION_IDEN, COL_PUBLISHED_AT_IDEN, COL_PUBLISHED_BY_IDEN,
-    COL_REVISION_IDEN, COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN,
+    apply_pagination, ALIAS_COMBINED_IDEN, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN,
+    COL_DISPLAY_TITLE_IDEN, COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN,
+    COL_DRAFT_VERSION_IDEN, COL_HAS_PENDING_DRAFT_IDEN, COL_ID_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN, COL_PUBLISHED_AT_IDEN, COL_PUBLISHED_BY_IDEN,
+    COL_REVISION_IDEN, COL_SLUG_IDEN, COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN,
     COL_VERSION_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
 };
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const COL_SLUG_IDEN: StaticIden = StaticIden("slug");
-const COL_DRAFT_VERSION_IDEN: StaticIden = StaticIden("draft_version");
-const ALIAS_COMBINED_IDEN: StaticIden = StaticIden("combined");
 
 // ---------------------------------------------------------------------------
 // Public Functions

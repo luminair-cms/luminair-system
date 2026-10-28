@@ -20,22 +20,15 @@ use domain::schema::{AttributeId, DocumentTypeId, FieldType, IntegerSize, Primit
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{
     COL_CONTENT, COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES,
-    COL_ID, COL_LAST_PUBLISHED_REVISION, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_RELATIONS,
-    COL_REVISION, COL_STATUS, COL_UPDATED_AT, COL_UPDATED_BY, COL_VERSION, DocumentTypeNaming,
-    FieldColumnNaming,
+    COL_DRAFT_VERSION, COL_ID, COL_LAST_PUBLISHED_REVISION, COL_PUBLISHED_AT, COL_PUBLISHED_BY,
+    COL_RELATIONS, COL_REVISION, COL_SLUG, COL_STATUS, COL_UPDATED_AT, COL_UPDATED_BY,
+    COL_VERSION, DocumentTypeNaming, FieldColumnNaming,
 };
 use crate::persistence::repositories::codec::{
     deserialize_display_values_json, deserialize_fields_json, deserialize_json_map,
     deserialize_localized_text, deserialize_relations_json, parse_actor_urn,
     parse_optional_actor_urn, status_from_db_str,
 };
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const COL_SLUG: &str = "slug";
-const COL_DRAFT_VERSION: &str = "draft_version";
 
 // ---------------------------------------------------------------------------
 // Public Functions
