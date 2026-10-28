@@ -7,7 +7,8 @@ use indexmap::IndexMap;
 
 use domain::auth::{
     AccessRequest, AccessRequestId, AccessRequestRepository, AccessRequestStatus, Role, RoleId,
-    RoleRepository, UserId, UserRoleAssignment, UserRoleAssignmentId, UserRoleAssignmentRepository,
+    RoleRepository, UserId, UserProfile, UserProfileRepository, UserRoleAssignment,
+    UserRoleAssignmentId, UserRoleAssignmentRepository,
 };
 use domain::content::{
     ContentValue, DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
@@ -47,6 +48,12 @@ pub struct FakeUserRoleAssignmentRepository {
 #[derive(Debug, Clone, Default)]
 pub struct FakeAccessRequestRepository {
     pub requests: Arc<RwLock<HashMap<AccessRequestId, AccessRequest>>>,
+}
+
+/// Thread-safe in-memory fake for `UserProfileRepository`.
+#[derive(Debug, Clone, Default)]
+pub struct FakeUserProfileRepository {
+    pub profiles: Arc<RwLock<HashMap<UserId, UserProfile>>>,
 }
 
 impl FakeDocumentInstanceRepository {
@@ -118,6 +125,21 @@ impl FakeUserRoleAssignmentRepository {
 impl FakeAccessRequestRepository {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+impl FakeUserProfileRepository {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn with_profile(self, profile: UserProfile) -> Self {
+        if let Ok(mut store) = self.profiles.write() {
+            store.insert(profile.user_id.clone(), profile);
+        }
+        self
     }
 }
 
@@ -660,6 +682,74 @@ impl AccessRequestRepository for FakeAccessRequestRepository {
     }
 }
 
+impl UserProfileRepository for FakeUserProfileRepository {
+    async fn find_by_id(&self, user_id: &UserId) -> Result<Option<UserProfile>, DomainError> {
+        let store = self.profiles.read().map_err(lock_error)?;
+        Ok(store.get(user_id).cloned())
+    }
+
+    async fn find_by_ids(&self, user_ids: &[UserId]) -> Result<Vec<UserProfile>, DomainError> {
+        let store = self.profiles.read().map_err(lock_error)?;
+        Ok(user_ids.iter().filter_map(|id| store.get(id).cloned()).collect())
+    }
+
+    async fn list_users(
+        &self,
+        query: Option<&str>,
+        pagination: Pagination,
+    ) -> Result<Page<UserProfile>, DomainError> {
+        let store = self.profiles.read().map_err(lock_error)?;
+        let q = query.map(|s| s.trim().to_lowercase());
+
+        let mut matched: Vec<UserProfile> = store
+            .values()
+            .filter(|p| {
+                if let Some(ref search) = q {
+                    if search.is_empty() {
+                        return true;
+                    }
+                    let email_match = p
+                        .email
+                        .as_ref()
+                        .map(|e| e.as_str().to_lowercase().contains(search))
+                        .unwrap_or(false);
+                    let name_match = p
+                        .name
+                        .as_ref()
+                        .map(|n| n.as_str().to_lowercase().contains(search))
+                        .unwrap_or(false);
+                    let id_match = p.user_id.as_str().to_lowercase().contains(search);
+                    email_match || name_match || id_match
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect();
+
+        matched.sort_by(|a, b| a.user_id.as_str().cmp(b.user_id.as_str()));
+
+        let total = matched.len() as u64;
+        let page_num = pagination.page.max(1);
+        let page_size = pagination.page_size.max(1);
+        let offset = ((page_num - 1) * page_size) as usize;
+
+        let items = matched
+            .into_iter()
+            .skip(offset)
+            .take(page_size as usize)
+            .collect();
+
+        Ok(Page::new(items, total, page_num, page_size))
+    }
+
+    async fn save(&self, profile: &UserProfile) -> Result<(), DomainError> {
+        let mut store = self.profiles.write().map_err(lock_error)?;
+        store.insert(profile.user_id.clone(), profile.clone());
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helper Functions
 // ---------------------------------------------------------------------------
@@ -889,5 +979,68 @@ mod tests {
         }));
         let err = repo.find_pending().await.unwrap_err();
         assert!(matches!(err, DomainError::Storage(_)), "got {err:?}");
+
+        let repo = FakeUserProfileRepository::new();
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = repo.profiles.write().unwrap();
+            panic!("poison the lock");
+        }));
+        let err = repo.find_by_id(&create_user_id("u")).await.unwrap_err();
+        assert!(matches!(err, DomainError::Storage(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn test_fake_user_profile_repository_search_and_pagination() {
+        use chrono::Utc;
+        use domain::common::{DisplayName, Email};
+
+        let repo = FakeUserProfileRepository::new();
+        let p1 = UserProfile::new(
+            create_user_id("alice"),
+            Some(Email::try_new("alice@example.com").unwrap()),
+            Some(DisplayName::try_new("Alice Smith").unwrap()),
+            Utc::now(),
+        );
+        let p2 = UserProfile::new(
+            create_user_id("bob"),
+            Some(Email::try_new("bob@corp.com").unwrap()),
+            Some(DisplayName::try_new("Bob Jones").unwrap()),
+            Utc::now(),
+        );
+        let p3 = UserProfile::new(
+            create_user_id("charlie"),
+            Some(Email::try_new("charlie@example.com").unwrap()),
+            Some(DisplayName::try_new("Charlie Brown").unwrap()),
+            Utc::now(),
+        );
+
+        repo.save(&p1).await.unwrap();
+        repo.save(&p2).await.unwrap();
+        repo.save(&p3).await.unwrap();
+
+        // 1. Search by email domain
+        let page = repo
+            .list_users(Some("example.com"), Pagination::new(1, 10))
+            .await
+            .unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.items[0].user_id.as_str(), "alice");
+        assert_eq!(page.items[1].user_id.as_str(), "charlie");
+
+        // 2. Search by name substring
+        let page = repo
+            .list_users(Some("jones"), Pagination::new(1, 10))
+            .await
+            .unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].user_id.as_str(), "bob");
+
+        // 3. Batch lookup
+        let batch = repo
+            .find_by_ids(&[create_user_id("alice"), create_user_id("bob")])
+            .await
+            .unwrap();
+        assert_eq!(batch.len(), 2);
     }
 }
