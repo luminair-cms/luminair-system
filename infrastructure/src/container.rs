@@ -6,18 +6,17 @@ use sqlx::PgPool;
 
 use application::services::{
     AccessRequestsServiceImpl, DocumentsServiceImpl, SchemaServiceImpl, SystemConfigServiceImpl,
+    UserDirectoryServiceImpl,
 };
 use domain::system::SystemContext;
 
 use crate::api::state::{HttpState, ProductionHttpState};
-use crate::auth::{
-    OidcTokenValidator, ServiceTokenRegistry, SqlxAuthResolver, SqlxShadowUserRecorder,
-};
+use crate::auth::{OidcTokenValidator, ServiceTokenRegistry, SqlxAuthResolver};
 use crate::health::SqlxHealthChecker;
 use crate::persistence::naming::SchemaNaming;
 use crate::persistence::repositories::{
     SqlxAccessRequestRepository, SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository,
-    SqlxRoleRepository, SqlxUserRoleAssignmentRepository,
+    SqlxRoleRepository, SqlxUserProfileRepository, SqlxUserRoleAssignmentRepository,
 };
 
 // ---------------------------------------------------------------------------
@@ -33,7 +32,7 @@ pub struct PersistenceContainer {
     pub role_repo: SqlxRoleRepository,
     pub assignment_repo: SqlxUserRoleAssignmentRepository,
     pub access_request_repo: SqlxAccessRequestRepository,
-    pub shadow_user_recorder: SqlxShadowUserRecorder,
+    pub user_profile_repo: SqlxUserProfileRepository,
 }
 
 /// Central composition root container holding initialized services and adapters.
@@ -52,6 +51,7 @@ pub struct AppContainer {
             SqlxRoleRepository,
         >,
     >,
+    pub user_directory_service: Arc<UserDirectoryServiceImpl<SqlxUserProfileRepository>>,
     pub schema_service: Arc<SchemaServiceImpl>,
     pub system_config_service: Arc<SystemConfigServiceImpl>,
     pub health_checker: Arc<SqlxHealthChecker>,
@@ -73,7 +73,7 @@ impl PersistenceContainer {
         let role_repo = SqlxRoleRepository::new(pool.clone());
         let assignment_repo = SqlxUserRoleAssignmentRepository::new(pool.clone());
         let access_request_repo = SqlxAccessRequestRepository::new(pool.clone());
-        let shadow_user_recorder = SqlxShadowUserRecorder::new(pool);
+        let user_profile_repo = SqlxUserProfileRepository::new(pool);
 
         Self {
             naming,
@@ -82,7 +82,7 @@ impl PersistenceContainer {
             role_repo,
             assignment_repo,
             access_request_repo,
-            shadow_user_recorder,
+            user_profile_repo,
         }
     }
 }
@@ -110,6 +110,10 @@ impl AppContainer {
             persistence.role_repo.clone(),
         ));
 
+        let user_directory_service = Arc::new(UserDirectoryServiceImpl::new(
+            persistence.user_profile_repo.clone(),
+        ));
+
         let schema_service = Arc::new(SchemaServiceImpl::new(context));
         let system_config_service = Arc::new(SystemConfigServiceImpl::new(context));
         let health_checker = Arc::new(SqlxHealthChecker::new(pool));
@@ -120,7 +124,6 @@ impl AppContainer {
             persistence.access_request_repo.clone(),
             persistence.assignment_repo.clone(),
             persistence.role_repo.clone(),
-            persistence.shadow_user_recorder.clone(),
         ));
 
         Self {
@@ -129,6 +132,7 @@ impl AppContainer {
             auth_resolver,
             documents_service,
             access_requests_service,
+            user_directory_service,
             schema_service,
             system_config_service,
             health_checker,
@@ -145,6 +149,7 @@ impl AppContainer {
             Arc::clone(&self.access_requests_service),
             Arc::clone(&self.schema_service),
             Arc::clone(&self.system_config_service),
+            Arc::clone(&self.user_directory_service),
             Arc::clone(&self.health_checker),
         )
     }

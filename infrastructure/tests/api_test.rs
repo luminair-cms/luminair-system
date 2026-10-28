@@ -25,10 +25,11 @@ use domain::test_support::fixtures::admin_role;
 
 use application::services::{
     AccessRequestsServiceImpl, DocumentsServiceImpl, SchemaServiceImpl, SystemConfigServiceImpl,
+    UserDirectoryServiceImpl,
 };
 use application::test_support::{
     FakeAccessRequestRepository, FakeDocumentInstanceRepository, FakeRoleRepository,
-    FakeUserRoleAssignmentRepository,
+    FakeUserProfileRepository, FakeUserRoleAssignmentRepository,
 };
 
 use infrastructure::api::routes::build_router;
@@ -115,13 +116,16 @@ impl TestFixture {
             None,
         ));
 
-        let resolver = Arc::new(DefaultAuthResolver::without_shadow_recorder(
+        let resolver = Arc::new(DefaultAuthResolver::new(
             oidc_validator,
             Arc::new(service_tokens),
             access_repo.clone(),
             assignment_repo.clone(),
             role_repo.clone(),
         ));
+
+        let user_profile_repo = FakeUserProfileRepository::new();
+        let user_directory_service = Arc::new(UserDirectoryServiceImpl::new(user_profile_repo));
 
         let documents_service = Arc::new(DocumentsServiceImpl::new(doc_repo, context));
         let access_requests_service = Arc::new(AccessRequestsServiceImpl::new(
@@ -140,6 +144,7 @@ impl TestFixture {
             access_requests_service,
             schema_service,
             system_config_service,
+            user_directory_service,
             health_checker,
         );
 
@@ -846,4 +851,86 @@ async fn assert_discard_unpublish_and_delete(fixture: &TestFixture, auth: &str, 
         .add_header("authorization", auth)
         .await;
     res_gone.assert_status_not_found();
+}
+
+#[tokio::test]
+async fn test_08_user_directory_and_profile_sync() {
+    let fixture = TestFixture::new().await;
+    let admin_auth = fixture.admin_bearer();
+
+    // 1. Unauthenticated request to sync profile fails with 401
+    let res_unauth = fixture
+        .server
+        .post("/api/v1/auth/profile/sync")
+        .json(&json!({"name": "Ghost"}))
+        .await;
+    res_unauth.assert_status_unauthorized();
+
+    // 2. Authenticated user (even before onboarding/roles) can sync profile
+    let user_token = create_test_jwt("usr_bob", Some("bob@example.com"), Some("Bob Builder"));
+    let user_auth = format!("Bearer {user_token}");
+
+    let res_sync = fixture
+        .server
+        .post("/api/v1/auth/profile/sync")
+        .add_header("authorization", &user_auth)
+        .json(&json!({}))
+        .await;
+    res_sync.assert_status_ok();
+    let sync_body: Value = res_sync.json();
+    assert_eq!(sync_body["data"]["userId"], "usr_bob");
+    assert_eq!(sync_body["data"]["email"], "bob@example.com");
+    assert_eq!(sync_body["data"]["name"], "Bob Builder");
+
+    // 3. Sync again with override payload updates name
+    let res_sync_override = fixture
+        .server
+        .post("/api/v1/auth/profile/sync")
+        .add_header("authorization", &user_auth)
+        .json(&json!({"name": "Robert Builder"}))
+        .await;
+    res_sync_override.assert_status_ok();
+    let override_body: Value = res_sync_override.json();
+    assert_eq!(override_body["data"]["name"], "Robert Builder");
+
+    // 4. Non-admin user cannot list users directory (lacks ManageUsers permission) -> 403 Forbidden
+    let res_list_forbidden = fixture
+        .server
+        .get("/api/v1/auth/users")
+        .add_header("authorization", &user_auth)
+        .await;
+    res_list_forbidden.assert_status_forbidden();
+
+    // 5. Admin user (having ManageUsers) lists users successfully
+    let res_list = fixture
+        .server
+        .get("/api/v1/auth/users")
+        .add_header("authorization", &admin_auth)
+        .await;
+    res_list.assert_status_ok();
+    let list_body: Value = res_list.json();
+    assert_eq!(list_body["meta"]["total"], 1);
+    assert_eq!(list_body["data"][0]["userId"], "usr_bob");
+    assert_eq!(list_body["data"][0]["name"], "Robert Builder");
+
+    // 6. Test search filter ?q=Robert
+    let res_search = fixture
+        .server
+        .get("/api/v1/auth/users?q=Robert")
+        .add_header("authorization", &admin_auth)
+        .await;
+    res_search.assert_status_ok();
+    let search_body: Value = res_search.json();
+    assert_eq!(search_body["meta"]["total"], 1);
+
+    // 7. Test search filter ?q=Nonexistent -> empty page
+    let res_search_empty = fixture
+        .server
+        .get("/api/v1/auth/users?q=Nonexistent")
+        .add_header("authorization", &admin_auth)
+        .await;
+    res_search_empty.assert_status_ok();
+    let empty_body: Value = res_search_empty.json();
+    assert_eq!(empty_body["meta"]["total"], 0);
+    assert!(empty_body["data"].as_array().unwrap().is_empty());
 }

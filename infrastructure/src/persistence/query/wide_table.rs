@@ -18,7 +18,7 @@ use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::DocumentTypeNaming;
 use crate::persistence::query::common::{
     apply_pagination, apply_wide_table_filters, content_value_to_sea_value,
-    IDEN_HAS_PENDING_DRAFT, IDEN_ID, IDEN_PUBLISHED_AT,
+    COL_HAS_PENDING_DRAFT_IDEN, COL_ID_IDEN, COL_PUBLISHED_AT_IDEN,
 };
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ pub fn select_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> SelectS
     let mut stmt = Query::select();
     stmt.from(type_naming.table_iden)
         .column(Asterisk)
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 
@@ -41,7 +41,7 @@ pub fn select_clean_published_query(type_naming: &DocumentTypeNaming) -> SelectS
     let mut stmt = Query::select();
     stmt.from(type_naming.table_iden)
         .column(Asterisk)
-        .and_where(Expr::col(IDEN_HAS_PENDING_DRAFT).eq(false));
+        .and_where(Expr::col(COL_HAS_PENDING_DRAFT_IDEN).eq(false));
     stmt
 }
 
@@ -60,8 +60,8 @@ pub fn find_published_query(
 
     apply_wide_table_filters(&mut stmt, type_naming, filters)?;
 
-    stmt.order_by(IDEN_PUBLISHED_AT, Order::Desc)
-        .order_by(IDEN_ID, Order::Asc);
+    stmt.order_by(COL_PUBLISHED_AT_IDEN, Order::Desc)
+        .order_by(COL_ID_IDEN, Order::Asc);
 
     apply_pagination(&mut stmt, pagination);
 
@@ -75,7 +75,7 @@ pub fn count_published_query(
 ) -> Result<SelectStatement, PersistenceError> {
     let mut stmt = Query::select();
     stmt.from(type_naming.table_iden)
-        .expr(Func::count(Expr::col(IDEN_ID)));
+        .expr(Func::count(Expr::col(COL_ID_IDEN)));
 
     apply_wide_table_filters(&mut stmt, type_naming, filters)?;
 
@@ -121,7 +121,7 @@ pub fn upsert_wide_table_query(
         .values(values)
         .map_err(|e| PersistenceError::Validation(e.to_string()))?
         .on_conflict(
-            OnConflict::column(IDEN_ID)
+            OnConflict::column(COL_ID_IDEN)
                 .update_columns(type_naming.wide_update_columns.iter().copied())
                 .to_owned(),
         );
@@ -138,8 +138,8 @@ pub fn update_has_pending_draft_query(
 ) -> UpdateStatement {
     let mut stmt = Query::update();
     stmt.table(type_naming.table_iden)
-        .value(IDEN_HAS_PENDING_DRAFT, has_pending_draft)
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .value(COL_HAS_PENDING_DRAFT_IDEN, has_pending_draft)
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 
@@ -148,7 +148,7 @@ pub fn update_has_pending_draft_query(
 pub fn delete_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(type_naming.table_iden)
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 

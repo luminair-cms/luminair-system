@@ -6,13 +6,14 @@ use axum::routing::{get, post};
 
 use application::services::{
     AccessRequestsService, DocumentsService, SchemaService, SystemConfigService,
+    UserDirectoryService,
 };
 
-use crate::api::handlers::{access_requests, content, health, schema, system};
+use crate::api::handlers::{access_requests, content, health, schema, system, users};
 use crate::api::middleware::{inject_problem_instance, propagate_request_id};
 use crate::api::state::{
     HasAccessRequestsService, HasAuthResolver, HasDocumentsService, HasHealthChecker,
-    HasSchemaService, HasSystemConfigService, HttpState,
+    HasSchemaService, HasSystemConfigService, HasUserDirectoryService, HttpState,
 };
 use crate::auth::AuthContextResolver;
 use crate::health::HealthCheckService;
@@ -24,8 +25,8 @@ use crate::health::HealthCheckService;
 /// Builds the complete HTTP driving adapter REST router bound to `state`.
 ///
 /// Registers all health probes, system configuration, schema metadata, access request,
-/// and document content lifecycle routes with tracing and RFC 9457 middleware.
-pub fn build_router<D, A, S, C, H, Auth>(state: HttpState<D, A, S, C, H, Auth>) -> Router
+/// user directory, and document content lifecycle routes with tracing and RFC 9457 middleware.
+pub fn build_router<D, A, S, C, H, Auth, U>(state: HttpState<D, A, S, C, H, Auth, U>) -> Router
 where
     D: DocumentsService,
     A: AccessRequestsService,
@@ -33,13 +34,15 @@ where
     C: SystemConfigService,
     H: HealthCheckService,
     Auth: AuthContextResolver,
+    U: UserDirectoryService,
 {
     Router::new()
-        .merge(health_routes::<HttpState<D, A, S, C, H, Auth>>())
-        .merge(system_routes::<HttpState<D, A, S, C, H, Auth>>())
-        .merge(schema_routes::<HttpState<D, A, S, C, H, Auth>>())
-        .merge(access_request_routes::<HttpState<D, A, S, C, H, Auth>>())
-        .merge(content_routes::<HttpState<D, A, S, C, H, Auth>>())
+        .merge(health_routes::<HttpState<D, A, S, C, H, Auth, U>>())
+        .merge(system_routes::<HttpState<D, A, S, C, H, Auth, U>>())
+        .merge(schema_routes::<HttpState<D, A, S, C, H, Auth, U>>())
+        .merge(access_request_routes::<HttpState<D, A, S, C, H, Auth, U>>())
+        .merge(user_directory_routes::<HttpState<D, A, S, C, H, Auth, U>>())
+        .merge(content_routes::<HttpState<D, A, S, C, H, Auth, U>>())
         .layer(from_fn(inject_problem_instance))
         .layer(from_fn(propagate_request_id))
         .with_state(state)
@@ -112,6 +115,16 @@ where
             "/api/v1/auth/access-requests/{id}/reject",
             post(access_requests::reject_access_request::<St>),
         )
+}
+
+/// Builds user directory and profile synchronization routes (`/api/v1/auth/users` and `/api/v1/auth/profile/sync`).
+pub fn user_directory_routes<St>() -> Router<St>
+where
+    St: HasUserDirectoryService + HasAuthResolver,
+{
+    Router::new()
+        .route("/api/v1/auth/users", get(users::list_users::<St>))
+        .route("/api/v1/auth/profile/sync", post(users::sync_profile::<St>))
 }
 
 /// Builds document instance lifecycle and snapshot routes (`/api/v1/content/*`).

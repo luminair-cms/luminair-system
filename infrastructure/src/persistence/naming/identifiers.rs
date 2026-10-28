@@ -55,12 +55,16 @@ pub const COL_REVIEWED_BY: &str = "reviewed_by";
 pub const COL_REVIEWED_AT: &str = "reviewed_at";
 pub const COL_ASSIGNED_ROLES: &str = "assigned_roles";
 
+// User Profiles specific columns
+pub const COL_FIRST_SEEN_AT: &str = "first_seen_at";
+pub const COL_LAST_SEEN_AT: &str = "last_seen_at";
+
 // Static system table names
 pub const TABLE_ROLES: &str = "roles";
 pub const TABLE_ROLE_PERMISSIONS: &str = "role_permissions";
 pub const TABLE_USER_ROLE_ASSIGNMENTS: &str = "user_role_assignments";
 pub const TABLE_ACCESS_REQUESTS: &str = "access_requests";
-pub const TABLE_SHADOW_USERS: &str = "shadow_users";
+pub const TABLE_USER_PROFILES: &str = "user_profiles";
 pub const TABLE_DOCUMENT_DRAFTS: &str = "document_drafts";
 pub const TABLE_DOCUMENT_SNAPSHOTS: &str = "document_snapshots";
 pub const TABLE_DOCUMENT_TOMBSTONES: &str = "document_tombstones";

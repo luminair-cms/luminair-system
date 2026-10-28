@@ -1,61 +1,74 @@
 //! Sea-Query dynamic query builders for RBAC (`roles`, `role_permissions`, `user_role_assignments`) and `access_requests`.
 
 use sea_query::{
-    DeleteStatement, Expr, ExprTrait, InsertStatement, OnConflict, Order, Query, SelectStatement,
+    Condition, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, OnConflict, Order, Query,
+    SelectStatement,
 };
 use uuid::Uuid;
 
 use domain::auth::access_request::AccessRequest;
+use domain::auth::profile::UserProfile;
 use domain::auth::role::{Role, UserRoleAssignment};
 use domain::auth::user::UserId;
+use domain::common::Pagination;
 
 use crate::persistence::naming::StaticIden;
 use super::common::{
-    IDEN_ACTION, IDEN_ASSIGNED_ROLES, IDEN_CREATED_AT, IDEN_DESCRIPTION, IDEN_DOCUMENT_TYPE_ID,
-    IDEN_EMAIL, IDEN_GRANTED_AT, IDEN_GRANTED_BY, IDEN_ID, IDEN_NAME, IDEN_REJECTION_REASON,
-    IDEN_REQUESTED_AT, IDEN_REVIEWED_AT, IDEN_REVIEWED_BY, IDEN_ROLE_ID, IDEN_STATUS,
-    IDEN_UPDATED_AT, IDEN_USER_ID, TABLE_ACCESS_REQUESTS_IDEN, TABLE_ROLE_PERMISSIONS_IDEN,
-    TABLE_ROLES_IDEN, TABLE_USER_ROLE_ASSIGNMENTS_IDEN,
+    apply_pagination, COL_ACTION_IDEN, COL_ASSIGNED_ROLES_IDEN, COL_CREATED_AT_IDEN,
+    COL_DESCRIPTION_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_EMAIL_IDEN, COL_FIRST_SEEN_AT_IDEN,
+    COL_GRANTED_AT_IDEN, COL_GRANTED_BY_IDEN, COL_ID_IDEN, COL_LAST_SEEN_AT_IDEN,
+    COL_NAME_IDEN, COL_REJECTION_REASON_IDEN, COL_REQUESTED_AT_IDEN, COL_REVIEWED_AT_IDEN,
+    COL_REVIEWED_BY_IDEN, COL_ROLE_ID_IDEN, COL_STATUS_IDEN, COL_UPDATED_AT_IDEN,
+    COL_USER_ID_IDEN, TABLE_ACCESS_REQUESTS_IDEN, TABLE_ROLE_PERMISSIONS_IDEN, TABLE_ROLES_IDEN,
+    TABLE_USER_PROFILES_IDEN, TABLE_USER_ROLE_ASSIGNMENTS_IDEN,
 };
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ROLE_COLUMNS: [StaticIden; 3] = [IDEN_ID, IDEN_NAME, IDEN_DESCRIPTION];
+const ROLE_COLUMNS: [StaticIden; 3] = [COL_ID_IDEN, COL_NAME_IDEN, COL_DESCRIPTION_IDEN];
 
 const PERMISSION_COLUMNS: [StaticIden; 3] = [
-    IDEN_ROLE_ID,
-    IDEN_ACTION,
-    IDEN_DOCUMENT_TYPE_ID,
+    COL_ROLE_ID_IDEN,
+    COL_ACTION_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN,
 ];
 
 const PERMISSION_INSERT_COLUMNS: [StaticIden; 4] = [
-    IDEN_ID,
-    IDEN_ROLE_ID,
-    IDEN_ACTION,
-    IDEN_DOCUMENT_TYPE_ID,
+    COL_ID_IDEN,
+    COL_ROLE_ID_IDEN,
+    COL_ACTION_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN,
 ];
 
 const USER_ROLE_ASSIGNMENT_COLUMNS: [StaticIden; 5] = [
-    IDEN_ID,
-    IDEN_USER_ID,
-    IDEN_ROLE_ID,
-    IDEN_GRANTED_AT,
-    IDEN_GRANTED_BY,
+    COL_ID_IDEN,
+    COL_USER_ID_IDEN,
+    COL_ROLE_ID_IDEN,
+    COL_GRANTED_AT_IDEN,
+    COL_GRANTED_BY_IDEN,
 ];
 
 const ACCESS_REQUEST_COLUMNS: [StaticIden; 10] = [
-    IDEN_ID,
-    IDEN_USER_ID,
-    IDEN_EMAIL,
-    IDEN_NAME,
-    IDEN_REQUESTED_AT,
-    IDEN_STATUS,
-    IDEN_REJECTION_REASON,
-    IDEN_REVIEWED_BY,
-    IDEN_REVIEWED_AT,
-    IDEN_ASSIGNED_ROLES,
+    COL_ID_IDEN,
+    COL_USER_ID_IDEN,
+    COL_EMAIL_IDEN,
+    COL_NAME_IDEN,
+    COL_REQUESTED_AT_IDEN,
+    COL_STATUS_IDEN,
+    COL_REJECTION_REASON_IDEN,
+    COL_REVIEWED_BY_IDEN,
+    COL_REVIEWED_AT_IDEN,
+    COL_ASSIGNED_ROLES_IDEN,
+];
+
+const USER_PROFILE_COLUMNS: [StaticIden; 5] = [
+    COL_USER_ID_IDEN,
+    COL_EMAIL_IDEN,
+    COL_NAME_IDEN,
+    COL_FIRST_SEEN_AT_IDEN,
+    COL_LAST_SEEN_AT_IDEN,
 ];
 
 // ---------------------------------------------------------------------------
@@ -68,7 +81,7 @@ pub fn select_role_by_id_query(id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 
@@ -78,8 +91,8 @@ pub fn select_roles_by_ids_query(ids: &[Uuid]) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
-        .and_where(Expr::col(IDEN_ID).is_in(ids.to_vec()))
-        .order_by(IDEN_NAME, Order::Asc);
+        .and_where(Expr::col(COL_ID_IDEN).is_in(ids.to_vec()))
+        .order_by(COL_NAME_IDEN, Order::Asc);
     stmt
 }
 
@@ -89,7 +102,7 @@ pub fn select_role_by_name_query(name: &str) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
-        .and_where(Expr::col(IDEN_NAME).eq(name));
+        .and_where(Expr::col(COL_NAME_IDEN).eq(name));
     stmt
 }
 
@@ -99,7 +112,7 @@ pub fn select_all_roles_query() -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
-        .order_by(IDEN_NAME, Order::Asc);
+        .order_by(COL_NAME_IDEN, Order::Asc);
     stmt
 }
 
@@ -109,9 +122,9 @@ pub fn select_permissions_by_role_ids_query(role_ids: &[Uuid]) -> SelectStatemen
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLE_PERMISSIONS_IDEN)
         .columns(PERMISSION_COLUMNS)
-        .and_where(Expr::col(IDEN_ROLE_ID).is_in(role_ids.to_vec()))
-        .order_by(IDEN_CREATED_AT, Order::Asc)
-        .order_by(IDEN_ID, Order::Asc);
+        .and_where(Expr::col(COL_ROLE_ID_IDEN).is_in(role_ids.to_vec()))
+        .order_by(COL_CREATED_AT_IDEN, Order::Asc)
+        .order_by(COL_ID_IDEN, Order::Asc);
     stmt
 }
 
@@ -127,9 +140,9 @@ pub fn upsert_role_query(role: &Role) -> InsertStatement {
             role.description.clone().into(),
         ])
         .on_conflict(
-            OnConflict::column(IDEN_ID)
-                .update_columns([IDEN_NAME, IDEN_DESCRIPTION])
-                .value(IDEN_UPDATED_AT, Expr::current_timestamp())
+            OnConflict::column(COL_ID_IDEN)
+                .update_columns([COL_NAME_IDEN, COL_DESCRIPTION_IDEN])
+                .value(COL_UPDATED_AT_IDEN, Expr::current_timestamp())
                 .to_owned(),
         );
     stmt
@@ -140,7 +153,7 @@ pub fn upsert_role_query(role: &Role) -> InsertStatement {
 pub fn delete_permissions_by_role_query(role_id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(TABLE_ROLE_PERMISSIONS_IDEN)
-        .and_where(Expr::col(IDEN_ROLE_ID).eq(role_id));
+        .and_where(Expr::col(COL_ROLE_ID_IDEN).eq(role_id));
     stmt
 }
 
@@ -180,9 +193,9 @@ pub fn select_assignments_by_user_query(user_id: &UserId) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_USER_ROLE_ASSIGNMENTS_IDEN)
         .columns(USER_ROLE_ASSIGNMENT_COLUMNS)
-        .and_where(Expr::col(IDEN_USER_ID).eq(user_id.as_ref()))
-        .order_by(IDEN_GRANTED_AT, Order::Asc)
-        .order_by(IDEN_ID, Order::Asc);
+        .and_where(Expr::col(COL_USER_ID_IDEN).eq(user_id.as_ref()))
+        .order_by(COL_GRANTED_AT_IDEN, Order::Asc)
+        .order_by(COL_ID_IDEN, Order::Asc);
     stmt
 }
 
@@ -192,7 +205,7 @@ pub fn exists_admin_assignment_query(admin_role_id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_USER_ROLE_ASSIGNMENTS_IDEN)
         .expr(Expr::val(1))
-        .and_where(Expr::col(IDEN_ROLE_ID).eq(admin_role_id))
+        .and_where(Expr::col(COL_ROLE_ID_IDEN).eq(admin_role_id))
         .limit(1);
     stmt
 }
@@ -212,8 +225,8 @@ pub fn upsert_assignment_query(assignment: &UserRoleAssignment) -> InsertStateme
             granted_by_urn.into(),
         ])
         .on_conflict(
-            OnConflict::columns([IDEN_USER_ID, IDEN_ROLE_ID])
-                .update_columns([IDEN_GRANTED_AT, IDEN_GRANTED_BY])
+            OnConflict::columns([COL_USER_ID_IDEN, COL_ROLE_ID_IDEN])
+                .update_columns([COL_GRANTED_AT_IDEN, COL_GRANTED_BY_IDEN])
                 .to_owned(),
         );
     stmt
@@ -224,7 +237,7 @@ pub fn upsert_assignment_query(assignment: &UserRoleAssignment) -> InsertStateme
 pub fn delete_assignment_query(id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(TABLE_USER_ROLE_ASSIGNMENTS_IDEN)
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 
@@ -238,7 +251,7 @@ pub fn select_access_request_by_id_query(id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 
@@ -248,8 +261,8 @@ pub fn select_latest_access_request_by_user_query(user_id: &UserId) -> SelectSta
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
-        .and_where(Expr::col(IDEN_USER_ID).eq(user_id.as_ref()))
-        .order_by(IDEN_REQUESTED_AT, Order::Desc)
+        .and_where(Expr::col(COL_USER_ID_IDEN).eq(user_id.as_ref()))
+        .order_by(COL_REQUESTED_AT_IDEN, Order::Desc)
         .limit(1);
     stmt
 }
@@ -260,9 +273,9 @@ pub fn select_active_access_request_by_user_query(user_id: &UserId) -> SelectSta
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
-        .and_where(Expr::col(IDEN_USER_ID).eq(user_id.as_ref()))
-        .and_where(Expr::col(IDEN_STATUS).is_in(["pending", "approved"]))
-        .order_by(IDEN_REQUESTED_AT, Order::Desc)
+        .and_where(Expr::col(COL_USER_ID_IDEN).eq(user_id.as_ref()))
+        .and_where(Expr::col(COL_STATUS_IDEN).is_in(["pending", "approved"]))
+        .order_by(COL_REQUESTED_AT_IDEN, Order::Desc)
         .limit(1);
     stmt
 }
@@ -273,8 +286,8 @@ pub fn select_pending_access_requests_query() -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
-        .and_where(Expr::col(IDEN_STATUS).eq("pending"))
-        .order_by(IDEN_REQUESTED_AT, Order::Asc);
+        .and_where(Expr::col(COL_STATUS_IDEN).eq("pending"))
+        .order_by(COL_REQUESTED_AT_IDEN, Order::Asc);
     stmt
 }
 
@@ -304,14 +317,107 @@ pub fn upsert_access_request_query(
             assigned_roles_json.into(),
         ])
         .on_conflict(
-            OnConflict::column(IDEN_ID)
+            OnConflict::column(COL_ID_IDEN)
                 .update_columns([
-                    IDEN_STATUS,
-                    IDEN_REJECTION_REASON,
-                    IDEN_REVIEWED_BY,
-                    IDEN_REVIEWED_AT,
-                    IDEN_ASSIGNED_ROLES,
+                    COL_STATUS_IDEN,
+                    COL_REJECTION_REASON_IDEN,
+                    COL_REVIEWED_BY_IDEN,
+                    COL_REVIEWED_AT_IDEN,
+                    COL_ASSIGNED_ROLES_IDEN,
                 ])
+                .to_owned(),
+        );
+    stmt
+}
+
+// ---------------------------------------------------------------------------
+// User Profiles Query Builders
+// ---------------------------------------------------------------------------
+
+/// Builds a query to fetch a single `UserProfile` by `user_id`.
+#[must_use]
+pub fn select_user_profile_by_id_query(user_id: &UserId) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(TABLE_USER_PROFILES_IDEN)
+        .columns(USER_PROFILE_COLUMNS)
+        .and_where(Expr::col(COL_USER_ID_IDEN).eq(user_id.as_ref()));
+    stmt
+}
+
+/// Builds a query to fetch multiple `UserProfile` records by a list of `user_ids`.
+#[must_use]
+pub fn select_user_profiles_by_ids_query(user_ids: &[UserId]) -> SelectStatement {
+    let ids: Vec<&str> = user_ids.iter().map(AsRef::as_ref).collect();
+    let mut stmt = Query::select();
+    stmt.from(TABLE_USER_PROFILES_IDEN)
+        .columns(USER_PROFILE_COLUMNS)
+        .and_where(Expr::col(COL_USER_ID_IDEN).is_in(ids));
+    stmt
+}
+
+/// Builds a paginated query to list `UserProfile` records matching an optional search string.
+#[must_use]
+pub fn select_user_profiles_paginated_query(
+    query: Option<&str>,
+    pagination: Pagination,
+) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(TABLE_USER_PROFILES_IDEN)
+        .columns(USER_PROFILE_COLUMNS);
+
+    apply_user_profile_search_filter(&mut stmt, query);
+
+    stmt.order_by(COL_USER_ID_IDEN, Order::Asc);
+    apply_pagination(&mut stmt, pagination);
+    stmt
+}
+
+/// Builds a count query for `UserProfile` records matching an optional search string.
+#[must_use]
+pub fn count_user_profiles_query(query: Option<&str>) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(TABLE_USER_PROFILES_IDEN)
+        .expr(Func::count(Expr::col(COL_USER_ID_IDEN)));
+
+    apply_user_profile_search_filter(&mut stmt, query);
+    stmt
+}
+
+fn apply_user_profile_search_filter(stmt: &mut SelectStatement, query: Option<&str>) {
+    use sea_query::extension::postgres::PgExpr;
+
+    if let Some(q) = query {
+        let trimmed = q.trim();
+        if !trimmed.is_empty() {
+            let pattern = format!("%{trimmed}%");
+            stmt.cond_where(
+                Condition::any()
+                    .add(Expr::col(COL_EMAIL_IDEN).ilike(pattern.clone()))
+                    .add(Expr::col(COL_NAME_IDEN).ilike(pattern.clone()))
+                    .add(Expr::col(COL_USER_ID_IDEN).ilike(pattern)),
+            );
+        }
+    }
+}
+
+/// Builds an upsert statement for a `UserProfile`.
+///
+/// On conflict on `user_id`, updates `email`, `name`, and `last_seen_at` while preserving `first_seen_at`.
+#[must_use]
+pub fn upsert_user_profile_query(profile: &UserProfile) -> InsertStatement {
+    let mut stmt = Query::insert();
+    stmt.into_table(TABLE_USER_PROFILES_IDEN)
+        .columns(USER_PROFILE_COLUMNS)
+        .values_panic([
+            profile.user_id.as_ref().into(),
+            profile.email.as_ref().map(AsRef::as_ref).into(),
+            profile.name.as_ref().map(AsRef::as_ref).into(),
+            profile.first_seen_at.into(),
+            profile.last_seen_at.into(),
+        ])
+        .on_conflict(
+            OnConflict::column(COL_USER_ID_IDEN)
+                .update_columns([COL_EMAIL_IDEN, COL_NAME_IDEN, COL_LAST_SEEN_AT_IDEN])
                 .to_owned(),
         );
     stmt
@@ -470,5 +576,51 @@ mod tests {
         assert!(unparam_upsert.contains("INSERT INTO \"access_requests\""));
         assert!(unparam_upsert.contains("ON CONFLICT (\"id\") DO UPDATE SET"));
         assert!(unparam_upsert.contains("\"status\" = \"excluded\".\"status\""));
+    }
+
+    #[test]
+    fn test_user_profile_queries() {
+        let user_id = UserId::try_new("alice_sub").unwrap();
+        let profile = UserProfile::new(
+            user_id.clone(),
+            Email::try_new("alice@example.com").ok(),
+            DisplayName::try_new("Alice").ok(),
+            Utc::now(),
+        );
+
+        // 1. Select by ID
+        let stmt_by_id = select_user_profile_by_id_query(&user_id);
+        let (sql_by_id, _) = crate::persistence::query::common::compile_select(&stmt_by_id);
+        assert!(sql_by_id.contains("FROM \"user_profiles\" WHERE \"user_id\" = $1"));
+
+        // 2. Select by IDs
+        let stmt_by_ids = select_user_profiles_by_ids_query(std::slice::from_ref(&user_id));
+        let (sql_by_ids, _) = crate::persistence::query::common::compile_select(&stmt_by_ids);
+        assert!(sql_by_ids.contains("FROM \"user_profiles\" WHERE \"user_id\" IN ($1)"));
+
+        // 3. Paginated list with search
+        let stmt_list = select_user_profiles_paginated_query(
+            Some("alice"),
+            Pagination::new(1, 10),
+        );
+        let unparam_list = stmt_list.to_string(PostgresQueryBuilder);
+        assert!(unparam_list.contains("FROM \"user_profiles\""));
+        assert!(unparam_list.contains("ILIKE '%alice%'"));
+        assert!(unparam_list.contains("ORDER BY \"user_id\" ASC LIMIT 10"));
+
+        // 4. Count query
+        let stmt_count = count_user_profiles_query(Some("alice"));
+        let unparam_count = stmt_count.to_string(PostgresQueryBuilder);
+        assert!(unparam_count.contains("COUNT(\"user_id\")"));
+        assert!(unparam_count.contains("ILIKE '%alice%'"));
+
+        // 5. Upsert query
+        let stmt_upsert = upsert_user_profile_query(&profile);
+        let unparam_upsert = stmt_upsert.to_string(PostgresQueryBuilder);
+        assert!(unparam_upsert.contains("INSERT INTO \"user_profiles\""));
+        assert!(unparam_upsert.contains("ON CONFLICT (\"user_id\") DO UPDATE SET"));
+        assert!(unparam_upsert.contains("\"email\" = \"excluded\".\"email\""));
+        assert!(unparam_upsert.contains("\"name\" = \"excluded\".\"name\""));
+        assert!(unparam_upsert.contains("\"last_seen_at\" = \"excluded\".\"last_seen_at\""));
     }
 }

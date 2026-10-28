@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use domain::auth::access_request::{AccessRequest, AccessRequestId, AccessRequestStatus};
+use domain::auth::profile::UserProfile;
 use domain::auth::role::{RoleId, UserRoleAssignment, UserRoleAssignmentId};
 use domain::auth::user::{ActorId, UserId};
 use domain::content::header::{
@@ -251,6 +252,19 @@ pub enum AccessRequestStatusDto {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+}
+
+/// User profile directory identity projection DTO.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserProfileDto {
+    pub user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub first_seen_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
 }
 
 /// User role assignment DTO.
@@ -607,6 +621,18 @@ impl From<AccessRequestStatus> for AccessRequestStatusDto {
             AccessRequestStatus::Pending => Self::Pending,
             AccessRequestStatus::Approved => Self::Approved,
             AccessRequestStatus::Rejected { reason } => Self::Rejected { reason },
+        }
+    }
+}
+
+impl From<UserProfile> for UserProfileDto {
+    fn from(profile: UserProfile) -> Self {
+        Self {
+            user_id: profile.user_id.into_inner(),
+            email: profile.email.map(|e| e.into_inner()),
+            name: profile.name.map(|n| n.into_inner()),
+            first_seen_at: profile.first_seen_at,
+            last_seen_at: profile.last_seen_at,
         }
     }
 }

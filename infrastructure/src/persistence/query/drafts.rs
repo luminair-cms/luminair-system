@@ -11,9 +11,10 @@ use domain::schema::DocumentTypeId;
 
 use crate::persistence::naming::StaticIden;
 use super::common::{
-    IDEN_CONTENT, IDEN_CREATED_AT, IDEN_CREATED_BY, IDEN_DISPLAY_TITLE, IDEN_DISPLAY_VALUES,
-    IDEN_DOCUMENT_TYPE_ID, IDEN_ID, IDEN_LAST_PUBLISHED_REVISION, IDEN_RELATIONS,
-    IDEN_SCHEMA_VERSION, IDEN_STATUS, IDEN_UPDATED_AT, IDEN_UPDATED_BY, IDEN_VERSION,
+    COL_CONTENT_IDEN, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN, COL_DISPLAY_TITLE_IDEN,
+    COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN, COL_RELATIONS_IDEN, COL_SCHEMA_VERSION_IDEN,
+    COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN, COL_VERSION_IDEN,
     TABLE_DOCUMENT_DRAFTS_IDEN,
 };
 
@@ -22,33 +23,33 @@ use super::common::{
 // ---------------------------------------------------------------------------
 
 const DRAFT_INSERT_COLUMNS: [StaticIden; 14] = [
-    IDEN_ID,
-    IDEN_DOCUMENT_TYPE_ID,
-    IDEN_DISPLAY_VALUES,
-    IDEN_DISPLAY_TITLE,
-    IDEN_STATUS,
-    IDEN_CONTENT,
-    IDEN_RELATIONS,
-    IDEN_SCHEMA_VERSION,
-    IDEN_VERSION,
-    IDEN_LAST_PUBLISHED_REVISION,
-    IDEN_CREATED_AT,
-    IDEN_CREATED_BY,
-    IDEN_UPDATED_AT,
-    IDEN_UPDATED_BY,
+    COL_ID_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN,
+    COL_DISPLAY_VALUES_IDEN,
+    COL_DISPLAY_TITLE_IDEN,
+    COL_STATUS_IDEN,
+    COL_CONTENT_IDEN,
+    COL_RELATIONS_IDEN,
+    COL_SCHEMA_VERSION_IDEN,
+    COL_VERSION_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN,
+    COL_CREATED_AT_IDEN,
+    COL_CREATED_BY_IDEN,
+    COL_UPDATED_AT_IDEN,
+    COL_UPDATED_BY_IDEN,
 ];
 
 const DRAFT_UPDATE_COLUMNS: [StaticIden; 10] = [
-    IDEN_DISPLAY_VALUES,
-    IDEN_DISPLAY_TITLE,
-    IDEN_STATUS,
-    IDEN_CONTENT,
-    IDEN_RELATIONS,
-    IDEN_SCHEMA_VERSION,
-    IDEN_VERSION,
-    IDEN_LAST_PUBLISHED_REVISION,
-    IDEN_UPDATED_AT,
-    IDEN_UPDATED_BY,
+    COL_DISPLAY_VALUES_IDEN,
+    COL_DISPLAY_TITLE_IDEN,
+    COL_STATUS_IDEN,
+    COL_CONTENT_IDEN,
+    COL_RELATIONS_IDEN,
+    COL_SCHEMA_VERSION_IDEN,
+    COL_VERSION_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN,
+    COL_UPDATED_AT_IDEN,
+    COL_UPDATED_BY_IDEN,
 ];
 
 // ---------------------------------------------------------------------------
@@ -84,8 +85,8 @@ pub fn select_draft_by_id_query(type_id: &DocumentTypeId, id: Uuid) -> SelectSta
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .column(Asterisk)
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_id.as_ref()))
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 
@@ -95,8 +96,8 @@ pub fn select_drafts_by_type_query(type_id: &DocumentTypeId) -> SelectStatement 
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .column(Asterisk)
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_id.as_ref()))
-        .order_by(IDEN_UPDATED_AT, Order::Desc);
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .order_by(COL_UPDATED_AT_IDEN, Order::Desc);
     stmt
 }
 
@@ -123,7 +124,7 @@ pub fn upsert_draft_query(params: DraftUpsertParams<'_>) -> InsertStatement {
             params.updated_by_urn.into(),
         ])
         .on_conflict(
-            OnConflict::columns([IDEN_DOCUMENT_TYPE_ID, IDEN_ID])
+            OnConflict::columns([COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN])
                 .update_columns(DRAFT_UPDATE_COLUMNS)
                 .to_owned(),
         );
@@ -135,8 +136,8 @@ pub fn upsert_draft_query(params: DraftUpsertParams<'_>) -> InsertStatement {
 pub fn delete_draft_query(type_id: &DocumentTypeId, id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(TABLE_DOCUMENT_DRAFTS_IDEN)
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_id.as_ref()))
-        .and_where(Expr::col(IDEN_ID).eq(id));
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
     stmt
 }
 
@@ -146,7 +147,7 @@ pub fn exists_draft_for_type_query(type_id: &DocumentTypeId) -> SelectStatement 
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .expr(Expr::val(1))
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_id.as_ref()))
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
         .limit(1);
     stmt
 }

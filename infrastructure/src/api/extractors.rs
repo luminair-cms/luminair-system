@@ -62,6 +62,15 @@ pub struct AdminHeadersQuery {
     pub status: Option<DocumentStatus>,
 }
 
+/// Query parameters for listing user profiles in the directory (`GET /api/v1/auth/users`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUsersQuery {
+    pub q: Option<String>,
+    pub page: Option<u32>,
+    pub page_size: Option<u32>,
+}
+
 // ---------------------------------------------------------------------------
 // Inherent Implementations
 // ---------------------------------------------------------------------------
@@ -70,6 +79,14 @@ impl PaginationQuery {
     /// Converts optional page and page_size parameters into bounded domain [`Pagination`].
     #[must_use]
     pub fn into_pagination(self) -> Pagination {
+        compute_bounded_pagination(self.page, self.page_size)
+    }
+}
+
+impl ListUsersQuery {
+    /// Extracts bounded domain [`Pagination`] from the query.
+    #[must_use]
+    pub fn pagination(&self) -> Pagination {
         compute_bounded_pagination(self.page, self.page_size)
     }
 }

@@ -208,3 +208,16 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   3. **Aurora DSQL Hot-Path Protection**: Replaced unconditional row upserts on every HTTP request with explicit session synchronization (`POST /api/v1/auth/profile/sync`) and access request onboarding hooks, eliminating OCC serialization conflict contention.
   4. **Database Table Transition**: Replaced legacy `shadow_users` table with `user_profiles` table, indexed by `(email, name)` for fast prefix search.
   5. **See**: [`ADR-006`](../docs/adr/ADR-006-user-profile-and-directory-architecture.md).
+
+---
+
+### 2026-10-28 — ADR-006 Implementation Completed & StaticIden Option B Standardization
+
+- **Context**: Completing implementation of ADR-006 across all crates, resolving naming inconsistencies in SeaQuery StaticIden wrappers, and removing the legacy `shadow_user` infrastructure.
+- **Decisions**:
+  1. **Option B Identifier Standardization**: Standardized SeaQuery `StaticIden` wrappers across `infrastructure::persistence::query` on the `<BASE_NAME>_IDEN` pattern (`COL_<COLNAME>_IDEN`, `TABLE_<TABLENAME>_IDEN`, `ALIAS_<NAME>_IDEN`), matching `infrastructure::persistence::naming::identifiers` 1:1.
+  2. **Legacy Shadow User Removal**: Removed `infrastructure/src/auth/shadow_user.rs` and its per-request write amplification in `DefaultAuthResolver`. `user_profiles` is now managed cleanly via `UserDirectoryService` and explicit sync.
+  3. **REST Endpoints Added**:
+     - `GET /api/v1/auth/users`: Lists and searches user profiles for the Admin Studio role-assignment picker (enforces `Permission::ManageUsers`).
+     - `POST /api/v1/auth/profile/sync`: Synchronizes authenticated IdP claims upon SPA login or profile changes.
+  4. **Spec-Backed Testing & Traceability**: Declarative behavioral specification `docs/specs/application/user-directory-service.md` covers rules `UD-01` through `UD-07`, verified by `application/tests/ud_user_directory_service.rs` and passing `spec_traceability`. End-to-end integration verified via `infrastructure/tests/api_test.rs::test_08_user_directory_and_profile_sync`.

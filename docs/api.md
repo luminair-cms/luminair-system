@@ -265,15 +265,17 @@ All endpoints accept and return JSON. Authenticate requests using `Authorization
 | `GET` | `/api/v1/content/:type_id/:id/snapshots/:revision` | Inspect full historical revision content and relations. | Archive (`DocumentSnapshot`) |
 | `POST` | `/api/v1/content/:type_id/:id/snapshots/:revision/restore` | Restore historical revision into working draft (body: `{"discard_pending_edits": bool}`). | `Modified` |
 
-### 6.2 Authentication & Access Requests
+### 6.2 Authentication, Onboarding & User Directory
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/auth/access-requests` | Submit an access request for onboarding. |
-| `GET` | `/api/v1/auth/access-requests` | List pending access requests awaiting review (admin only). |
-| `GET` | `/api/v1/auth/access-requests/:id` | Get access request status (owner or admin). |
-| `POST` | `/api/v1/auth/access-requests/:id/approve` | Approve access request and assign roles (admin only). |
-| `POST` | `/api/v1/auth/access-requests/:id/reject` | Reject access request with reason (admin only). |
+| Method | Path | Description | Authorization |
+|---|---|---|---|
+| `POST` | `/api/v1/auth/profile/sync` | Synchronize authenticated IdP claims (email, name) into local user profile directory. | Authenticated User |
+| `GET` | `/api/v1/auth/users` | List and search user profiles for role-assignment picker (`?q=&page=&pageSize=`). | Administrator (`Permission::ManageUsers`) |
+| `POST` | `/api/v1/auth/access-requests` | Submit an access request for onboarding. | Authenticated User |
+| `GET` | `/api/v1/auth/access-requests` | List pending access requests awaiting review. | Administrator |
+| `GET` | `/api/v1/auth/access-requests/:id` | Get access request status. | Owner or Administrator |
+| `POST` | `/api/v1/auth/access-requests/:id/approve` | Approve access request and assign roles. | Administrator |
+| `POST` | `/api/v1/auth/access-requests/:id/reject` | Reject access request with reason. | Administrator |
 
 ### 6.3 System Configuration
 

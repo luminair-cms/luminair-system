@@ -16,14 +16,15 @@ use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{
     COL_ACTION, COL_ASSIGNED_ROLES, COL_CONTENT, COL_CREATED_AT, COL_CREATED_BY,
     COL_DESCRIPTION, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES, COL_DOCUMENT_ID,
-    COL_DOCUMENT_TYPE_ID, COL_EMAIL, COL_GRANTED_AT, COL_GRANTED_BY, COL_HAS_PENDING_DRAFT,
-    COL_ID, COL_LAST_PUBLISHED_REVISION, COL_NAME, COL_ORDER_INDEX, COL_PUBLISHED_AT,
-    COL_PUBLISHED_BY, COL_REASON, COL_REJECTION_REASON, COL_RELATIONS, COL_REQUESTED_AT,
-    COL_REVIEWED_AT, COL_REVIEWED_BY, COL_REVISION, COL_ROLE_ID, COL_SCHEMA_VERSION,
-    COL_SOURCE_ID, COL_STATUS, COL_TARGET_ID, COL_UPDATED_AT, COL_UPDATED_BY, COL_USER_ID,
-    COL_VERSION, DocumentTypeNaming, StaticIden, TABLE_ACCESS_REQUESTS, TABLE_DOCUMENT_DRAFTS,
-    TABLE_DOCUMENT_SNAPSHOTS, TABLE_DOCUMENT_TOMBSTONES, TABLE_ROLE_PERMISSIONS, TABLE_ROLES,
-    TABLE_SHADOW_USERS, TABLE_USER_ROLE_ASSIGNMENTS,
+    COL_DOCUMENT_TYPE_ID, COL_EMAIL, COL_FIRST_SEEN_AT, COL_GRANTED_AT, COL_GRANTED_BY,
+    COL_HAS_PENDING_DRAFT, COL_ID, COL_LAST_PUBLISHED_REVISION, COL_LAST_SEEN_AT,
+    COL_NAME, COL_ORDER_INDEX, COL_PUBLISHED_AT, COL_PUBLISHED_BY, COL_REASON,
+    COL_REJECTION_REASON, COL_RELATIONS, COL_REQUESTED_AT, COL_REVIEWED_AT,
+    COL_REVIEWED_BY, COL_REVISION, COL_ROLE_ID, COL_SCHEMA_VERSION, COL_SOURCE_ID,
+    COL_STATUS, COL_TARGET_ID, COL_UPDATED_AT, COL_UPDATED_BY, COL_USER_ID,
+    COL_VERSION, DocumentTypeNaming, StaticIden, TABLE_ACCESS_REQUESTS,
+    TABLE_DOCUMENT_DRAFTS, TABLE_DOCUMENT_SNAPSHOTS, TABLE_DOCUMENT_TOMBSTONES,
+    TABLE_ROLE_PERMISSIONS, TABLE_ROLES, TABLE_USER_PROFILES, TABLE_USER_ROLE_ASSIGNMENTS,
 };
 use crate::persistence::repositories::codec::{localized_text_to_json, primitive_value_to_json};
 
@@ -31,52 +32,54 @@ use crate::persistence::repositories::codec::{localized_text_to_json, primitive_
 // Public StaticIden Constants
 // ---------------------------------------------------------------------------
 
-pub const IDEN_ID: StaticIden = StaticIden(COL_ID);
-pub const IDEN_REVISION: StaticIden = StaticIden(COL_REVISION);
-pub const IDEN_HAS_PENDING_DRAFT: StaticIden = StaticIden(COL_HAS_PENDING_DRAFT);
-pub const IDEN_DISPLAY_VALUES: StaticIden = StaticIden(COL_DISPLAY_VALUES);
-pub const IDEN_DISPLAY_TITLE: StaticIden = StaticIden(COL_DISPLAY_TITLE);
-pub const IDEN_CREATED_AT: StaticIden = StaticIden(COL_CREATED_AT);
-pub const IDEN_CREATED_BY: StaticIden = StaticIden(COL_CREATED_BY);
-pub const IDEN_UPDATED_AT: StaticIden = StaticIden(COL_UPDATED_AT);
-pub const IDEN_UPDATED_BY: StaticIden = StaticIden(COL_UPDATED_BY);
-pub const IDEN_PUBLISHED_AT: StaticIden = StaticIden(COL_PUBLISHED_AT);
-pub const IDEN_PUBLISHED_BY: StaticIden = StaticIden(COL_PUBLISHED_BY);
+pub const COL_ID_IDEN: StaticIden = StaticIden(COL_ID);
+pub const COL_REVISION_IDEN: StaticIden = StaticIden(COL_REVISION);
+pub const COL_HAS_PENDING_DRAFT_IDEN: StaticIden = StaticIden(COL_HAS_PENDING_DRAFT);
+pub const COL_DISPLAY_VALUES_IDEN: StaticIden = StaticIden(COL_DISPLAY_VALUES);
+pub const COL_DISPLAY_TITLE_IDEN: StaticIden = StaticIden(COL_DISPLAY_TITLE);
+pub const COL_CREATED_AT_IDEN: StaticIden = StaticIden(COL_CREATED_AT);
+pub const COL_CREATED_BY_IDEN: StaticIden = StaticIden(COL_CREATED_BY);
+pub const COL_UPDATED_AT_IDEN: StaticIden = StaticIden(COL_UPDATED_AT);
+pub const COL_UPDATED_BY_IDEN: StaticIden = StaticIden(COL_UPDATED_BY);
+pub const COL_PUBLISHED_AT_IDEN: StaticIden = StaticIden(COL_PUBLISHED_AT);
+pub const COL_PUBLISHED_BY_IDEN: StaticIden = StaticIden(COL_PUBLISHED_BY);
 
-pub const IDEN_STATUS: StaticIden = StaticIden(COL_STATUS);
-pub const IDEN_DOCUMENT_TYPE_ID: StaticIden = StaticIden(COL_DOCUMENT_TYPE_ID);
-pub const IDEN_CONTENT: StaticIden = StaticIden(COL_CONTENT);
-pub const IDEN_RELATIONS: StaticIden = StaticIden(COL_RELATIONS);
-pub const IDEN_SCHEMA_VERSION: StaticIden = StaticIden(COL_SCHEMA_VERSION);
-pub const IDEN_VERSION: StaticIden = StaticIden(COL_VERSION);
-pub const IDEN_LAST_PUBLISHED_REVISION: StaticIden = StaticIden(COL_LAST_PUBLISHED_REVISION);
+pub const COL_STATUS_IDEN: StaticIden = StaticIden(COL_STATUS);
+pub const COL_DOCUMENT_TYPE_ID_IDEN: StaticIden = StaticIden(COL_DOCUMENT_TYPE_ID);
+pub const COL_CONTENT_IDEN: StaticIden = StaticIden(COL_CONTENT);
+pub const COL_RELATIONS_IDEN: StaticIden = StaticIden(COL_RELATIONS);
+pub const COL_SCHEMA_VERSION_IDEN: StaticIden = StaticIden(COL_SCHEMA_VERSION);
+pub const COL_VERSION_IDEN: StaticIden = StaticIden(COL_VERSION);
+pub const COL_LAST_PUBLISHED_REVISION_IDEN: StaticIden = StaticIden(COL_LAST_PUBLISHED_REVISION);
 
-pub const IDEN_REASON: StaticIden = StaticIden(COL_REASON);
-pub const IDEN_DOCUMENT_ID: StaticIden = StaticIden(COL_DOCUMENT_ID);
+pub const COL_REASON_IDEN: StaticIden = StaticIden(COL_REASON);
+pub const COL_DOCUMENT_ID_IDEN: StaticIden = StaticIden(COL_DOCUMENT_ID);
 
-pub const IDEN_SOURCE_ID: StaticIden = StaticIden(COL_SOURCE_ID);
-pub const IDEN_TARGET_ID: StaticIden = StaticIden(COL_TARGET_ID);
-pub const IDEN_ORDER_INDEX: StaticIden = StaticIden(COL_ORDER_INDEX);
+pub const COL_SOURCE_ID_IDEN: StaticIden = StaticIden(COL_SOURCE_ID);
+pub const COL_TARGET_ID_IDEN: StaticIden = StaticIden(COL_TARGET_ID);
+pub const COL_ORDER_INDEX_IDEN: StaticIden = StaticIden(COL_ORDER_INDEX);
 
-pub const IDEN_NAME: StaticIden = StaticIden(COL_NAME);
-pub const IDEN_DESCRIPTION: StaticIden = StaticIden(COL_DESCRIPTION);
-pub const IDEN_ROLE_ID: StaticIden = StaticIden(COL_ROLE_ID);
-pub const IDEN_ACTION: StaticIden = StaticIden(COL_ACTION);
-pub const IDEN_USER_ID: StaticIden = StaticIden(COL_USER_ID);
-pub const IDEN_GRANTED_AT: StaticIden = StaticIden(COL_GRANTED_AT);
-pub const IDEN_GRANTED_BY: StaticIden = StaticIden(COL_GRANTED_BY);
-pub const IDEN_EMAIL: StaticIden = StaticIden(COL_EMAIL);
-pub const IDEN_REQUESTED_AT: StaticIden = StaticIden(COL_REQUESTED_AT);
-pub const IDEN_REJECTION_REASON: StaticIden = StaticIden(COL_REJECTION_REASON);
-pub const IDEN_REVIEWED_BY: StaticIden = StaticIden(COL_REVIEWED_BY);
-pub const IDEN_REVIEWED_AT: StaticIden = StaticIden(COL_REVIEWED_AT);
-pub const IDEN_ASSIGNED_ROLES: StaticIden = StaticIden(COL_ASSIGNED_ROLES);
+pub const COL_NAME_IDEN: StaticIden = StaticIden(COL_NAME);
+pub const COL_DESCRIPTION_IDEN: StaticIden = StaticIden(COL_DESCRIPTION);
+pub const COL_ROLE_ID_IDEN: StaticIden = StaticIden(COL_ROLE_ID);
+pub const COL_ACTION_IDEN: StaticIden = StaticIden(COL_ACTION);
+pub const COL_USER_ID_IDEN: StaticIden = StaticIden(COL_USER_ID);
+pub const COL_GRANTED_AT_IDEN: StaticIden = StaticIden(COL_GRANTED_AT);
+pub const COL_GRANTED_BY_IDEN: StaticIden = StaticIden(COL_GRANTED_BY);
+pub const COL_EMAIL_IDEN: StaticIden = StaticIden(COL_EMAIL);
+pub const COL_REQUESTED_AT_IDEN: StaticIden = StaticIden(COL_REQUESTED_AT);
+pub const COL_REJECTION_REASON_IDEN: StaticIden = StaticIden(COL_REJECTION_REASON);
+pub const COL_REVIEWED_BY_IDEN: StaticIden = StaticIden(COL_REVIEWED_BY);
+pub const COL_REVIEWED_AT_IDEN: StaticIden = StaticIden(COL_REVIEWED_AT);
+pub const COL_ASSIGNED_ROLES_IDEN: StaticIden = StaticIden(COL_ASSIGNED_ROLES);
+pub const COL_FIRST_SEEN_AT_IDEN: StaticIden = StaticIden(COL_FIRST_SEEN_AT);
+pub const COL_LAST_SEEN_AT_IDEN: StaticIden = StaticIden(COL_LAST_SEEN_AT);
 
 pub const TABLE_ROLES_IDEN: StaticIden = StaticIden(TABLE_ROLES);
 pub const TABLE_ROLE_PERMISSIONS_IDEN: StaticIden = StaticIden(TABLE_ROLE_PERMISSIONS);
 pub const TABLE_USER_ROLE_ASSIGNMENTS_IDEN: StaticIden = StaticIden(TABLE_USER_ROLE_ASSIGNMENTS);
 pub const TABLE_ACCESS_REQUESTS_IDEN: StaticIden = StaticIden(TABLE_ACCESS_REQUESTS);
-pub const TABLE_SHADOW_USERS_IDEN: StaticIden = StaticIden(TABLE_SHADOW_USERS);
+pub const TABLE_USER_PROFILES_IDEN: StaticIden = StaticIden(TABLE_USER_PROFILES);
 pub const TABLE_DOCUMENT_DRAFTS_IDEN: StaticIden = StaticIden(TABLE_DOCUMENT_DRAFTS);
 pub const TABLE_DOCUMENT_SNAPSHOTS_IDEN: StaticIden = StaticIden(TABLE_DOCUMENT_SNAPSHOTS);
 pub const TABLE_DOCUMENT_TOMBSTONES_IDEN: StaticIden = StaticIden(TABLE_DOCUMENT_TOMBSTONES);
@@ -298,7 +301,7 @@ mod tests {
     #[test]
     fn test_apply_pagination() {
         let mut stmt = Query::select();
-        stmt.from(IDEN_ID);
+        stmt.from(COL_ID_IDEN);
         apply_pagination(&mut stmt, Pagination { page: 3, page_size: 15 });
         let (sql, _) = compile_select(&stmt);
         let unparam = stmt.to_string(PostgresQueryBuilder);

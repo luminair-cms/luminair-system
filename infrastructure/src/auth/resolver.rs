@@ -14,7 +14,6 @@ use crate::auth::claims::AuthenticatedUser;
 use crate::auth::error::{AuthError, AuthResolutionError};
 use crate::auth::oidc::OidcTokenValidator;
 use crate::auth::service_token::{ServiceTokenEntry, ServiceTokenRegistry};
-use crate::auth::shadow_user::{NoopShadowUserRecorder, ShadowUserRecorder, SqlxShadowUserRecorder};
 use crate::persistence::{
     SqlxAccessRequestRepository, SqlxRoleRepository, SqlxUserRoleAssignmentRepository,
 };
@@ -39,13 +38,12 @@ pub trait AuthContextResolver: Send + Sync + 'static {
 }
 
 /// Generic authentication resolver orchestrating token verification, onboarding, and RBAC.
-pub struct DefaultAuthResolver<A, U, R, S = NoopShadowUserRecorder> {
+pub struct DefaultAuthResolver<A, U, R> {
     oidc_validator: Arc<OidcTokenValidator>,
     service_tokens: Arc<ServiceTokenRegistry>,
     access_request_repo: A,
     assignment_repo: U,
     role_repo: R,
-    shadow_recorder: S,
 }
 
 /// Production database-backed authentication resolver.
@@ -53,14 +51,13 @@ pub type SqlxAuthResolver = DefaultAuthResolver<
     SqlxAccessRequestRepository,
     SqlxUserRoleAssignmentRepository,
     SqlxRoleRepository,
-    SqlxShadowUserRecorder,
 >;
 
 // ---------------------------------------------------------------------------
 // Implementations
 // ---------------------------------------------------------------------------
 
-impl<A, U, R, S> DefaultAuthResolver<A, U, R, S> {
+impl<A, U, R> DefaultAuthResolver<A, U, R> {
     /// Creates a new authentication resolver with the given dependencies.
     pub fn new(
         oidc_validator: Arc<OidcTokenValidator>,
@@ -68,7 +65,6 @@ impl<A, U, R, S> DefaultAuthResolver<A, U, R, S> {
         access_request_repo: A,
         assignment_repo: U,
         role_repo: R,
-        shadow_recorder: S,
     ) -> Self {
         Self {
             oidc_validator,
@@ -76,28 +72,7 @@ impl<A, U, R, S> DefaultAuthResolver<A, U, R, S> {
             access_request_repo,
             assignment_repo,
             role_repo,
-            shadow_recorder,
         }
-    }
-}
-
-impl<A, U, R> DefaultAuthResolver<A, U, R, NoopShadowUserRecorder> {
-    /// Convenience constructor creating a resolver with a no-op shadow user recorder.
-    pub fn without_shadow_recorder(
-        oidc_validator: Arc<OidcTokenValidator>,
-        service_tokens: Arc<ServiceTokenRegistry>,
-        access_request_repo: A,
-        assignment_repo: U,
-        role_repo: R,
-    ) -> Self {
-        Self::new(
-            oidc_validator,
-            service_tokens,
-            access_request_repo,
-            assignment_repo,
-            role_repo,
-            NoopShadowUserRecorder,
-        )
     }
 }
 
@@ -114,18 +89,16 @@ impl SqlxAuthResolver {
             service_tokens,
             SqlxAccessRequestRepository::new(pool.clone()),
             SqlxUserRoleAssignmentRepository::new(pool.clone()),
-            SqlxRoleRepository::new(pool.clone()),
-            SqlxShadowUserRecorder::new(pool),
+            SqlxRoleRepository::new(pool),
         )
     }
 }
 
-impl<A, U, R, S> AuthContextResolver for DefaultAuthResolver<A, U, R, S>
+impl<A, U, R> AuthContextResolver for DefaultAuthResolver<A, U, R>
 where
     A: AccessRequestRepository + 'static,
     U: UserRoleAssignmentRepository + 'static,
     R: RoleRepository + 'static,
-    S: ShadowUserRecorder + 'static,
 {
     async fn resolve_user_identity(
         &self,
@@ -133,7 +106,6 @@ where
     ) -> Result<AuthenticatedUser, AuthResolutionError> {
         let token = extract_bearer_token(auth_header)?;
         let user = self.oidc_validator.verify_token(token)?;
-        let _ = self.shadow_recorder.record_user_seen(&user).await;
         Ok(user)
     }
 
@@ -148,7 +120,6 @@ where
         }
 
         let user = self.oidc_validator.verify_token(token)?;
-        let _ = self.shadow_recorder.record_user_seen(&user).await;
 
         let assignments = self
             .assignment_repo
@@ -164,7 +135,7 @@ where
     }
 }
 
-impl<A, U, R, S> DefaultAuthResolver<A, U, R, S>
+impl<A, U, R> DefaultAuthResolver<A, U, R>
 where
     A: AccessRequestRepository,
     R: RoleRepository,
@@ -412,7 +383,7 @@ mod tests {
             roles: vec![test_role],
         };
 
-        let resolver = DefaultAuthResolver::without_shadow_recorder(
+        let resolver = DefaultAuthResolver::new(
             validator,
             token_registry,
             MockAccessRequestRepo::default(),
@@ -443,7 +414,7 @@ mod tests {
         )
         .expect("token");
 
-        let resolver = DefaultAuthResolver::without_shadow_recorder(
+        let resolver = DefaultAuthResolver::new(
             validator,
             Arc::new(ServiceTokenRegistry::new()),
             MockAccessRequestRepo::default(),
@@ -495,7 +466,7 @@ mod tests {
             permissions: vec![],
         };
 
-        let resolver = DefaultAuthResolver::without_shadow_recorder(
+        let resolver = DefaultAuthResolver::new(
             validator,
             Arc::new(ServiceTokenRegistry::new()),
             MockAccessRequestRepo::default(),
@@ -530,7 +501,7 @@ mod tests {
         )
         .expect("token");
 
-        let resolver = DefaultAuthResolver::without_shadow_recorder(
+        let resolver = DefaultAuthResolver::new(
             validator,
             Arc::new(ServiceTokenRegistry::new()),
             MockAccessRequestRepo::default(),

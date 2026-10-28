@@ -12,7 +12,7 @@ use uuid::Uuid;
 use domain::content::instance::DocumentInstanceId;
 
 use crate::persistence::naming::StaticIden;
-use crate::persistence::query::common::{IDEN_ORDER_INDEX, IDEN_SOURCE_ID, IDEN_TARGET_ID};
+use crate::persistence::query::common::{COL_ORDER_INDEX_IDEN, COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN};
 
 // ---------------------------------------------------------------------------
 // Public Junction Table Query Builders
@@ -28,11 +28,11 @@ pub fn insert_link_query(
 ) -> InsertStatement {
     let mut stmt = Query::insert();
     stmt.into_table(junction_iden)
-        .columns([IDEN_SOURCE_ID, IDEN_TARGET_ID, IDEN_ORDER_INDEX])
+        .columns([COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN, COL_ORDER_INDEX_IDEN])
         .values_panic([source_id.into(), target_id.into(), order_index.into()])
         .on_conflict(
-            OnConflict::columns([IDEN_SOURCE_ID, IDEN_TARGET_ID])
-                .update_column(IDEN_ORDER_INDEX)
+            OnConflict::columns([COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN])
+                .update_column(COL_ORDER_INDEX_IDEN)
                 .to_owned(),
         );
     stmt
@@ -53,7 +53,7 @@ pub fn insert_links_batch_query(
 
     let mut stmt = Query::insert();
     stmt.into_table(junction_iden)
-        .columns([IDEN_SOURCE_ID, IDEN_TARGET_ID, IDEN_ORDER_INDEX]);
+        .columns([COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN, COL_ORDER_INDEX_IDEN]);
 
     for (idx, target_id) in target_ids.iter().enumerate() {
         let order_index = i32::try_from(idx).unwrap_or(i32::MAX);
@@ -65,8 +65,8 @@ pub fn insert_links_batch_query(
     }
 
     stmt.on_conflict(
-        OnConflict::columns([IDEN_SOURCE_ID, IDEN_TARGET_ID])
-            .update_column(IDEN_ORDER_INDEX)
+        OnConflict::columns([COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN])
+            .update_column(COL_ORDER_INDEX_IDEN)
             .to_owned(),
     );
 
@@ -78,7 +78,7 @@ pub fn insert_links_batch_query(
 pub fn delete_links_by_source_query(junction_iden: StaticIden, source_id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(junction_iden)
-        .and_where(Expr::col(IDEN_SOURCE_ID).eq(source_id));
+        .and_where(Expr::col(COL_SOURCE_ID_IDEN).eq(source_id));
     stmt
 }
 
@@ -90,9 +90,9 @@ pub fn select_targets_by_source_query(
 ) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(junction_iden)
-        .columns([IDEN_TARGET_ID, IDEN_ORDER_INDEX])
-        .and_where(Expr::col(IDEN_SOURCE_ID).eq(source_id))
-        .order_by(IDEN_ORDER_INDEX, Order::Asc);
+        .columns([COL_TARGET_ID_IDEN, COL_ORDER_INDEX_IDEN])
+        .and_where(Expr::col(COL_SOURCE_ID_IDEN).eq(source_id))
+        .order_by(COL_ORDER_INDEX_IDEN, Order::Asc);
     stmt
 }
 
@@ -104,10 +104,10 @@ pub fn select_links_by_sources_query(
 ) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(junction_iden)
-        .columns([IDEN_SOURCE_ID, IDEN_TARGET_ID, IDEN_ORDER_INDEX])
-        .and_where(Expr::col(IDEN_SOURCE_ID).is_in(source_ids.to_vec()))
-        .order_by(IDEN_SOURCE_ID, Order::Asc)
-        .order_by(IDEN_ORDER_INDEX, Order::Asc);
+        .columns([COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN, COL_ORDER_INDEX_IDEN])
+        .and_where(Expr::col(COL_SOURCE_ID_IDEN).is_in(source_ids.to_vec()))
+        .order_by(COL_SOURCE_ID_IDEN, Order::Asc)
+        .order_by(COL_ORDER_INDEX_IDEN, Order::Asc);
     stmt
 }
 
@@ -119,10 +119,10 @@ pub fn select_links_by_targets_query(
 ) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(junction_iden)
-        .columns([IDEN_SOURCE_ID, IDEN_TARGET_ID, IDEN_ORDER_INDEX])
-        .and_where(Expr::col(IDEN_TARGET_ID).is_in(target_ids.to_vec()))
-        .order_by(IDEN_TARGET_ID, Order::Asc)
-        .order_by(IDEN_ORDER_INDEX, Order::Asc);
+        .columns([COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN, COL_ORDER_INDEX_IDEN])
+        .and_where(Expr::col(COL_TARGET_ID_IDEN).is_in(target_ids.to_vec()))
+        .order_by(COL_TARGET_ID_IDEN, Order::Asc)
+        .order_by(COL_ORDER_INDEX_IDEN, Order::Asc);
     stmt
 }
 

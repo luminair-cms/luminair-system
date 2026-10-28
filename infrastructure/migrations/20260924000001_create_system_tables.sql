@@ -77,15 +77,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_access_requests_active_user
     ON access_requests (user_id)
     WHERE status IN ('pending', 'approved');
 
--- 6. Shadow Users (Local cache of verified OIDC identities, ADR-005)
-CREATE TABLE IF NOT EXISTS shadow_users (
-    user_id    VARCHAR(255) PRIMARY KEY,
-    email      VARCHAR(320),
-    name       VARCHAR(255),
-    auth_type  VARCHAR(64),
-    first_seen TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- 6. User Profiles (Local directory of verified OIDC identities, ADR-006)
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id       VARCHAR(255) PRIMARY KEY,
+    email         VARCHAR(320),
+    name          VARCHAR(255),
+    first_seen_at TIMESTAMPTZ NOT NULL,
+    last_seen_at  TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_shadow_users_email
-    ON shadow_users (email);
+CREATE INDEX IF NOT EXISTS idx_user_profiles_search
+    ON user_profiles (email, name);

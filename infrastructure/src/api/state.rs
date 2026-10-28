@@ -5,6 +5,7 @@ use std::sync::Arc;
 use application::services::{
     AccessRequestsService, AccessRequestsServiceImpl, DocumentsService, DocumentsServiceImpl,
     SchemaService, SchemaServiceImpl, SystemConfigService, SystemConfigServiceImpl,
+    UserDirectoryService, UserDirectoryServiceImpl,
 };
 use domain::system::SystemContext;
 
@@ -12,7 +13,7 @@ use crate::auth::{AuthContextResolver, SqlxAuthResolver};
 use crate::health::{HealthCheckService, SqlxHealthChecker};
 use crate::persistence::repositories::{
     SqlxAccessRequestRepository, SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository,
-    SqlxRoleRepository, SqlxUserRoleAssignmentRepository,
+    SqlxRoleRepository, SqlxUserProfileRepository, SqlxUserRoleAssignmentRepository,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,13 @@ pub trait HasSystemConfigService: HasSystemContext {
     fn system_config_service(&self) -> &Self::SystemConfig;
 }
 
+/// Provides access to the user directory and profile management application service.
+pub trait HasUserDirectoryService: HasSystemContext {
+    type UserDirectory: UserDirectoryService;
+
+    fn user_directory_service(&self) -> &Self::UserDirectory;
+}
+
 /// Provides access to the system health and readiness checker.
 pub trait HasHealthChecker: Clone + Send + Sync + 'static {
     type Health: HealthCheckService;
@@ -85,6 +93,7 @@ pub struct HttpState<
     C = SystemConfigServiceImpl,
     H = SqlxHealthChecker,
     Auth = SqlxAuthResolver,
+    U = UserDirectoryServiceImpl<SqlxUserProfileRepository>,
 > {
     pub context: &'static SystemContext,
     pub auth_resolver: Arc<Auth>,
@@ -92,6 +101,7 @@ pub struct HttpState<
     pub access_requests_service: Arc<A>,
     pub schema_service: Arc<S>,
     pub system_config_service: Arc<C>,
+    pub user_directory_service: Arc<U>,
     pub health_checker: Arc<H>,
 }
 
@@ -107,15 +117,17 @@ pub type ProductionHttpState = HttpState<
     SystemConfigServiceImpl,
     SqlxHealthChecker,
     SqlxAuthResolver,
+    UserDirectoryServiceImpl<SqlxUserProfileRepository>,
 >;
 
 // ---------------------------------------------------------------------------
 // Inherent Implementations
 // ---------------------------------------------------------------------------
 
-impl<D, A, S, C, H, Auth> HttpState<D, A, S, C, H, Auth> {
+impl<D, A, S, C, H, Auth, U> HttpState<D, A, S, C, H, Auth, U> {
     /// Creates a new `HttpState` wrapping the provided application services.
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         context: &'static SystemContext,
         auth_resolver: Arc<Auth>,
@@ -123,6 +135,7 @@ impl<D, A, S, C, H, Auth> HttpState<D, A, S, C, H, Auth> {
         access_requests_service: Arc<A>,
         schema_service: Arc<S>,
         system_config_service: Arc<C>,
+        user_directory_service: Arc<U>,
         health_checker: Arc<H>,
     ) -> Self {
         Self {
@@ -132,6 +145,7 @@ impl<D, A, S, C, H, Auth> HttpState<D, A, S, C, H, Auth> {
             access_requests_service,
             schema_service,
             system_config_service,
+            user_directory_service,
             health_checker,
         }
     }
@@ -141,7 +155,7 @@ impl<D, A, S, C, H, Auth> HttpState<D, A, S, C, H, Auth> {
 // Trait Implementations
 // ---------------------------------------------------------------------------
 
-impl<D, A, S, C, H, Auth> Clone for HttpState<D, A, S, C, H, Auth> {
+impl<D, A, S, C, H, Auth, U> Clone for HttpState<D, A, S, C, H, Auth, U> {
     fn clone(&self) -> Self {
         Self {
             context: self.context,
@@ -150,12 +164,13 @@ impl<D, A, S, C, H, Auth> Clone for HttpState<D, A, S, C, H, Auth> {
             access_requests_service: Arc::clone(&self.access_requests_service),
             schema_service: Arc::clone(&self.schema_service),
             system_config_service: Arc::clone(&self.system_config_service),
+            user_directory_service: Arc::clone(&self.user_directory_service),
             health_checker: Arc::clone(&self.health_checker),
         }
     }
 }
 
-impl<D, A, S, C, H, Auth> HasSystemContext for HttpState<D, A, S, C, H, Auth>
+impl<D, A, S, C, H, Auth, U> HasSystemContext for HttpState<D, A, S, C, H, Auth, U>
 where
     D: Send + Sync + 'static,
     A: Send + Sync + 'static,
@@ -163,13 +178,14 @@ where
     C: Send + Sync + 'static,
     H: Send + Sync + 'static,
     Auth: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     fn system_context(&self) -> &'static SystemContext {
         self.context
     }
 }
 
-impl<D, A, S, C, H, Auth> HasAuthResolver for HttpState<D, A, S, C, H, Auth>
+impl<D, A, S, C, H, Auth, U> HasAuthResolver for HttpState<D, A, S, C, H, Auth, U>
 where
     D: Send + Sync + 'static,
     A: Send + Sync + 'static,
@@ -177,6 +193,7 @@ where
     C: Send + Sync + 'static,
     H: Send + Sync + 'static,
     Auth: AuthContextResolver,
+    U: Send + Sync + 'static,
 {
     type Auth = Auth;
 
@@ -185,7 +202,7 @@ where
     }
 }
 
-impl<D, A, S, C, H, Auth> HasDocumentsService for HttpState<D, A, S, C, H, Auth>
+impl<D, A, S, C, H, Auth, U> HasDocumentsService for HttpState<D, A, S, C, H, Auth, U>
 where
     D: DocumentsService,
     A: Send + Sync + 'static,
@@ -193,6 +210,7 @@ where
     C: Send + Sync + 'static,
     H: Send + Sync + 'static,
     Auth: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type Documents = D;
 
@@ -201,7 +219,7 @@ where
     }
 }
 
-impl<D, A, S, C, H, Auth> HasAccessRequestsService for HttpState<D, A, S, C, H, Auth>
+impl<D, A, S, C, H, Auth, U> HasAccessRequestsService for HttpState<D, A, S, C, H, Auth, U>
 where
     D: Send + Sync + 'static,
     A: AccessRequestsService,
@@ -209,6 +227,7 @@ where
     C: Send + Sync + 'static,
     H: Send + Sync + 'static,
     Auth: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type AccessRequests = A;
 
@@ -217,7 +236,7 @@ where
     }
 }
 
-impl<D, A, S, C, H, Auth> HasSchemaService for HttpState<D, A, S, C, H, Auth>
+impl<D, A, S, C, H, Auth, U> HasSchemaService for HttpState<D, A, S, C, H, Auth, U>
 where
     D: Send + Sync + 'static,
     A: Send + Sync + 'static,
@@ -225,6 +244,7 @@ where
     C: Send + Sync + 'static,
     H: Send + Sync + 'static,
     Auth: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type Schema = S;
 
@@ -233,7 +253,7 @@ where
     }
 }
 
-impl<D, A, S, C, H, Auth> HasSystemConfigService for HttpState<D, A, S, C, H, Auth>
+impl<D, A, S, C, H, Auth, U> HasSystemConfigService for HttpState<D, A, S, C, H, Auth, U>
 where
     D: Send + Sync + 'static,
     A: Send + Sync + 'static,
@@ -241,6 +261,7 @@ where
     C: SystemConfigService,
     H: Send + Sync + 'static,
     Auth: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type SystemConfig = C;
 
@@ -249,7 +270,24 @@ where
     }
 }
 
-impl<D, A, S, C, H, Auth> HasHealthChecker for HttpState<D, A, S, C, H, Auth>
+impl<D, A, S, C, H, Auth, U> HasUserDirectoryService for HttpState<D, A, S, C, H, Auth, U>
+where
+    D: Send + Sync + 'static,
+    A: Send + Sync + 'static,
+    S: Send + Sync + 'static,
+    C: Send + Sync + 'static,
+    H: Send + Sync + 'static,
+    Auth: Send + Sync + 'static,
+    U: UserDirectoryService,
+{
+    type UserDirectory = U;
+
+    fn user_directory_service(&self) -> &Self::UserDirectory {
+        self.user_directory_service.as_ref()
+    }
+}
+
+impl<D, A, S, C, H, Auth, U> HasHealthChecker for HttpState<D, A, S, C, H, Auth, U>
 where
     D: Send + Sync + 'static,
     A: Send + Sync + 'static,
@@ -257,6 +295,7 @@ where
     C: Send + Sync + 'static,
     H: HealthCheckService,
     Auth: Send + Sync + 'static,
+    U: Send + Sync + 'static,
 {
     type Health = H;
 
@@ -296,15 +335,42 @@ mod tests {
     use crate::auth::{AuthError, AuthResolutionError, AuthenticatedUser};
     use crate::health::HealthStatus;
 
-    // Explicitly non-Clone dummy structs to verify HttpState manual Clone works without Clone bounds
-    struct NonCloneDocs;
-    struct NonCloneAccess;
-    struct NonCloneSchema;
-    struct NonCloneConfig;
-    struct NonCloneHealth;
-    struct NonCloneAuth;
+    // Test service stubs deliberately omitting `#[derive(Clone)]`.
+    // Verifies that HttpState can be cloned without imposing `Clone` trait bounds on its generic service parameters.
+    struct StubDocumentsService;
+    struct StubAccessRequestsService;
+    struct StubSchemaService;
+    struct StubSystemConfigService;
+    struct StubHealthChecker;
+    struct StubAuthResolver;
+    struct StubUserDirectoryService;
 
-    impl DocumentsService for NonCloneDocs {
+    impl UserDirectoryService for StubUserDirectoryService {
+        async fn list_users(
+            &self,
+            _caller: &CallerContext,
+            _cmd: application::commands::user_directory::ListUsersCommand,
+        ) -> Result<domain::common::Page<domain::auth::profile::UserProfile>, ApplicationError> {
+            Ok(domain::common::Page::empty(domain::common::Pagination { page: 1, page_size: 20 }))
+        }
+
+        async fn get_user(
+            &self,
+            _caller: &CallerContext,
+            _user_id: &domain::auth::user::UserId,
+        ) -> Result<Option<domain::auth::profile::UserProfile>, ApplicationError> {
+            Ok(None)
+        }
+
+        async fn sync_profile(
+            &self,
+            _cmd: application::commands::user_directory::SyncProfileCommand,
+        ) -> Result<domain::auth::profile::UserProfile, ApplicationError> {
+            Err(ApplicationError::Internal("test".into()))
+        }
+    }
+
+    impl DocumentsService for StubDocumentsService {
         async fn find(
             &self,
             _caller: &CallerContext,
@@ -402,7 +468,7 @@ mod tests {
         }
     }
 
-    impl AccessRequestsService for NonCloneAccess {
+    impl AccessRequestsService for StubAccessRequestsService {
         async fn submit(
             &self,
             _cmd: SubmitAccessRequestCommand,
@@ -442,7 +508,7 @@ mod tests {
         }
     }
 
-    impl SchemaService for NonCloneSchema {
+    impl SchemaService for StubSchemaService {
         fn list_document_types(
             &self,
             _caller: &CallerContext,
@@ -459,13 +525,13 @@ mod tests {
         }
     }
 
-    impl SystemConfigService for NonCloneConfig {
+    impl SystemConfigService for StubSystemConfigService {
         fn get_config(&self) -> &SystemConfig {
             &fixture_context().config
         }
     }
 
-    impl HealthCheckService for NonCloneHealth {
+    impl HealthCheckService for StubHealthChecker {
         async fn liveness(&self) -> HealthStatus {
             HealthStatus::Healthy
         }
@@ -475,7 +541,7 @@ mod tests {
         }
     }
 
-    impl AuthContextResolver for NonCloneAuth {
+    impl AuthContextResolver for StubAuthResolver {
         async fn resolve_user_identity(
             &self,
             _auth_header: Option<&str>,
@@ -504,16 +570,17 @@ mod tests {
     }
 
     #[test]
-    fn test_http_state_clone_with_non_clone_services() {
+    fn test_http_state_clone_without_service_clone_bounds() {
         let context = fixture_context();
         let state = HttpState::new(
             context,
-            Arc::new(NonCloneAuth),
-            Arc::new(NonCloneDocs),
-            Arc::new(NonCloneAccess),
-            Arc::new(NonCloneSchema),
-            Arc::new(NonCloneConfig),
-            Arc::new(NonCloneHealth),
+            Arc::new(StubAuthResolver),
+            Arc::new(StubDocumentsService),
+            Arc::new(StubAccessRequestsService),
+            Arc::new(StubSchemaService),
+            Arc::new(StubSystemConfigService),
+            Arc::new(StubUserDirectoryService),
+            Arc::new(StubHealthChecker),
         );
 
         let cloned = state.clone();
@@ -525,12 +592,13 @@ mod tests {
         let context = fixture_context();
         let state = HttpState::new(
             context,
-            Arc::new(NonCloneAuth),
-            Arc::new(NonCloneDocs),
-            Arc::new(NonCloneAccess),
-            Arc::new(NonCloneSchema),
-            Arc::new(NonCloneConfig),
-            Arc::new(NonCloneHealth),
+            Arc::new(StubAuthResolver),
+            Arc::new(StubDocumentsService),
+            Arc::new(StubAccessRequestsService),
+            Arc::new(StubSchemaService),
+            Arc::new(StubSystemConfigService),
+            Arc::new(StubUserDirectoryService),
+            Arc::new(StubHealthChecker),
         );
 
         assert_eq!(state.system_context().config.available_locales.len(), 1);

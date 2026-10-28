@@ -8,9 +8,9 @@ use domain::schema::DocumentTypeId;
 
 use crate::persistence::naming::StaticIden;
 use super::common::{
-    IDEN_CONTENT, IDEN_CREATED_AT, IDEN_CREATED_BY, IDEN_DOCUMENT_ID, IDEN_DOCUMENT_TYPE_ID,
-    IDEN_ID, IDEN_REASON, IDEN_RELATIONS, IDEN_REVISION,
-    TABLE_DOCUMENT_SNAPSHOTS_IDEN,
+    COL_CONTENT_IDEN, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN, COL_DOCUMENT_ID_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN, COL_REASON_IDEN, COL_RELATIONS_IDEN,
+    COL_REVISION_IDEN, TABLE_DOCUMENT_SNAPSHOTS_IDEN,
 };
 
 // ---------------------------------------------------------------------------
@@ -18,37 +18,37 @@ use super::common::{
 // ---------------------------------------------------------------------------
 
 const SNAPSHOT_INSERT_COLUMNS: [StaticIden; 9] = [
-    IDEN_ID,
-    IDEN_DOCUMENT_TYPE_ID,
-    IDEN_DOCUMENT_ID,
-    IDEN_REVISION,
-    IDEN_CONTENT,
-    IDEN_RELATIONS,
-    IDEN_CREATED_AT,
-    IDEN_CREATED_BY,
-    IDEN_REASON,
+    COL_ID_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN,
+    COL_DOCUMENT_ID_IDEN,
+    COL_REVISION_IDEN,
+    COL_CONTENT_IDEN,
+    COL_RELATIONS_IDEN,
+    COL_CREATED_AT_IDEN,
+    COL_CREATED_BY_IDEN,
+    COL_REASON_IDEN,
 ];
 
 const SNAPSHOT_HEADER_COLUMNS: [StaticIden; 7] = [
-    IDEN_ID,
-    IDEN_DOCUMENT_TYPE_ID,
-    IDEN_DOCUMENT_ID,
-    IDEN_REVISION,
-    IDEN_CREATED_AT,
-    IDEN_CREATED_BY,
-    IDEN_REASON,
+    COL_ID_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN,
+    COL_DOCUMENT_ID_IDEN,
+    COL_REVISION_IDEN,
+    COL_CREATED_AT_IDEN,
+    COL_CREATED_BY_IDEN,
+    COL_REASON_IDEN,
 ];
 
 const SNAPSHOT_FULL_COLUMNS: [StaticIden; 9] = [
-    IDEN_ID,
-    IDEN_DOCUMENT_TYPE_ID,
-    IDEN_DOCUMENT_ID,
-    IDEN_REVISION,
-    IDEN_CONTENT,
-    IDEN_RELATIONS,
-    IDEN_CREATED_AT,
-    IDEN_CREATED_BY,
-    IDEN_REASON,
+    COL_ID_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN,
+    COL_DOCUMENT_ID_IDEN,
+    COL_REVISION_IDEN,
+    COL_CONTENT_IDEN,
+    COL_RELATIONS_IDEN,
+    COL_CREATED_AT_IDEN,
+    COL_CREATED_BY_IDEN,
+    COL_REASON_IDEN,
 ];
 
 // ---------------------------------------------------------------------------
@@ -87,9 +87,9 @@ pub fn list_snapshot_headers_query(type_id: &DocumentTypeId, doc_id: Uuid) -> Se
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_SNAPSHOTS_IDEN)
         .columns(SNAPSHOT_HEADER_COLUMNS)
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_id.as_ref()))
-        .and_where(Expr::col(IDEN_DOCUMENT_ID).eq(doc_id))
-        .order_by(IDEN_REVISION, Order::Desc);
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .and_where(Expr::col(COL_DOCUMENT_ID_IDEN).eq(doc_id))
+        .order_by(COL_REVISION_IDEN, Order::Desc);
     stmt
 }
 
@@ -104,9 +104,9 @@ pub fn get_snapshot_by_revision_query(
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_SNAPSHOTS_IDEN)
         .columns(SNAPSHOT_FULL_COLUMNS)
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_id.as_ref()))
-        .and_where(Expr::col(IDEN_DOCUMENT_ID).eq(doc_id))
-        .and_where(Expr::col(IDEN_REVISION).eq(rev_i32));
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .and_where(Expr::col(COL_DOCUMENT_ID_IDEN).eq(doc_id))
+        .and_where(Expr::col(COL_REVISION_IDEN).eq(rev_i32));
     stmt
 }
 

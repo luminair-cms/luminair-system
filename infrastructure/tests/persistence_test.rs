@@ -11,7 +11,10 @@ use uuid::Uuid;
 
 use domain::auth::access_request::AccessRequestStatus;
 use domain::auth::policy::AccessRequestPolicy;
-use domain::auth::ports::{AccessRequestRepository, RoleRepository, UserRoleAssignmentRepository};
+use domain::auth::ports::{
+    AccessRequestRepository, RoleRepository, UserProfileRepository, UserRoleAssignmentRepository,
+};
+use domain::auth::profile::UserProfile;
 use domain::auth::role::{Permission, Role, RoleId, UserRoleAssignment, UserRoleAssignmentId};
 use domain::auth::user::{ActorId, UserId};
 use domain::common::{DisplayName, Email};
@@ -42,7 +45,7 @@ use infrastructure::persistence::repositories::codec::{
 };
 use infrastructure::persistence::repositories::{
     SqlxAccessRequestRepository, SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository,
-    SqlxRoleRepository, SqlxUserRoleAssignmentRepository,
+    SqlxRoleRepository, SqlxUserProfileRepository, SqlxUserRoleAssignmentRepository,
 };
 use infrastructure::schema_loader::load_system_context_from_dir;
 
@@ -371,6 +374,91 @@ async fn assert_access_request_behavior(
         .expect("request found");
     assert_eq!(by_user.status, AccessRequestStatus::Approved);
     assert_eq!(by_user.assigned_roles, vec![custom_role_id]);
+}
+
+async fn assert_user_profile_behavior(profile_repo: &SqlxUserProfileRepository) {
+    let now = Utc::now();
+    let alice_id = UserId::try_new("usr_alice_pers").expect("valid user id");
+    let mut alice = UserProfile::new(
+        alice_id.clone(),
+        Email::try_new("alice@pers.test").ok(),
+        DisplayName::try_new("Alice Smith").ok(),
+        now,
+    );
+
+    // 1. Save new profile
+    profile_repo.save(&alice).await.expect("save alice profile");
+
+    let found_alice = profile_repo
+        .find_by_id(&alice_id)
+        .await
+        .expect("find alice")
+        .expect("alice found");
+    assert_eq!(found_alice.user_id, alice_id);
+    assert_eq!(
+        found_alice.email.as_ref().map(AsRef::as_ref),
+        Some("alice@pers.test")
+    );
+    assert_eq!(
+        found_alice.name.as_ref().map(AsRef::as_ref),
+        Some("Alice Smith")
+    );
+
+    // 2. Upsert updated claims
+    let later = now + chrono::Duration::hours(2);
+    alice.sync_claims(
+        Email::try_new("alice.updated@pers.test").ok(),
+        DisplayName::try_new("Alice Updated").ok(),
+        later,
+    );
+    profile_repo.save(&alice).await.expect("upsert alice profile");
+
+    let updated_alice = profile_repo
+        .find_by_id(&alice_id)
+        .await
+        .expect("find updated alice")
+        .expect("alice found");
+    assert_eq!(
+        updated_alice.email.as_ref().map(AsRef::as_ref),
+        Some("alice.updated@pers.test")
+    );
+    assert_eq!(
+        updated_alice.name.as_ref().map(AsRef::as_ref),
+        Some("Alice Updated")
+    );
+    assert_eq!(updated_alice.first_seen_at.timestamp(), now.timestamp());
+
+    // 3. Save second profile & batch lookup
+    let bob_id = UserId::try_new("usr_bob_pers").expect("valid user id");
+    let bob = UserProfile::new(
+        bob_id.clone(),
+        Email::try_new("bob@corp.test").ok(),
+        DisplayName::try_new("Bob Jones").ok(),
+        now,
+    );
+    profile_repo.save(&bob).await.expect("save bob profile");
+
+    let both = profile_repo
+        .find_by_ids(&[alice_id.clone(), bob_id.clone()])
+        .await
+        .expect("batch lookup");
+    assert_eq!(both.len(), 2);
+
+    // 4. Paginated search
+    let page_search = profile_repo
+        .list_users(Some("corp.test"), Pagination::new(1, 10))
+        .await
+        .expect("search corp.test");
+    assert_eq!(page_search.total, 1);
+    assert_eq!(page_search.items.len(), 1);
+    assert_eq!(page_search.items[0].user_id, bob_id);
+
+    let page_all = profile_repo
+        .list_users(None, Pagination::new(1, 1))
+        .await
+        .expect("page 1 of all");
+    assert!(page_all.total >= 2);
+    assert_eq!(page_all.items.len(), 1);
 }
 
 async fn assert_lifecycle_draft_creation(
@@ -863,7 +951,8 @@ async fn test_role_user_assignment_and_access_request_repositories_live() {
 
     let role_repo = SqlxRoleRepository::new(pool.clone());
     let assignment_repo = SqlxUserRoleAssignmentRepository::new(pool.clone());
-    let access_repo = SqlxAccessRequestRepository::new(pool);
+    let access_repo = SqlxAccessRequestRepository::new(pool.clone());
+    let profile_repo = SqlxUserProfileRepository::new(pool);
 
     let (admin_role, custom_role) = assert_roles_behavior(&role_repo).await;
 
@@ -877,6 +966,7 @@ async fn test_role_user_assignment_and_access_request_repositories_live() {
     .await;
 
     assert_access_request_behavior(&access_repo, custom_role.id).await;
+    assert_user_profile_behavior(&profile_repo).await;
 }
 
 #[tokio::test]

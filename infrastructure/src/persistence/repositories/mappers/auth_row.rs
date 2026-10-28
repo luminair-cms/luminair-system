@@ -8,6 +8,7 @@ use sqlx::postgres::PgRow;
 use uuid::Uuid;
 
 use domain::auth::access_request::{AccessRequest, AccessRequestId};
+use domain::auth::profile::UserProfile;
 use domain::auth::role::{Permission, Role, RoleId, UserRoleAssignment, UserRoleAssignmentId};
 use domain::auth::user::UserId;
 use domain::common::{DisplayName, Email};
@@ -15,8 +16,9 @@ use domain::common::{DisplayName, Email};
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{
     COL_ACTION, COL_ASSIGNED_ROLES, COL_DESCRIPTION, COL_DOCUMENT_TYPE_ID, COL_EMAIL,
-    COL_GRANTED_AT, COL_GRANTED_BY, COL_ID, COL_NAME, COL_REJECTION_REASON, COL_REQUESTED_AT,
-    COL_REVIEWED_AT, COL_REVIEWED_BY, COL_ROLE_ID, COL_STATUS, COL_USER_ID,
+    COL_FIRST_SEEN_AT, COL_GRANTED_AT, COL_GRANTED_BY, COL_ID, COL_LAST_SEEN_AT, COL_NAME,
+    COL_REJECTION_REASON, COL_REQUESTED_AT, COL_REVIEWED_AT, COL_REVIEWED_BY, COL_ROLE_ID,
+    COL_STATUS, COL_USER_ID,
 };
 use crate::persistence::repositories::codec::{
     access_request_status_from_db, deserialize_assigned_roles_json, parse_optional_actor_urn,
@@ -124,6 +126,36 @@ pub fn map_access_request_row(row: &PgRow) -> Result<AccessRequest, PersistenceE
         reviewed_at,
         assigned_roles,
     })
+}
+
+/// Maps a row from `user_profiles` into a [`UserProfile`] entity.
+pub fn map_user_profile_row(row: &PgRow) -> Result<UserProfile, PersistenceError> {
+    let user_id_str: String = row.try_get(COL_USER_ID)?;
+    let user_id = UserId::try_new(user_id_str)
+        .map_err(|e| PersistenceError::Validation(e.to_string()))?;
+    let email_str: Option<String> = row.try_get(COL_EMAIL)?;
+    let email = email_str
+        .map(|s| Email::try_new(s).map_err(|e| PersistenceError::Validation(e.to_string())))
+        .transpose()?;
+    let name_str: Option<String> = row.try_get(COL_NAME)?;
+    let name = name_str
+        .map(|s| DisplayName::try_new(s).map_err(|e| PersistenceError::Validation(e.to_string())))
+        .transpose()?;
+    let first_seen_at: DateTime<Utc> = row.try_get(COL_FIRST_SEEN_AT)?;
+    let last_seen_at: DateTime<Utc> = row.try_get(COL_LAST_SEEN_AT)?;
+
+    Ok(UserProfile::reconstitute(
+        user_id,
+        email,
+        name,
+        first_seen_at,
+        last_seen_at,
+    ))
+}
+
+/// Maps multiple `user_profiles` rows into a `Vec<UserProfile>`.
+pub fn map_user_profile_rows(rows: &[PgRow]) -> Result<Vec<UserProfile>, PersistenceError> {
+    rows.iter().map(map_user_profile_row).collect()
 }
 
 // ---------------------------------------------------------------------------

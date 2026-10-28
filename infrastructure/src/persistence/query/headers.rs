@@ -10,19 +10,20 @@ use domain::content::ports::Pagination;
 
 use crate::persistence::naming::{DocumentTypeNaming, StaticIden};
 use super::common::{
-    IDEN_CREATED_AT, IDEN_CREATED_BY, IDEN_DISPLAY_TITLE, IDEN_DISPLAY_VALUES,
-    IDEN_DOCUMENT_TYPE_ID, IDEN_HAS_PENDING_DRAFT, IDEN_ID, IDEN_LAST_PUBLISHED_REVISION,
-    IDEN_PUBLISHED_AT, IDEN_PUBLISHED_BY, IDEN_REVISION, IDEN_STATUS, IDEN_UPDATED_AT,
-    IDEN_UPDATED_BY, IDEN_VERSION, TABLE_DOCUMENT_DRAFTS_IDEN, apply_pagination,
+    apply_pagination, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN, COL_DISPLAY_TITLE_IDEN,
+    COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_HAS_PENDING_DRAFT_IDEN,
+    COL_ID_IDEN, COL_LAST_PUBLISHED_REVISION_IDEN, COL_PUBLISHED_AT_IDEN, COL_PUBLISHED_BY_IDEN,
+    COL_REVISION_IDEN, COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN,
+    COL_VERSION_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
 };
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const IDEN_SLUG: StaticIden = StaticIden("slug");
-const IDEN_DRAFT_VERSION: StaticIden = StaticIden("draft_version");
-const IDEN_COMBINED: StaticIden = StaticIden("combined");
+const COL_SLUG_IDEN: StaticIden = StaticIden("slug");
+const COL_DRAFT_VERSION_IDEN: StaticIden = StaticIden("draft_version");
+const ALIAS_COMBINED_IDEN: StaticIden = StaticIden("combined");
 
 // ---------------------------------------------------------------------------
 // Public Functions
@@ -43,8 +44,8 @@ pub fn list_single_lifecycle_headers_query(
         stmt.and_where(Expr::val(true).eq(false));
     }
 
-    stmt.order_by(IDEN_UPDATED_AT, Order::Desc)
-        .order_by(IDEN_ID, Order::Asc);
+    stmt.order_by(COL_UPDATED_AT_IDEN, Order::Desc)
+        .order_by(COL_ID_IDEN, Order::Asc);
     apply_pagination(&mut stmt, pagination);
     stmt
 }
@@ -57,7 +58,7 @@ pub fn count_single_lifecycle_headers_query(
 ) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(type_naming.table_iden)
-        .expr(Func::count(Expr::col(IDEN_ID)));
+        .expr(Func::count(Expr::col(COL_ID_IDEN)));
 
     if status_filter.is_some_and(|st| st != DocumentStatus::Published) {
         stmt.and_where(Expr::val(true).eq(false));
@@ -77,16 +78,16 @@ pub fn list_draft_enabled_headers_query(
 
     let mut outer = Query::select();
     outer
-        .from_subquery(union_query, IDEN_COMBINED)
+        .from_subquery(union_query, ALIAS_COMBINED_IDEN)
         .column(Asterisk);
 
     if let Some(status) = status_filter {
-        outer.and_where(Expr::col(IDEN_STATUS).eq(document_status_str(status)));
+        outer.and_where(Expr::col(COL_STATUS_IDEN).eq(document_status_str(status)));
     }
 
     outer
-        .order_by(IDEN_UPDATED_AT, Order::Desc)
-        .order_by(IDEN_ID, Order::Asc);
+        .order_by(COL_UPDATED_AT_IDEN, Order::Desc)
+        .order_by(COL_ID_IDEN, Order::Asc);
     apply_pagination(&mut outer, pagination);
     outer
 }
@@ -101,11 +102,11 @@ pub fn count_draft_enabled_headers_query(
 
     let mut outer = Query::select();
     outer
-        .from_subquery(union_query, IDEN_COMBINED)
-        .expr(Func::count(Expr::col(IDEN_ID)));
+        .from_subquery(union_query, ALIAS_COMBINED_IDEN)
+        .expr(Func::count(Expr::col(COL_ID_IDEN)));
 
     if let Some(status) = status_filter {
-        outer.and_where(Expr::col(IDEN_STATUS).eq(document_status_str(status)));
+        outer.and_where(Expr::col(COL_STATUS_IDEN).eq(document_status_str(status)));
     }
 
     outer
@@ -121,22 +122,22 @@ pub fn find_display_titles_by_ids_query(
     if !draft_and_publish {
         let mut stmt = Query::select();
         stmt.from(type_naming.table_iden)
-            .columns([IDEN_ID, IDEN_DISPLAY_TITLE])
-            .and_where(Expr::col(IDEN_ID).is_in(ids.to_vec()));
+            .columns([COL_ID_IDEN, COL_DISPLAY_TITLE_IDEN])
+            .and_where(Expr::col(COL_ID_IDEN).is_in(ids.to_vec()));
         return stmt;
     }
 
     let mut b1 = Query::select();
     b1.from(type_naming.table_iden)
-        .columns([IDEN_ID, IDEN_DISPLAY_TITLE])
-        .and_where(Expr::col(IDEN_HAS_PENDING_DRAFT).eq(false))
-        .and_where(Expr::col(IDEN_ID).is_in(ids.to_vec()));
+        .columns([COL_ID_IDEN, COL_DISPLAY_TITLE_IDEN])
+        .and_where(Expr::col(COL_HAS_PENDING_DRAFT_IDEN).eq(false))
+        .and_where(Expr::col(COL_ID_IDEN).is_in(ids.to_vec()));
 
     let mut b2 = Query::select();
     b2.from(TABLE_DOCUMENT_DRAFTS_IDEN)
-        .columns([IDEN_ID, IDEN_DISPLAY_TITLE])
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_naming.document_type_id.as_ref()))
-        .and_where(Expr::col(IDEN_ID).is_in(ids.to_vec()));
+        .columns([COL_ID_IDEN, COL_DISPLAY_TITLE_IDEN])
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_naming.document_type_id.as_ref()))
+        .and_where(Expr::col(COL_ID_IDEN).is_in(ids.to_vec()));
 
     b1.union(UnionType::All, b2);
     b1
@@ -161,12 +162,12 @@ fn build_draft_enabled_union_query(type_naming: &DocumentTypeNaming) -> SelectSt
     let mut b1 = Query::select();
     b1.from(TABLE_DOCUMENT_DRAFTS_IDEN);
     select_draft_header_projection(&mut b1);
-    b1.and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_naming.document_type_id.as_ref()));
+    b1.and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_naming.document_type_id.as_ref()));
 
     let mut b2 = Query::select();
     b2.from(type_naming.table_iden);
     select_wide_table_header_projection(&mut b2, type_naming);
-    b2.and_where(Expr::col(IDEN_HAS_PENDING_DRAFT).eq(false));
+    b2.and_where(Expr::col(COL_HAS_PENDING_DRAFT_IDEN).eq(false));
 
     b1.union(UnionType::All, b2);
     b1
@@ -176,41 +177,41 @@ fn select_wide_table_header_projection(
     stmt: &mut SelectStatement,
     type_naming: &DocumentTypeNaming,
 ) {
-    stmt.column(IDEN_ID)
-        .column(IDEN_DISPLAY_VALUES)
-        .column(IDEN_DISPLAY_TITLE)
-        .expr_as(Expr::val("published"), IDEN_STATUS);
+    stmt.column(COL_ID_IDEN)
+        .column(COL_DISPLAY_VALUES_IDEN)
+        .column(COL_DISPLAY_TITLE_IDEN)
+        .expr_as(Expr::val("published"), COL_STATUS_IDEN);
 
     if has_slug_column(type_naming) {
-        stmt.expr_as(Expr::col(IDEN_SLUG), IDEN_SLUG);
+        stmt.expr_as(Expr::col(COL_SLUG_IDEN), COL_SLUG_IDEN);
     } else {
-        stmt.expr_as(Expr::cust("NULL::text"), IDEN_SLUG);
+        stmt.expr_as(Expr::cust("NULL::text"), COL_SLUG_IDEN);
     }
 
-    stmt.column(IDEN_REVISION)
-        .expr_as(Expr::cust("NULL::int"), IDEN_DRAFT_VERSION)
-        .column(IDEN_CREATED_AT)
-        .column(IDEN_CREATED_BY)
-        .column(IDEN_UPDATED_AT)
-        .column(IDEN_UPDATED_BY)
-        .column(IDEN_PUBLISHED_AT)
-        .column(IDEN_PUBLISHED_BY);
+    stmt.column(COL_REVISION_IDEN)
+        .expr_as(Expr::cust("NULL::int"), COL_DRAFT_VERSION_IDEN)
+        .column(COL_CREATED_AT_IDEN)
+        .column(COL_CREATED_BY_IDEN)
+        .column(COL_UPDATED_AT_IDEN)
+        .column(COL_UPDATED_BY_IDEN)
+        .column(COL_PUBLISHED_AT_IDEN)
+        .column(COL_PUBLISHED_BY_IDEN);
 }
 
 fn select_draft_header_projection(stmt: &mut SelectStatement) {
-    stmt.column(IDEN_ID)
-        .column(IDEN_DISPLAY_VALUES)
-        .column(IDEN_DISPLAY_TITLE)
-        .column(IDEN_STATUS)
-        .expr_as(Expr::cust("NULL::text"), IDEN_SLUG)
-        .expr_as(Expr::col(IDEN_LAST_PUBLISHED_REVISION), IDEN_REVISION)
-        .expr_as(Expr::col(IDEN_VERSION), IDEN_DRAFT_VERSION)
-        .column(IDEN_CREATED_AT)
-        .column(IDEN_CREATED_BY)
-        .column(IDEN_UPDATED_AT)
-        .column(IDEN_UPDATED_BY)
-        .expr_as(Expr::cust("NULL::timestamptz"), IDEN_PUBLISHED_AT)
-        .expr_as(Expr::cust("NULL::text"), IDEN_PUBLISHED_BY);
+    stmt.column(COL_ID_IDEN)
+        .column(COL_DISPLAY_VALUES_IDEN)
+        .column(COL_DISPLAY_TITLE_IDEN)
+        .column(COL_STATUS_IDEN)
+        .expr_as(Expr::cust("NULL::text"), COL_SLUG_IDEN)
+        .expr_as(Expr::col(COL_LAST_PUBLISHED_REVISION_IDEN), COL_REVISION_IDEN)
+        .expr_as(Expr::col(COL_VERSION_IDEN), COL_DRAFT_VERSION_IDEN)
+        .column(COL_CREATED_AT_IDEN)
+        .column(COL_CREATED_BY_IDEN)
+        .column(COL_UPDATED_AT_IDEN)
+        .column(COL_UPDATED_BY_IDEN)
+        .expr_as(Expr::cust("NULL::timestamptz"), COL_PUBLISHED_AT_IDEN)
+        .expr_as(Expr::cust("NULL::text"), COL_PUBLISHED_BY_IDEN);
 }
 
 fn has_slug_column(type_naming: &DocumentTypeNaming) -> bool {

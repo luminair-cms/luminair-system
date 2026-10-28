@@ -197,7 +197,7 @@ async fn test_db_migrations_execution_and_idempotency_if_database_available() {
     assert!(table_names.contains(&"role_permissions".to_string()));
     assert!(table_names.contains(&"user_role_assignments".to_string()));
     assert!(table_names.contains(&"access_requests".to_string()));
-    assert!(table_names.contains(&"shadow_users".to_string()));
+    assert!(table_names.contains(&"user_profiles".to_string()));
 
     // Verify system_config table is NOT created (ADR-006 / startup config decision)
     assert!(

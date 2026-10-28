@@ -16,8 +16,8 @@ use crate::persistence::naming::{
     SchemaNaming,
 };
 use crate::persistence::query::common::{
-    IDEN_DOCUMENT_TYPE_ID, IDEN_ID, IDEN_RELATIONS, TABLE_DOCUMENT_DRAFTS_IDEN, compile_delete,
-    compile_insert, compile_select,
+    compile_delete, compile_insert, compile_select, COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN,
+    COL_RELATIONS_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
 };
 use crate::persistence::query::junction::{
     delete_links_by_source_query, insert_links_batch_query, select_links_by_sources_query,
@@ -328,7 +328,7 @@ async fn fetch_wide_target_instances(
     let mut stmt = Query::select();
     stmt.from(target_type_naming.table_iden)
         .column(Asterisk)
-        .and_where(Expr::col(IDEN_ID).is_in(uuids.to_vec()));
+        .and_where(Expr::col(COL_ID_IDEN).is_in(uuids.to_vec()));
 
     let (sql, values) = compile_select(&stmt);
     let rows = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
@@ -363,10 +363,10 @@ async fn fetch_draft_target_instances(
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .column(Asterisk)
         .and_where(
-            Expr::col(IDEN_DOCUMENT_TYPE_ID)
+            Expr::col(COL_DOCUMENT_TYPE_ID_IDEN)
                 .eq(target_type_naming.document_type_id.as_ref()),
         )
-        .and_where(Expr::col(IDEN_ID).is_in(missing.to_vec()));
+        .and_where(Expr::col(COL_ID_IDEN).is_in(missing.to_vec()));
 
     let (sql, values) = compile_select(&stmt);
     let rows = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
@@ -428,9 +428,9 @@ async fn fetch_draft_relational_targets(
 
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
-        .columns([IDEN_ID, IDEN_RELATIONS])
-        .and_where(Expr::col(IDEN_DOCUMENT_TYPE_ID).eq(type_naming.document_type_id.as_ref()))
-        .and_where(Expr::col(IDEN_ID).is_in(draft_ids.to_vec()));
+        .columns([COL_ID_IDEN, COL_RELATIONS_IDEN])
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_naming.document_type_id.as_ref()))
+        .and_where(Expr::col(COL_ID_IDEN).is_in(draft_ids.to_vec()));
 
     let (sql, values) = compile_select(&stmt);
     let rows = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
