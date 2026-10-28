@@ -47,6 +47,7 @@ Read in this order:
 | [ADR-003](./docs/adr/ADR-003-aws-dsql-database.md) | AWS Aurora DSQL with PostgreSQL Portability | Accepted |
 | [ADR-004](./docs/adr/ADR-004-draft-and-publish-table-pattern.md) | Asymmetric Hybrid Draft-and-Publish Persistence Pattern | Accepted |
 | [ADR-005](./docs/adr/ADR-005-trash-undelete-and-retention.md) | Trash, Undelete & Retention Architecture | Proposed |
+| [ADR-006](./docs/adr/ADR-006-user-profile-and-directory-architecture.md) | User Profile and Directory Architecture for External Identity Management | Proposed |
 
 ## 4. Mandatory Workflow Rules
 
