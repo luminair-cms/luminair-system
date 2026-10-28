@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::future::Future;
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
 
 use super::header::{
     DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader, VersionView,
@@ -12,19 +11,7 @@ use super::values::DomainValue;
 use crate::errors::DomainError;
 use crate::schema::{AttributeId, DocumentTypeId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Pagination {
-    pub page: u32,
-    pub page_size: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Page<T> {
-    pub items: Vec<T>,
-    pub total: u64,
-    pub page: u32,
-    pub page_size: u32,
-}
+pub use crate::common::{Page, Pagination};
 
 /// Equality filter on a single scalar field.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,15 +23,6 @@ pub struct FieldFilter {
 /// A mapping of relation attribute to a map of parent instance IDs and their related instances:
 /// `AttributeId` -> (`ParentInstanceId` -> `Vec<RelatedInstance>`)
 pub type RelationMap = HashMap<AttributeId, HashMap<DocumentInstanceId, Vec<DocumentInstance>>>;
-
-impl Default for Pagination {
-    fn default() -> Self {
-        Self {
-            page: 1,
-            page_size: 25,
-        }
-    }
-}
 
 pub trait DocumentInstanceRepository: Send + Sync {
     /// Loads a single document instance by its type, ID, and requested lifecycle view:

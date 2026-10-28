@@ -1,10 +1,13 @@
 use std::collections::HashSet;
 
+use chrono::{DateTime, Utc};
 use indexmap::IndexSet;
 use rust_decimal::Decimal;
 
-use super::ids::{create_attr_id, create_doc_type_id};
-use crate::common::DisplayName;
+use super::ids::{create_attr_id, create_doc_type_id, create_user_id};
+use crate::auth::profile::UserProfile;
+use crate::auth::user::UserId;
+use crate::common::{DisplayName, Email};
 use crate::schema::attributes::{
     AttributeId, FieldConstraint, FieldDefinition, RelationDefinition,
 };
@@ -34,6 +37,15 @@ pub struct FieldDefinitionBuilder {
     unique: bool,
     required: bool,
     constraints: HashSet<FieldConstraint>,
+}
+
+/// Fluent builder for constructing `UserProfile` in tests.
+pub struct UserProfileBuilder {
+    user_id: UserId,
+    email: Option<Email>,
+    name: Option<DisplayName>,
+    first_seen_at: DateTime<Utc>,
+    last_seen_at: DateTime<Utc>,
 }
 
 impl DocumentTypeBuilder {
@@ -229,4 +241,90 @@ pub fn decimal_field(name: &str, precision: u8, scale: u8) -> FieldDefinitionBui
 /// Shorthand builder for localized text field.
 pub fn localized_field(name: &str) -> FieldDefinitionBuilder {
     FieldDefinitionBuilder::new(name, FieldType::LocalizedText)
+}
+
+// ---------------------------------------------------------------------------
+// UserProfileBuilder Implementation
+// ---------------------------------------------------------------------------
+
+impl UserProfileBuilder {
+    /// Creates a new `UserProfileBuilder` initialized with defaults for `name`.
+    #[must_use]
+    pub fn new(name: &str) -> Self {
+        let now = Utc::now();
+        Self {
+            user_id: create_user_id(name),
+            email: Email::try_new(format!("{name}@example.com")).ok(),
+            name: DisplayName::try_new(name).ok(),
+            first_seen_at: now,
+            last_seen_at: now,
+        }
+    }
+
+    /// Sets the user id.
+    #[must_use]
+    pub fn with_user_id(mut self, user_id: UserId) -> Self {
+        self.user_id = user_id;
+        self
+    }
+
+    /// Sets the email address.
+    #[must_use]
+    pub fn with_email(mut self, email: &str) -> Self {
+        self.email = Email::try_new(email).ok();
+        self
+    }
+
+    /// Clears the email address.
+    #[must_use]
+    pub fn without_email(mut self) -> Self {
+        self.email = None;
+        self
+    }
+
+    /// Sets the display name.
+    #[must_use]
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.name = DisplayName::try_new(name).ok();
+        self
+    }
+
+    /// Clears the display name.
+    #[must_use]
+    pub fn without_name(mut self) -> Self {
+        self.name = None;
+        self
+    }
+
+    /// Sets the first seen timestamp.
+    #[must_use]
+    pub fn with_first_seen_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.first_seen_at = dt;
+        self
+    }
+
+    /// Sets the last seen timestamp.
+    #[must_use]
+    pub fn with_last_seen_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.last_seen_at = dt;
+        self
+    }
+
+    /// Builds the `UserProfile`.
+    #[must_use]
+    pub fn build(self) -> UserProfile {
+        UserProfile::reconstitute(
+            self.user_id,
+            self.email,
+            self.name,
+            self.first_seen_at,
+            self.last_seen_at,
+        )
+    }
+}
+
+impl From<UserProfileBuilder> for UserProfile {
+    fn from(builder: UserProfileBuilder) -> Self {
+        builder.build()
+    }
 }

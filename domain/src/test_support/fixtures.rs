@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use super::builders::UserProfileBuilder;
 use super::ids::{create_doc_type_id, create_locales, create_user_id};
 use crate::auth::access_request::AccessRequest;
 use crate::auth::policy::AccessRequestPolicy;
+use crate::auth::profile::UserProfile;
 use crate::auth::role::{Permission, Role, RoleId};
 use crate::auth::user::{ActorId, UserId};
 use crate::common::{DisplayName, Email};
@@ -68,3 +70,10 @@ pub fn admin_role() -> Role {
 pub fn draft_content(fields: HashMap<AttributeId, ContentValue>) -> DocumentContent {
     DocumentContent::new(fields, PublicationState::Draft)
 }
+
+/// Returns a default `UserProfile` fixture.
+pub fn fixture_user_profile(user_name: &str) -> UserProfile {
+    UserProfileBuilder::new(user_name).build()
+}
+
+pub use fixture_user_profile as create_user_profile;
