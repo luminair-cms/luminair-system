@@ -7,8 +7,8 @@
   - Database Persistence & Adapters: [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md)
   - REST API & Authentication: [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md)
   - Canonical API Reference: [`docs/api.md`](./api.md)
-- **Status**: Phases 1–6 Complete (Schema Loader, Persistence Foundation, Repository Adapters, CLI `test`/`dry-run`/`migrate` Modes, `AppContainer`, Health Checker, Authentication & Authorization, Generic `HttpState`, Zero-Clone Codecs & REST API) — Ready for Phase 4B.3 / Phase 7 (`RunMode::Service` & Cloud Runtime / DSQL IAM Integration)
-- **Last Updated**: 2026-10-27
+- **Status**: Phases 1–7 Complete (Schema Loader, Persistence Foundation, Repository Adapters, CLI `test`/`dry-run`/`migrate`/`service` Modes, Composition Root, Health Checker, Authentication & Authorization, Generic `HttpState`, Zero-Clone Codecs, REST API & AWS Aurora DSQL Connection Factory)
+- **Last Updated**: 2026-10-28
 
 ---
 
@@ -20,12 +20,12 @@ The `infrastructure` crate is implemented incrementally across 7 testable phases
 flowchart TD
     P1["Phase 1: Schema Loader & SystemContext (Complete)<br/>(Disk discovery, zero-copy DTOs, validation, &'static SystemContext)"]
     P2["Phase 2: Database Persistence Foundation (Complete)<br/>(SchemaNaming cache, static migrations, 9-module dynamic DDL sync, 8-module Sea-Query, OCC)"]
-    P3["Phase 3: Repository Adapters (Complete)<br/>(Codecs, Row Mappers, Relations helper, 5 Thin SQLx Repositories)"]
+    P3["Phase 3: Repository Adapters (Complete)<br/>(Codecs, Row Mappers, Relations helper, 6 Thin SQLx Repositories)"]
     P4A["Phase 4A: CLI Subsystem & Binary Entry Point (Complete)<br/>(CliConfig, runner: Test / DryRun / Migrate, main.rs, Docker Compose)"]
-    P4B["Phase 4B: Composition Root & Health Checker (Steps 4B.1–4B.2 Complete)<br/>(PersistenceContainer, AppContainer, HealthCheckService, ProductionHttpState)"]
-    P5["Phase 5: Authentication & Authorization (Complete)<br/>(OIDC JWT, Service Tokens, Shadow Users, AuthContextResolver, Caller / OnboardingUser)"]
-    P6["Phase 6: REST API & Axum HTTP Layer (Complete)<br/>(Generic HttpState, Has* traits, Zero-Clone Codecs, RFC 9457 ProblemDetails, 23 Endpoints)"]
-    P7["Phase 7: Cloud Runtime & DSQL IAM Integration<br/>(RunMode::Service, AWS DSQL IAM token rotation, graceful HTTP shutdown)"]
+    P4B["Phase 4B: Composition Root & Health Checker (Complete)<br/>(PersistenceContainer, AppContainer, HealthCheckService, ProductionHttpState)"]
+    P5["Phase 5: Authentication & Authorization (Complete)<br/>(OIDC JWT, Service Tokens, User Profile Directory & Sync, AuthContextResolver, Caller / OnboardingUser)"]
+    P6["Phase 6: REST API & Axum HTTP Layer (Complete)<br/>(Generic HttpState, Has* traits, Zero-Clone Codecs, RFC 9457 ProblemDetails, 25 Routes across 21 Operations)"]
+    P7["Phase 7: Cloud Runtime & DSQL IAM Integration (Complete)<br/>(RunMode::Service, AWS DSQL IAM token rotation, graceful HTTP shutdown)"]
 
     P1 --> P2
     P2 --> P3
@@ -76,7 +76,7 @@ flowchart TD
   - `registry.rs`: Startup-precomputed zero-allocation `SchemaNaming` (`SchemaNaming::from_registry(&registry) -> &'static SchemaNaming`), `DocumentTypeNaming`, `FieldColumnNaming`, `RelationNaming` (pre-resolving both owning and inverse relation junction tables), and `StaticIden(&'static str)` implementing `sea_query::Iden`.
   - `mod.rs`: Clean Facade re-exporting public types and functions over private submodules.
 - [x] **Step 2.2: Static System Migrations (`infrastructure/migrations/` & `persistence/migration/embedded.rs`)**
-  - `20260924000001_create_system_tables.sql` (`roles`, `role_permissions`, `shadow_users`, `user_role_assignments`, `access_requests`).
+  - `20260924000001_create_system_tables.sql` (`roles`, `role_permissions`, `user_role_assignments`, `access_requests`, `user_profiles`).
   - `20260924000002_seed_builtin_roles.sql` (`ROLE_ADMIN_ID`, `ROLE_EDITOR_ID`, `ROLE_WRITER_ID`, `ROLE_VIEWER_ID`).
   - `20261010000001_create_document_drafts.sql` (`document_drafts` table).
   - `20261010000002_create_document_snapshots.sql` (`document_snapshots` table).
@@ -119,7 +119,8 @@ flowchart TD
   - `role.rs`: `SqlxRoleRepository`.
   - `user_role_assignment.rs`: `SqlxUserRoleAssignmentRepository`.
   - `access_request.rs`: `SqlxAccessRequestRepository`.
-  - `mod.rs`: Clean Facade hiding internal helper/mapper modules (`pub(crate)` / private `mod`) and re-exporting only the 5 `Sqlx*Repository` adapters and `codec`.
+  - `user_profile.rs`: `SqlxUserProfileRepository`.
+  - `mod.rs`: Clean Facade hiding internal helper/mapper modules (`pub(crate)` / private `mod`) and re-exporting only the 6 `Sqlx*Repository` adapters and `codec`.
 - [x] **Step 3.3: Integration Test Suite (`infrastructure/tests/persistence_test.rs`)**
   - Offline tests for `SchemaNaming` precomputation, symmetric relation resolution, query compilation, and codec round-tripping.
   - Live PostgreSQL integration tests (in isolated schemas) for full content lifecycle, snapshots, roles, user role assignments, and access requests.
@@ -148,8 +149,8 @@ flowchart TD
 #### Phase 4B: Composition Root (`container.rs`), Health Checker & `Service` Mode
 
 - [x] **Step 4B.1: Composition Root Wiring (`infrastructure/src/container.rs`)**
-  - Assemble `PersistenceContainer` (initializing `&'static SchemaNaming` via `SchemaNaming::from_registry(&context.schema)` and constructing all 5 `Sqlx*Repository` adapters + `SqlxShadowUserRecorder`).
-  - Assemble `AppContainer` (`from_pool_and_context`) wiring `DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`, `SqlxHealthChecker`, and `SqlxAuthResolver`, plus `AppContainer::http_state() -> ProductionHttpState`.
+  - Assemble `PersistenceContainer` (initializing `&'static SchemaNaming` via `SchemaNaming::from_registry(&context.schema)` and constructing all 6 `Sqlx*Repository` adapters: `SqlxDocumentInstanceRepository`, `SqlxDocumentSnapshotRepository`, `SqlxRoleRepository`, `SqlxUserRoleAssignmentRepository`, `SqlxAccessRequestRepository`, `SqlxUserProfileRepository`).
+  - Assemble `AppContainer` (`from_pool_and_context`) wiring `DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`, `UserDirectoryServiceImpl`, `SqlxHealthChecker`, and `SqlxAuthResolver`, plus `AppContainer::http_state() -> ProductionHttpState`.
 - [x] **Step 4B.2: Health Checker (`infrastructure/src/health.rs`)**
   - Implement `HealthStatus` (`Healthy`, `Unhealthy { reason }`), `HealthCheckService` port trait, `SqlxHealthChecker` (`/healthz` liveness and `/ready` readiness via `SELECT 1` on `PgPool`), and `AlwaysHealthyChecker`.
 - [x] **Step 4B.3: `RunMode::Service` Worker (`infrastructure/src/cli/service.rs`)**
@@ -170,8 +171,9 @@ flowchart TD
 - [x] **Step 5.3: Auth Context Resolver & Axum Extractors (`infrastructure/src/auth/resolver.rs`, `extractor.rs`)**
   - `AuthContextResolver` port and `DefaultAuthResolver<A, U, R, S>` (`SqlxAuthResolver`) resolving `CallerContext` (`ActorId::User` or `ActorId::Service`) and onboarding errors (`access_not_requested`, `access_pending`, `access_rejected`).
   - Axum `FromRequestParts<St>` where `St: HasAuthResolver` for `Caller(pub CallerContext)` and `OnboardingUser(pub AuthenticatedUser)`.
-- [x] **Step 5.4: Shadow Users (`infrastructure/src/auth/shadow_user.rs`)**
-  - `ShadowUserRecorder`, `SqlxShadowUserRecorder` (upserting `shadow_users` with zero-allocation borrowed `&str` bindings), and `NoopShadowUserRecorder`.
+- [x] **Step 5.4: User Profile Directory & Bootstrap Synchronization (ADR-006) (`infrastructure/src/persistence/repositories/user_profile.rs`, `application/user_directory.rs`)**
+  - Replaced legacy `shadow_user.rs` write-on-read model with ADR-006 decoupled read-only directory lookup (`UserProfileRepository`, `UserDirectoryService`) and explicit bootstrap profile synchronization (`POST /api/v1/auth/profile/sync`, `GET /api/v1/auth/users`).
+  - Eliminates Aurora DSQL write amplification on read requests while providing efficient in-database querying and pagination for user management.
 
 ---
 

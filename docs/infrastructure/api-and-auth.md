@@ -22,7 +22,7 @@ flowchart TD
         POOL["PgPool"]
         NAMING["&'static SchemaNaming"]
         CTX["&'static SystemContext"]
-        REPOS["PersistenceContainer<br/>(5 Sqlx*Repository adapters)"]
+        REPOS["PersistenceContainer<br/>(6 Sqlx*Repository adapters)"]
         POOL & NAMING & CTX --> REPOS
     end
 
@@ -31,20 +31,21 @@ flowchart TD
         AR_SVC["Arc&lt;A: AccessRequestsService&gt;"]
         SCH_SVC["Arc&lt;S: SchemaService&gt;"]
         CFG_SVC["Arc&lt;C: SystemConfigService&gt;"]
+        USR_SVC["Arc&lt;U: UserDirectoryService&gt;"]
         HLTH["Arc&lt;H: HealthCheckService&gt;"]
         AUTH["Arc&lt;Auth: AuthContextResolver&gt;"]
     end
 
-    REPOS & CTX --> DOC_SVC & AR_SVC & SCH_SVC & CFG_SVC & HLTH & AUTH
+    REPOS & CTX --> DOC_SVC & AR_SVC & SCH_SVC & CFG_SVC & USR_SVC & HLTH & AUTH
 
     subgraph DrivingLayer["HTTP Driving Layer (Shared by REST & Future GraphQL)"]
-        STATE["HttpState&lt;D, A, S, C, H, Auth&gt;<br/>(No Repositories, No PgPool)"]
+        STATE["HttpState&lt;D, A, S, C, H, Auth, U&gt;<br/>(No Repositories, No PgPool)"]
         REST["REST Router (/api/v1/*)"]
         GQL["Future GraphQL Router (/graphql)"]
         CODEC["Shared Zero-Clone Content & Relation Codec"]
     end
 
-    DOC_SVC & AR_SVC & SCH_SVC & CFG_SVC & HLTH & AUTH & CTX --> STATE
+    DOC_SVC & AR_SVC & SCH_SVC & CFG_SVC & USR_SVC & HLTH & AUTH & CTX --> STATE
     STATE --> REST
     STATE -.-> GQL
     CODEC --> REST
@@ -53,7 +54,7 @@ flowchart TD
 
 ### 1.2 Generic `HttpState` & Interface-Segregated `Has*` State Traits (`api::state`)
 
-`HttpState` is parameterized over the application port traits (`DocumentsService`, `AccessRequestsService`, `SchemaService`, `SystemConfigService`, `HealthCheckService`, `AuthContextResolver`) with defaults pointing to the production SQLx-backed service implementations:
+`HttpState` is parameterized over the application port traits (`DocumentsService`, `AccessRequestsService`, `SchemaService`, `SystemConfigService`, `HealthCheckService`, `AuthContextResolver`, `UserDirectoryService`) with defaults pointing to the production SQLx-backed service implementations:
 
 ```rust
 pub struct HttpState<
@@ -67,6 +68,7 @@ pub struct HttpState<
     C = SystemConfigServiceImpl,
     H = SqlxHealthChecker,
     Auth = SqlxAuthResolver,
+    U = UserDirectoryServiceImpl<SqlxUserProfileRepository>,
 > {
     pub context: &'static SystemContext,
     pub auth_resolver: Arc<Auth>,
@@ -74,12 +76,13 @@ pub struct HttpState<
     pub access_requests_service: Arc<A>,
     pub schema_service: Arc<S>,
     pub system_config_service: Arc<C>,
+    pub user_directory_service: Arc<U>,
     pub health_checker: Arc<H>,
 }
 ```
 
 - **Manual `Clone` via `Arc::clone`**: Implemented without requiring `D: Clone, A: Clone, ...` bounds on the service traits.
-- **Interface-Segregated `Has*` Traits**: Each handler module constrains only the single service trait it calls (`HasSystemContext`, `HasDocumentsService`, `HasAccessRequestsService`, `HasSchemaService`, `HasSystemConfigService`, `HasHealthChecker`, `HasAuthResolver`), keeping handler signatures concise and reusable across REST and GraphQL.
+- **Interface-Segregated `Has*` Traits**: Each handler module constrains only the single service trait it calls (`HasSystemContext`, `HasDocumentsService`, `HasAccessRequestsService`, `HasSchemaService`, `HasSystemConfigService`, `HasUserDirectoryService`, `HasHealthChecker`, `HasAuthResolver`), keeping handler signatures concise and reusable across REST and GraphQL.
 - **Zero-Database Route Testing**: Because routers and handlers are generic over service traits, `infrastructure/tests/api_test.rs` can instantiate `HttpState` over `application::test_support` in-memory fakes for fast end-to-end HTTP verification via `axum-test`.
 
 ---
@@ -153,10 +156,13 @@ The `auth` module extracts and verifies incoming credentials, translating them i
    - *Local Development / Docker Compose*: [Dex](https://dexidp.io/) is provided via [`docker-compose.yml`](../../docker-compose.yml) and [`config/dex.yaml`](../../config/dex.yaml) on port `5556` (`http://localhost:5556/dex`) as a lightweight Keycloak alternative, pre-seeded with local users (`admin@luminair.dev`, `editor@luminair.dev`) and client `luminair-admin-spa`.
 2. **Service API Tokens (`auth::service_token`)**:
    - Validates pre-shared machine-to-machine tokens via `ServiceTokenRegistry` (`ServiceTokenEntry`), mapping to `ActorId::Service(service_id)` and `Vec<RoleId>`.
-3. **Shadow Users (`auth::shadow_user`)**:
-   - Records seen OIDC identities in `shadow_users` with `first_seen` and `last_seen` timestamps via `ShadowUserRecorder` (`SqlxShadowUserRecorder` / `NoopShadowUserRecorder`).
+3. **User Profile Directory & Bootstrap Synchronization (`auth`, `UserDirectoryService`, ADR-006)**:
+   - *Decoupled from read requests*: completely eliminates write-on-read side effects and distributed OCC lock contention on AWS Aurora DSQL (`record_user_seen` removed).
+   - *Explicit bootstrap sync*: `POST /api/v1/auth/profile/sync` is called by SPA/client applications upon login to synchronize verified IdP claims (`email`, `name`) into local `user_profiles` storage.
+   - *Directory search & picker*: `GET /api/v1/auth/users` provides paginated, indexed search for Admin Studio role-assignment pickers (governed by `Permission::ManageUsers`).
+   - *Programmatic single-user lookup*: `UserDirectoryService::get_user(&self, caller, user_id)` provides identity lookup for application services and caller self-inspection, enforcing resource ownership or `ManageUsers` authorization.
 4. **Typestate Axum Extractors (`auth::extractor`, `auth::resolver`)**:
-   - `OnboardingUser(pub AuthenticatedUser)`: Used by `POST /api/v1/auth/access-requests` for authenticated OIDC users who do not yet have roles.
+   - `OnboardingUser(pub AuthenticatedUser)`: Used by `POST /api/v1/auth/access-requests` and `POST /api/v1/auth/profile/sync` for authenticated OIDC users who do not yet have roles.
    - `Caller(pub CallerContext)`: Used by all protected endpoints; if an authenticated OIDC user has 0 assigned roles, checks `AccessRequestRepository` and returns the canonical onboarding status error (`403 access_not_requested`, `403 access_pending`, or `403 access_rejected`).
 
 ---
@@ -182,6 +188,8 @@ Conforming to [`docs/api.md`](../api.md):
 │   ├── /{id}                                 # GET access request status
 │   ├── /{id}/approve                         # POST approve and assign roles
 │   └── /{id}/reject                          # POST reject with reason
+├── /auth/users                               # GET list and search user profiles (picker)
+├── /auth/profile/sync                        # POST synchronize verified IdP profile claims
 ├── /system
 │   ├── /config                               # GET system configuration
 │   └── /locales                              # GET active locales

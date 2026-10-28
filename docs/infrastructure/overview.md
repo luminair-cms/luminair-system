@@ -90,7 +90,8 @@ infrastructure/
     │       ├── document_snapshot.rs          # SqlxDocumentSnapshotRepository (ADR-004)
     │       ├── role.rs                       # SqlxRoleRepository
     │       ├── user_role_assignment.rs       # SqlxUserRoleAssignmentRepository
-    │       └── access_request.rs             # SqlxAccessRequestRepository
+    │       ├── access_request.rs             # SqlxAccessRequestRepository
+    │       └── user_profile.rs               # SqlxUserProfileRepository (ADR-006)
     │
     ├── auth/                                 # Authentication and security machinery
     │   ├── mod.rs
@@ -98,7 +99,6 @@ infrastructure/
     │   ├── error.rs                          # AuthError and AuthResolutionError
     │   ├── oidc.rs                           # OidcConfig, JwtClaims, and OidcTokenValidator
     │   ├── service_token.rs                  # ServiceTokenEntry & ServiceTokenRegistry for Service actors
-    │   ├── shadow_user.rs                    # ShadowUserRecorder, SqlxShadowUserRecorder, NoopShadowUserRecorder
     │   ├── resolver.rs                       # AuthContextResolver & DefaultAuthResolver (SqlxAuthResolver)
     │   └── extractor.rs                      # Axum Caller and OnboardingUser request extractors
     │
@@ -119,6 +119,7 @@ infrastructure/
     │       ├── content.rs                    # Content CRUD, publish, unpublish, discard-draft, restore, snapshots
     │       ├── schema.rs                     # Schema discovery endpoints
     │       ├── access_requests.rs            # User onboarding & review endpoints
+    │       ├── users.rs                      # User directory (/users) & profile sync (/profile/sync)
     │       ├── system.rs                     # Locales and system configuration endpoints
     │       └── health.rs                     # /healthz and /ready endpoints
     │
@@ -145,18 +146,19 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use application::services::{
     AccessRequestsServiceImpl, DocumentsServiceImpl, SchemaServiceImpl, SystemConfigServiceImpl,
+    UserDirectoryServiceImpl,
 };
 use domain::system::SystemContext;
 
 use crate::api::state::{HttpState, ProductionHttpState};
 use crate::auth::{
-    OidcTokenValidator, ServiceTokenRegistry, SqlxAuthResolver, SqlxShadowUserRecorder,
+    OidcTokenValidator, ServiceTokenRegistry, SqlxAuthResolver,
 };
 use crate::health::SqlxHealthChecker;
 use crate::persistence::naming::SchemaNaming;
 use crate::persistence::repositories::{
     SqlxAccessRequestRepository, SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository,
-    SqlxRoleRepository, SqlxUserRoleAssignmentRepository,
+    SqlxRoleRepository, SqlxUserProfileRepository, SqlxUserRoleAssignmentRepository,
 };
 
 /// Sub-container aggregating SQLx repository adapters and database persistence machinery.
@@ -168,7 +170,7 @@ pub struct PersistenceContainer {
     pub role_repo: SqlxRoleRepository,
     pub assignment_repo: SqlxUserRoleAssignmentRepository,
     pub access_request_repo: SqlxAccessRequestRepository,
-    pub shadow_user_recorder: SqlxShadowUserRecorder,
+    pub user_profile_repo: SqlxUserProfileRepository,
 }
 
 /// Central composition root container holding initialized services and adapters.
@@ -187,6 +189,7 @@ pub struct AppContainer {
             SqlxRoleRepository,
         >,
     >,
+    pub user_directory_service: Arc<UserDirectoryServiceImpl<SqlxUserProfileRepository>>,
     pub schema_service: Arc<SchemaServiceImpl>,
     pub system_config_service: Arc<SystemConfigServiceImpl>,
     pub health_checker: Arc<SqlxHealthChecker>,

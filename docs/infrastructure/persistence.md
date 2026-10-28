@@ -37,7 +37,7 @@ flowchart TD
         QHeaders["query/headers.rs<br/>(Admin Headers UNION ALL & Display Title Batch Lookup)"]
         QJunction["query/junction.rs<br/>(Junction Link Batch INSERT, DELETE, Owning & Inverse SELECT)"]
         QSnap["query/snapshots.rs<br/>(document_snapshots INSERT, LIST HEADERS, GET BY REVISION)"]
-        QAuth["query/auth.rs<br/>(roles, role_permissions, user_role_assignments, access_requests)"]
+        QAuth["query/auth.rs<br/>(roles, role_permissions, user_role_assignments, access_requests, user_profiles)"]
         QOcc["query/occ.rs<br/>(with_occ_retry exponential backoff)"]
     end
 
@@ -51,6 +51,7 @@ flowchart TD
         RRole["repositories/role.rs<br/>(SqlxRoleRepository)"]
         RAssign["repositories/user_role_assignment.rs<br/>(SqlxUserRoleAssignmentRepository)"]
         RAccess["repositories/access_request.rs<br/>(SqlxAccessRequestRepository)"]
+        RProf["repositories/user_profile.rs<br/>(SqlxUserProfileRepository)"]
     end
 
     PMod --> NMod & QMod & RMod
@@ -60,7 +61,7 @@ flowchart TD
     RDoc --> NReg & QWide & QDrafts & QHeaders & QJunction & QSnap & QOcc
     RDoc --> RMappers & RCodec & RRel
     RSnap --> NReg & QSnap & RMappers & RCodec & QOcc
-    RRole & RAssign & RAccess --> QAuth & RMappers & QOcc
+    RRole & RAssign & RAccess & RProf --> QAuth & RMappers & QOcc
 ```
 
 | Submodule | File | Single Responsibility |
@@ -74,12 +75,12 @@ flowchart TD
 | | `headers.rs` | `sea-query` AST builders for Admin Studio `list_admin_headers` (`UNION ALL` of drafts and clean published rows) and batched `find_display_titles_by_ids`. |
 | | `junction.rs` | `sea-query` AST builders for `[source]_[rel]_links` junction tables (`insert_links_batch`, `delete_links_by_source`, `select_targets_by_source`, `select_links_by_sources`, `select_links_by_targets`). |
 | | `snapshots.rs` | `sea-query` AST builders for `document_snapshots` (`insert_snapshot`, `list_snapshot_headers`, `get_snapshot_by_revision`). |
-| | `auth.rs` | `sea-query` AST builders for `roles`, `role_permissions`, `user_role_assignments`, and `access_requests`. |
+| | `auth.rs` | `sea-query` AST builders for `roles`, `role_permissions`, `user_role_assignments`, `access_requests`, and `user_profiles`. |
 | | `occ.rs` | `with_occ_retry` exponential backoff wrapper for Aurora DSQL `SQLSTATE 40001`. |
 | **`persistence::repositories`** | `codec.rs` | Schema-driven JSONB serialization/deserialization (`ContentValue`, `ResolvedRelation`, `display_values`), `ActorId` URN formatting/parsing, and `DocumentStatus`/`SnapshotReason` string mapping. |
-| | `mappers/*` | Pure `sqlx::postgres::PgRow` $\rightarrow$ Domain entity reconstitution (`document_row.rs`, `snapshot_row.rs`, `auth_row.rs`). |
+| | `mappers/*` | Pure `sqlx::postgres::PgRow` $\rightarrow$ Domain entity reconstitution (`document_row.rs`, `snapshot_row.rs`, `auth_row.rs` including `UserProfileRowMapper`). |
 | | `relations.rs` | Transactional junction table synchronization (`sync_owning_relations_in_tx`) and two-phase batch relation enrichment (`batch_fetch_relations` for both owning and pre-resolved inverse relations). |
-| | `document_instance.rs`, `document_snapshot.rs`, `role.rs`, `user_role_assignment.rs`, `access_request.rs` | Ultra-thin repository trait adapters (5–20 lines per method) orchestrating `query`, `mappers`, `codec`, `relations`, and `with_occ_retry`. |
+| | `document_instance.rs`, `document_snapshot.rs`, `role.rs`, `user_role_assignment.rs`, `access_request.rs`, `user_profile.rs` | Ultra-thin repository trait adapters (5–20 lines per method) orchestrating `query`, `mappers`, `codec`, `relations`, and `with_occ_retry`. |
 
 ---
 
@@ -121,13 +122,18 @@ Persistence migrations are divided into **static migrations** and **dynamic sche
 ### 3.1 Static System Migrations (`infrastructure/migrations/`)
 
 Pre-compiled SQL migrations embedded via `sqlx::migrate!("./migrations")`:
-1. `20260924000001_create_system_tables.sql`: `roles`, `role_permissions`, `user_role_assignments`, `access_requests`, `shadow_users`.
+1. `20260924000001_create_system_tables.sql`: `roles`, `role_permissions`, `user_role_assignments`, `access_requests`, `user_profiles` ([`ADR-006`](../adr/ADR-006-user-profile-and-directory-architecture.md)).
 2. `20260924000002_seed_builtin_roles.sql`: seeds deterministic built-in roles (`admin`, `editor`, `viewer`, `writer`).
 3. `20261010000001_create_document_drafts.sql`: unified draft table storing `status` (`'draft'`, `'modified'`, `'unpublished'`), `display_values JSONB`, `display_title`, `content JSONB`, `relations JSONB`, and OCC `version`.
 4. `20261010000002_create_document_snapshots.sql`: append-only revision history with `reason IN ('publish', 'unpublish')` and `UNIQUE (document_type_id, document_id, revision)`.
-5. `20261022000001_create_document_tombstones.sql`: trash/soft-delete store holding deleted instances pending retention vacuum.
 
 All static migration files strictly begin with `-- no-transaction` for Aurora DSQL DDL compatibility and use client UUIDv7.
+
+### 3.1.1 Forward-Reserved Schema: `document_tombstones` (ADR-005)
+
+The table identifier `TABLE_DOCUMENT_TOMBSTONES` is defined in `naming::identifiers` as a forward reservation for the proposed trash, undelete, and retention lifecycle ([`ADR-005`](../adr/ADR-005-trash-undelete-and-retention.md)).
+
+Because ADR-005 is currently in *Proposed* status, its static migration has not been introduced into `infrastructure/migrations/` (maintaining exactly 4 static migrations). The dynamic schema introspector (`introspector.rs`) explicitly excludes `document_tombstones` alongside system tables until ADR-005 is accepted and activated.
 
 ### 3.2 Dynamic Additive Schema Synchronizer (`persistence::migration::dynamic_sync`)
 
@@ -180,7 +186,8 @@ Implements `domain::content::DocumentInstanceRepository` and `domain::content::D
 - `list_admin_headers`: single query combining drafts and clean published rows (`has_pending_draft = FALSE`) using materialized `display_values` and `display_title`.
 - `find_display_titles_by_ids`: batched lookup for Phase 2 singular relational display field enrichment.
 
-### 5.2 Auth Repositories
+### 5.2 Auth & Identity Repositories
 - `SqlxRoleRepository`: loads static and custom roles, manages granular permissions.
 - `SqlxUserRoleAssignmentRepository`: maps user IDs to assigned roles with `ActorId` URNs.
 - `SqlxAccessRequestRepository`: manages user onboarding queue with partial unique active index.
+- `SqlxUserProfileRepository`: stores synchronized user profile snapshots in `user_profiles`, implementing `UserProfileRepository` for single-user lookup by `ActorId` and multi-user directory search (prefix/contains) with deterministic sorting ([`ADR-006`](../adr/ADR-006-user-profile-and-directory-architecture.md)).
