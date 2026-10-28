@@ -1,5 +1,6 @@
 //! Database connection factory supporting standard PostgreSQL and AWS Aurora DSQL endpoints.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,14 +36,13 @@ pub enum ConnectionTarget {
 }
 
 /// Dynamic authentication token provider for Amazon Aurora DSQL.
-#[async_trait::async_trait]
 pub trait DsqlTokenProvider: Send + Sync {
     /// Generates a short-lived IAM authentication token for the given cluster and region.
-    async fn generate_auth_token(
+    fn generate_auth_token(
         &self,
         cluster_endpoint: &str,
         region: &str,
-    ) -> Result<String, PersistenceError>;
+    ) -> impl Future<Output = Result<String, PersistenceError>> + Send;
 }
 
 /// Static token provider returning a fixed string (primarily for testing and offline development).
@@ -69,7 +69,6 @@ impl StaticDsqlTokenProvider {
     }
 }
 
-#[async_trait::async_trait]
 impl DsqlTokenProvider for StaticDsqlTokenProvider {
     async fn generate_auth_token(
         &self,
@@ -80,7 +79,6 @@ impl DsqlTokenProvider for StaticDsqlTokenProvider {
     }
 }
 
-#[async_trait::async_trait]
 impl DsqlTokenProvider for EnvironmentDsqlTokenProvider {
     async fn generate_auth_token(
         &self,
@@ -91,6 +89,26 @@ impl DsqlTokenProvider for EnvironmentDsqlTokenProvider {
             return Ok(token);
         }
         Ok("mock-dsql-auth-token".to_string())
+    }
+}
+
+impl<T: DsqlTokenProvider + ?Sized> DsqlTokenProvider for &T {
+    fn generate_auth_token(
+        &self,
+        cluster_endpoint: &str,
+        region: &str,
+    ) -> impl Future<Output = Result<String, PersistenceError>> + Send {
+        (**self).generate_auth_token(cluster_endpoint, region)
+    }
+}
+
+impl<T: DsqlTokenProvider + ?Sized> DsqlTokenProvider for Arc<T> {
+    fn generate_auth_token(
+        &self,
+        cluster_endpoint: &str,
+        region: &str,
+    ) -> impl Future<Output = Result<String, PersistenceError>> + Send {
+        (**self).generate_auth_token(cluster_endpoint, region)
     }
 }
 
@@ -106,17 +124,20 @@ pub async fn create_connection_pool(
     create_connection_pool_with_provider(
         database_url,
         max_connections,
-        Arc::new(EnvironmentDsqlTokenProvider),
+        &EnvironmentDsqlTokenProvider,
     )
     .await
 }
 
 /// Creates a new connection pool using a custom [`DsqlTokenProvider`] for IAM credentials.
-pub async fn create_connection_pool_with_provider(
+pub async fn create_connection_pool_with_provider<P>(
     database_url: &str,
     max_connections: u32,
-    provider: Arc<dyn DsqlTokenProvider>,
-) -> Result<PgPool, PersistenceError> {
+    provider: &P,
+) -> Result<PgPool, PersistenceError>
+where
+    P: DsqlTokenProvider + ?Sized,
+{
     let target = detect_connection_target(database_url)?;
     match target {
         ConnectionTarget::Postgres { url } => build_postgres_pool(&url, max_connections).await,
@@ -192,14 +213,17 @@ async fn build_postgres_pool(url: &str, max_connections: u32) -> Result<PgPool, 
         .map_err(PersistenceError::Sqlx)
 }
 
-async fn build_aurora_dsql_pool(
+async fn build_aurora_dsql_pool<P>(
     cluster_endpoint: &str,
     region: &str,
     user: &str,
     database: &str,
     max_connections: u32,
-    provider: Arc<dyn DsqlTokenProvider>,
-) -> Result<PgPool, PersistenceError> {
+    provider: &P,
+) -> Result<PgPool, PersistenceError>
+where
+    P: DsqlTokenProvider + ?Sized,
+{
     let token = provider
         .generate_auth_token(cluster_endpoint, region)
         .await?;
