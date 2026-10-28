@@ -1,4 +1,4 @@
-//! SQLx implementation of `DocumentInstanceRepository` and `DocumentSnapshotRepository`.
+//! SQLx implementation of `DocumentInstanceRepository`.
 
 use std::collections::HashMap;
 
@@ -10,12 +10,11 @@ use uuid::Uuid;
 
 use domain::auth::ActorId;
 use domain::content::header::{
-    DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader, VersionView,
+    DocumentHeader, DocumentSnapshot, DocumentStatus, VersionView,
 };
 use domain::content::instance::{DocumentInstance, DocumentInstanceId, PublicationState};
 use domain::content::ports::{
-    DocumentInstanceRepository, DocumentSnapshotRepository, FieldFilter, Page, Pagination,
-    RelationMap,
+    DocumentInstanceRepository, FieldFilter, Page, Pagination, RelationMap,
 };
 use domain::content::values::ContentValue;
 use domain::errors::DomainError;
@@ -46,9 +45,7 @@ use crate::persistence::repositories::codec::{
     publication_state_to_draft_status_str, serialize_display_values_json, serialize_fields_json,
     serialize_relations_json,
 };
-use crate::persistence::repositories::document_snapshot::{
-    SqlxDocumentSnapshotRepository, execute_insert_snapshot,
-};
+use crate::persistence::repositories::document_snapshot::execute_insert_snapshot;
 use crate::persistence::repositories::mappers::{
     extract_wide_published_meta, map_display_title_row, map_draft_row, map_header_row,
     map_wide_table_row,
@@ -62,7 +59,7 @@ use crate::persistence::repositories::relations::{
 // Public Repository Struct & Constructors
 // ---------------------------------------------------------------------------
 
-/// PostgreSQL / Aurora DSQL adapter for `DocumentInstanceRepository` and `DocumentSnapshotRepository`.
+/// PostgreSQL / Aurora DSQL adapter for `DocumentInstanceRepository`.
 #[derive(Debug, Clone)]
 pub struct SqlxDocumentInstanceRepository {
     pool: PgPool,
@@ -82,40 +79,6 @@ impl SqlxDocumentInstanceRepository {
             context,
             naming,
         }
-    }
-
-    #[must_use]
-    pub fn snapshot_repository(&self) -> SqlxDocumentSnapshotRepository {
-        SqlxDocumentSnapshotRepository::new(self.pool.clone(), self.context, self.naming)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Trait Implementation: DocumentSnapshotRepository
-// ---------------------------------------------------------------------------
-
-impl DocumentSnapshotRepository for SqlxDocumentInstanceRepository {
-    async fn save_snapshot(&self, snapshot: &DocumentSnapshot) -> Result<(), DomainError> {
-        self.snapshot_repository().save_snapshot(snapshot).await
-    }
-
-    async fn list_snapshots(
-        &self,
-        type_id: &DocumentTypeId,
-        doc_id: DocumentInstanceId,
-    ) -> Result<Vec<SnapshotHeader>, DomainError> {
-        self.snapshot_repository().list_snapshots(type_id, doc_id).await
-    }
-
-    async fn get_snapshot(
-        &self,
-        type_id: &DocumentTypeId,
-        doc_id: DocumentInstanceId,
-        revision: u32,
-    ) -> Result<Option<DocumentSnapshot>, DomainError> {
-        self.snapshot_repository()
-            .get_snapshot(type_id, doc_id, revision)
-            .await
     }
 }
 
@@ -851,15 +814,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sqlx_document_instance_repository_new_and_snapshot_repo() {
+    async fn test_sqlx_document_instance_repository_new() {
         let (context, naming) = fixture_context_and_naming();
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test")
             .expect("lazy pool creation must succeed");
 
         let repo = SqlxDocumentInstanceRepository::new(pool, context, naming);
-        let snapshot_repo = repo.snapshot_repository();
         assert_eq!(
-            snapshot_repo.context().config.default_locale,
+            repo.context.config.default_locale,
             context.config.default_locale
         );
     }

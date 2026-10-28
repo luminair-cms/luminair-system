@@ -184,3 +184,15 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
      - **Connection Lifetime & TLS**: Enforces `max_lifetime = 10 minutes` (under the 15-minute DSQL IAM token expiry window), `idle_timeout = 5 minutes`, and `ssl_mode = Require` on Aurora DSQL pools.
      - Centralized in `persistence::create_connection_pool` and reused across CLI `migrate`, `dry_run`, and `service` modes.
   4. **Dex OIDC Provider**: Added Dex (`ghcr.io/dexidp/dex:v2.41.1`) to `docker-compose.yml` with `config/dex.yaml` configuring in-memory storage, issuer `http://localhost:5556/dex`, pre-seeded users (`admin@luminair.dev`, `editor@luminair.dev`), and public client `luminair-admin-spa` as a lightweight Keycloak alternative.
+
+---
+
+### 2026-10-28 — Infrastructure Trait Alignment & Skill Refinement (RPITIT & SRP)
+
+- **Context**: Post-implementation audit of all infrastructure traits, supertrait hierarchies, and skill guidelines.
+- **Decisions**:
+  1. **Modern Rust RPITIT & Static Dispatch (`.ai/skills/rust-patterns.md`)**: Updated the dependency injection skill rule to reflect that traits with RPITIT (`impl Future + Send`) are non-dyn-compatible, standardizing on monomorphized static dispatch and zero-cost in-memory fakes.
+  2. **Strict Repository Separation (Variant 3.A)**: Removed the redundant `impl DocumentSnapshotRepository for SqlxDocumentInstanceRepository` pass-through delegation. `SqlxDocumentInstanceRepository` now strictly models instance lifecycle queries, while `SqlxDocumentSnapshotRepository` serves as the sole SQLx snapshot adapter, wired via `DocumentsServiceImpl::new_with_snapshots`.
+  3. **Trait Symmetry on Connection Factory (Variant 4.B)**: Removed blanket `impl for &T` and `impl for Arc<T>` from `DsqlTokenProvider`, restoring structural symmetry across all infrastructure trait definitions. Callers pass borrowed references (`&P`) to `create_connection_pool_with_provider`.
+  4. **Documented State Hierarchy & Lifetime Boundaries**: Codified why HTTP state and application service traits require `'static` (Axum router bounds) while domain ports remain `Send + Sync` without `'static` in `.ai/skills/rust-patterns.md`, and documented why state accessor traits inherit `HasSystemContext` in `.ai/skills/clean-code.md`.
+  5. **Shadow User Error Alignment**: Reserved the `ShadowUserRecorder` domain error leakage fix for a dedicated task and PR.

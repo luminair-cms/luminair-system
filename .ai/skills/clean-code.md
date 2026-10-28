@@ -23,6 +23,10 @@ Load this skill before designing, writing, refactoring, or reviewing code.
 - **Value Objects & Newtypes**: Enforce domain invariants at construction via `nutype`. See [`.ai/skills/rust-patterns.md`](rust-patterns.md).
 - **Builder Pattern**: Use fluent builders for complex domain entities and test fixtures (e.g. `DocumentTypeBuilder`).
 - **Guard Clauses**: Validate preconditions and permissions early with immediate returns.
+- **Interface Segregation & State Accessor Trait Hierarchy**:
+  - Keep web driving state accessors segregated per capability (`HasDocumentsService`, `HasAuthResolver`, `HasHealthChecker`) so HTTP handlers depend only on what they consume.
+  - Domain service accessors (`HasDocumentsService`, `HasAuthResolver`, etc.) inherit `HasSystemContext` as a baseline capability. This guarantees handlers automatically have access to schema and config lookups without redundant `+ HasSystemContext` bounds. Rust deduplicates overlapping supertraits at compile time with zero overhead.
+  - Infrastructure probe traits (`HasHealthChecker`) remain deliberately decoupled from `HasSystemContext` to allow minimal probe states.
 
 ---
 

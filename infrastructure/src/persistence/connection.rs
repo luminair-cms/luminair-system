@@ -1,7 +1,6 @@
 //! Database connection factory supporting standard PostgreSQL and AWS Aurora DSQL endpoints.
 
 use std::future::Future;
-use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::PgPool;
@@ -89,26 +88,6 @@ impl DsqlTokenProvider for EnvironmentDsqlTokenProvider {
             return Ok(token);
         }
         Ok("mock-dsql-auth-token".to_string())
-    }
-}
-
-impl<T: DsqlTokenProvider + ?Sized> DsqlTokenProvider for &T {
-    fn generate_auth_token(
-        &self,
-        cluster_endpoint: &str,
-        region: &str,
-    ) -> impl Future<Output = Result<String, PersistenceError>> + Send {
-        (**self).generate_auth_token(cluster_endpoint, region)
-    }
-}
-
-impl<T: DsqlTokenProvider + ?Sized> DsqlTokenProvider for Arc<T> {
-    fn generate_auth_token(
-        &self,
-        cluster_endpoint: &str,
-        region: &str,
-    ) -> impl Future<Output = Result<String, PersistenceError>> + Send {
-        (**self).generate_auth_token(cluster_endpoint, region)
     }
 }
 

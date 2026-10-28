@@ -12,12 +12,28 @@ It unifies architectural patterns, Domain-Driven Design (DDD) idioms, classic Go
 - Follow the three-crate boundary strictly (see [`docs/architecture.md`](../../docs/architecture.md)):
   - `domain` and `application` contain pure business and orchestration logic (zero SQL, HTTP, or filesystem I/O).
   - Repository ports (`trait DocumentInstanceRepository`, `trait RoleRepository`, etc.) are defined in `domain` and implemented only in `infrastructure`.
-- **Dependency Injection**: Inject port implementations via generics (static dispatch) or `Arc<dyn Trait>` (dynamic dispatch), keeping use-cases decoupled and testable with in-memory fakes.
+- **Async Ports & Static Dependency Injection (RPITIT)**:
+  - Declare async trait methods using native modern Rust Return-Position Impl Trait in Trait (RPITIT) with explicit `+ Send`:
+    ```rust
+    pub trait RoleRepository: Send + Sync {
+        fn find_by_id(&self, id: RoleId) -> impl Future<Output = Result<Option<Role>, DomainError>> + Send;
+    }
+    ```
+  - **Static Dispatch by Default**: Because RPITIT traits are non-dyn-compatible (not object-safe in modern Rust), inject dependencies via generic type parameters (monomorphized static dispatch) rather than `Arc<dyn Trait>`:
+    ```rust
+    pub struct DocumentsServiceImpl<R, S = R> {
+        instance_repo: R,
+        snapshot_repo: S,
+    }
+    ```
+  - **Zero-Cost In-Memory Fakes**: Test fakes implement port traits directly; tests inject them via generics without vtable overhead or allocation.
+  - **Dynamic Dispatch Exception**: Reserve `Arc<dyn Trait>` exclusively for synchronous traits (e.g. non-async visitors or token signers) or traits that explicitly return boxed futures (`Pin<Box<dyn Future<Output = ...> + Send>>`).
 
-```rust
-trait Mailer { fn send(&self, to: &str, body: &str); }
-struct Service<M: Mailer> { mailer: M }
-```
+### Trait Lifetime Bounds (`'static` vs `Send + Sync`)
+
+Distinguish trait lifetime requirements based on their architectural role:
+- **Domain & Driver Ports (`Send + Sync`)**: Keep repository ports in `domain` and connection/driver utilities in `infrastructure` free of `'static`. This ensures domain interfaces remain unconstrained by web framework lifetimes, and allows test fakes or stack-allocated providers to implement them without lifetime friction.
+- **Application Services & HTTP State Traits (`Send + Sync + 'static`)**: Require `'static` on service ports (`DocumentsService`, `HealthCheckService`, `AuthContextResolver`) and state extractors stored in Axum `Router` / `HttpState`. This satisfies Axum's `'static` state requirement up front, avoiding repetitive `'static` boilerplate across handlers and route builders.
 
 ### Facade (`pub use` & `pub(crate)`)
 
