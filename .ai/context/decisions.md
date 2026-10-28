@@ -196,3 +196,15 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
   3. **Trait Symmetry on Connection Factory (Variant 4.B)**: Removed blanket `impl for &T` and `impl for Arc<T>` from `DsqlTokenProvider`, restoring structural symmetry across all infrastructure trait definitions. Callers pass borrowed references (`&P`) to `create_connection_pool_with_provider`.
   4. **Documented State Hierarchy & Lifetime Boundaries**: Codified why HTTP state and application service traits require `'static` (Axum router bounds) while domain ports remain `Send + Sync` without `'static` in `.ai/skills/rust-patterns.md`, and documented why state accessor traits inherit `HasSystemContext` in `.ai/skills/clean-code.md`.
   5. **Shadow User Error Alignment**: Reserved the `ShadowUserRecorder` domain error leakage fix for a dedicated task and PR.
+
+---
+
+### 2026-10-28 — ADR-006 Accepted: UserProfile Entity and Directory Architecture
+
+- **Context**: Transitioning from the internal `shadow_users` caching hack to a first-class user identity and directory model supporting the Admin Studio role-assignment picker.
+- **Decisions**:
+  1. **Accepted ADR-006**: Introduced `UserProfile` entity in `domain::auth`, `UserProfileRepository` port trait in `domain::auth::ports`, and `UserDirectoryService` in `application::services`.
+  2. **Immutable Identity Anchoring**: All role assignments, access requests, and document audit trails anchor permanently to `user_id` (OIDC `sub`). Changes to user display names or emails in the external IdP (Keycloak/Cognito) update local presentation attributes without breaking foreign keys or audit histories.
+  3. **Aurora DSQL Hot-Path Protection**: Replaced unconditional row upserts on every HTTP request with explicit session synchronization (`POST /api/v1/auth/profile/sync`) and access request onboarding hooks, eliminating OCC serialization conflict contention.
+  4. **Database Table Transition**: Replaced legacy `shadow_users` table with `user_profiles` table, indexed by `(email, name)` for fast prefix search.
+  5. **See**: [`ADR-006`](../docs/adr/ADR-006-user-profile-and-directory-architecture.md).

@@ -1,7 +1,7 @@
 # ADR-006: User Profile and Directory Architecture for External Identity Management
 
-- **Status**: Proposed
-- **Date**: 2026-10-28 (proposed)
+- **Status**: Accepted
+- **Date**: 2026-10-28 (proposed) · 2026-10-28 (accepted)
 - **Deciders**: Dmitri Astafiev
 - **Governing decisions**: [`ADR-002`](./ADR-002-hexagonal-architecture.md), [`ADR-003`](./ADR-003-aws-dsql-database.md)
 - **Related docs**: [`docs/architecture.md`](../architecture.md), [`docs/api.md`](../api.md)
