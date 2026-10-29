@@ -98,6 +98,7 @@ Adopt the **Asymmetric Hybrid Persistence Pattern**:
     - `'modified'`: Document that is currently live in `[type]` (`has_pending_draft = TRUE`) and has pending, unpublished edits in `document_drafts`.
     - `'unpublished'`: Document that was previously published (`last_published_revision IS NOT NULL`) and later taken offline via `unpublish` (removed from `[type]`, preserved in `document_drafts`).
   - `version INT`: Incremented on every draft touch.
+  - `created_by VARCHAR(255)` / `updated_by VARCHAR(255)`: Strongly typed `ActorId` URNs (`user:<id>`, `service:<id>`, or `system`). `UserId` strings are bounded to $\le 255$ characters, while `ServiceId` strings are bounded to $\le 245$ characters (so `"service:"` [8 chars] + `ServiceId` [$\le 245$ chars] fits within the 255-character column width).
 
 ### 3. Composite Identity (`display_fields` & Key-Value `display_values`)
 In `DocumentTypeInfo`, schemas define an ordered list of attributes representing the document's identity, subject to two strict schema-registration invariants:

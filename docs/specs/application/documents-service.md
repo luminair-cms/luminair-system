@@ -12,7 +12,7 @@
 
 | Term | Meaning / API symbol | Concrete representation |
 |---|---|---|
-| `Singleton` (SingleType) | Document type with `DocumentKind::Singleton` | Maximum 1 instance permitted |
+| `Singleton` (SingleType) | Document type with `DocumentKind::Singleton` (widely used in CMS architectures for single-instance entities like settings, corresponding to Strapi's SingleType) | Maximum 1 instance permitted |
 | `Collection` | Document type with `DocumentKind::Collection` | Arbitrary number of instances |
 | `DraftPublishOn` | Document type with `draft_and_publish: true` | Publish & unpublish enabled |
 | `DraftPublishOff` | Document type with `draft_and_publish: false` | Publish & unpublish rejected |
@@ -33,18 +33,18 @@
 - **When**: Caller invokes `service.create(&caller, CreateDocumentCommand::new(type_id, valid_fields)).await`.
 - **Then**: Returns `Ok(instance)` with `instance.audit.version == 1`, `instance.audit.created_by == caller.actor`, `instance.content.publication_state` as `Draft`, and instance is retrievable from repository.
 
-### DS-02 — Create Blocked for Second SingleType Instance
+### DS-02 — Create Blocked for Second Singleton Instance
 - **Status**: `Approved`
-- **Origin**: `adr:002` (SingleType Guard Option C)
+- **Origin**: `adr:002` (Singleton Guard Option C)
 - **Given**: A singleton document type in schema registry, and an existing instance already saved in the repository.
 - **When**: Any caller invokes `service.create(&caller, CreateDocumentCommand::new(type_id, valid_fields)).await`.
-- **Then**: Returns `Err(ApplicationError::Domain(DomainError::SingleTypeAlreadyExists(type_id)))`.
+- **Then**: Returns `Err(ApplicationError::Domain(DomainError::SingletonAlreadyExists(type_id)))`.
 
 ### DS-03 — Create Rejects Content Violating Field Constraints
 - **Status**: `Approved`
-- **Origin**: `doc:domain::content::validate_content`
-- **Given**: A document type with a required field `title` having `MinLength(5)`.
-- **When**: Caller provides fields with `title` shorter than 5 characters or missing.
+- **Origin**: `doc:domain::content::validate_draft_content`
+- **Given**: A document type with field `title` having constraints or typed schema definition.
+- **When**: Caller provides fields with invalid field value type or violating field constraints.
 - **Then**: Returns `Err(ApplicationError::Validation(errors))` containing the failure reason; no instance is saved to the repository.
 
 ### DS-04 — Update Bumps Version and Touches Audit Trail
@@ -161,8 +161,9 @@
 
 ## Open Questions
 
-1. **Q1 (Subsequent SingleType Creation Response)**: SingleType duplicate creation currently returns `DomainError::SingleTypeAlreadyExists`. Should API translate this to HTTP 409 Conflict? (Currently handled as Domain error).
+1. **Q1 (Subsequent Singleton Creation Response)**: Singleton duplicate creation returns `DomainError::SingletonAlreadyExists` (mapped to HTTP 409 Conflict via `ConflictCode::SingletonAlreadyExists`).
 2. **Q2 (Filter Combination)**: In-memory filter logic uses logical AND across all filters. Is OR filtering needed in the future? (Out of scope for Milestone 1; AND is standard).
+3. **Q3 (Draft Content Validation)**: In draft-and-publish workflows, draft saving (`create` / `update`) uses lenient validation (`validate_draft_content`, allowing missing required fields for work-in-progress drafts), while publication (`publish` and non-draft saves) strictly validates required fields via `validate_publish_content`.
 
 ---
 
@@ -171,4 +172,4 @@
 | # | Location | Code Says | Doc / Spec Says | Impact |
 |---|---|---|---|---|
 | 1 | `application/src/services/documents.rs:530` | `publish` returns `ApplicationError::Conflict` when `draft_and_publish` is false | Clear conflict condition | Consistent |
-| 2 | `application/src/services/documents.rs:330` | SingleType check calls `exists_for_type` before validation | Fast-fail guard prevents unnecessary schema validation | Good optimization |
+| 2 | `application/src/services/documents.rs:330` | Singleton check calls `exists_for_type` before validation | Fast-fail guard prevents unnecessary schema validation | Good optimization |

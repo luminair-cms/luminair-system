@@ -102,7 +102,7 @@ async fn ds_02_create_blocked_for_second_singletype_instance() {
     assert!(matches!(
         second,
         Err(ApplicationError::Domain(
-            DomainError::SingleTypeAlreadyExists(_)
+            DomainError::SingletonAlreadyExists(_)
         ))
     ));
 }
@@ -110,8 +110,12 @@ async fn ds_02_create_blocked_for_second_singletype_instance() {
 #[tokio::test]
 async fn ds_03_create_rejects_content_violating_field_constraints() {
     let (service, doc_type, caller) = setup_service_fixture(true, false);
-    // Title is required by text_field fixture; omit it to violate schema
-    let fields = HashMap::new();
+    // Provide invalid field value type (e.g. integer for a text field)
+    let mut fields = HashMap::new();
+    fields.insert(
+        create_attr_id("title"),
+        ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(12345))),
+    );
 
     let res = service
         .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))

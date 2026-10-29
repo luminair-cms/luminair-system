@@ -32,18 +32,6 @@ pub fn validate_publish_content(
     validate_content_with_mode(doc_type, content, system_config, true)
 }
 
-/// Backward-compatible alias delegating to `validate_publish_content`.
-///
-/// # Errors
-/// Returns a collection of [`DomainError`] if validation fails.
-pub fn validate_content(
-    doc_type: &DocumentType,
-    content: &DocumentContent,
-    system_config: &SystemConfig,
-) -> Result<(), Vec<DomainError>> {
-    validate_publish_content(doc_type, content, system_config)
-}
-
 fn validate_content_with_mode(
     doc_type: &DocumentType,
     content: &DocumentContent,
@@ -266,7 +254,7 @@ mod tests {
         let (doc_type, config, title_attr) = make_test_setup();
         let content = draft_content(HashMap::new());
 
-        let result = validate_content(&doc_type, &content, &config);
+        let result = validate_publish_content(&doc_type, &content, &config);
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert_eq!(errors.len(), 1);
@@ -284,7 +272,7 @@ mod tests {
         fields.insert(title_attr.clone(), ContentValue::Null);
         let content = draft_content(fields);
 
-        let result = validate_content(&doc_type, &content, &config);
+        let result = validate_publish_content(&doc_type, &content, &config);
         let errors = result.unwrap_err();
         assert_eq!(errors.len(), 1);
         assert!(matches!(
@@ -304,13 +292,13 @@ mod tests {
 
         // Case 1: absent
         let empty_content = draft_content(HashMap::new());
-        assert!(validate_content(&doc_type, &empty_content, &config).is_ok());
+        assert!(validate_publish_content(&doc_type, &empty_content, &config).is_ok());
 
         // Case 2: Null
         let mut fields = HashMap::new();
         fields.insert(title_attr, ContentValue::Null);
         let null_content = draft_content(fields);
-        assert!(validate_content(&doc_type, &null_content, &config).is_ok());
+        assert!(validate_publish_content(&doc_type, &null_content, &config).is_ok());
     }
 
     #[test]
@@ -324,7 +312,7 @@ mod tests {
         );
         let content = draft_content(fields);
 
-        let errors = validate_content(&doc_type, &content, &config).unwrap_err();
+        let errors = validate_publish_content(&doc_type, &content, &config).unwrap_err();
         assert_eq!(errors.len(), 1);
         assert!(matches!(
             &errors[0],
@@ -348,7 +336,7 @@ mod tests {
             title_attr.clone(),
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Hello".into()))),
         );
-        assert!(validate_content(&doc_type, &draft_content(fields), &config).is_ok());
+        assert!(validate_publish_content(&doc_type, &draft_content(fields), &config).is_ok());
 
         // Invalid: too short
         let mut short_fields = HashMap::new();
@@ -357,7 +345,7 @@ mod tests {
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Hi".into()))),
         );
         let short_err =
-            validate_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
+            validate_publish_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
         assert!(short_err.iter().any(|e| matches!(e, DomainError::InvalidFieldValue { reason, .. } if reason.contains("below minimum"))));
 
         // Invalid: pattern mismatch
@@ -367,7 +355,7 @@ mod tests {
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("hello".into()))),
         );
         let pattern_err =
-            validate_content(&doc_type, &draft_content(regex_fields), &config).unwrap_err();
+            validate_publish_content(&doc_type, &draft_content(regex_fields), &config).unwrap_err();
         assert!(pattern_err.iter().any(|e| matches!(e, DomainError::InvalidFieldValue { reason, .. } if reason.contains("does not match pattern"))));
     }
 
@@ -402,7 +390,7 @@ mod tests {
                 Decimal::new(2500, 2),
             ))),
         );
-        assert!(validate_content(&doc_type, &draft_content(valid_fields), &config).is_ok());
+        assert!(validate_publish_content(&doc_type, &draft_content(valid_fields), &config).is_ok());
 
         // Out of range values
         let mut invalid_fields = HashMap::new();
@@ -417,7 +405,7 @@ mod tests {
             ))), // 5.00
         );
         let errors =
-            validate_content(&doc_type, &draft_content(invalid_fields), &config).unwrap_err();
+            validate_publish_content(&doc_type, &draft_content(invalid_fields), &config).unwrap_err();
         assert_eq!(errors.len(), 2);
     }
 
@@ -439,7 +427,7 @@ mod tests {
             desc_attr.clone(),
             ContentValue::LocalizedText(valid_locales),
         );
-        assert!(validate_content(&doc_type, &draft_content(fields), &config).is_ok());
+        assert!(validate_publish_content(&doc_type, &draft_content(fields), &config).is_ok());
 
         // Unknown locale error
         let mut with_de = HashMap::new();
@@ -447,7 +435,7 @@ mod tests {
         let mut de_fields = HashMap::new();
         de_fields.insert(desc_attr.clone(), ContentValue::LocalizedText(with_de));
         let de_errors =
-            validate_content(&doc_type, &draft_content(de_fields), &config).unwrap_err();
+            validate_publish_content(&doc_type, &draft_content(de_fields), &config).unwrap_err();
         assert!(matches!(&de_errors[0], DomainError::UnknownLocale(loc) if *loc == de));
 
         // Constraint violation on a specific locale
@@ -456,7 +444,7 @@ mod tests {
         let mut short_fields = HashMap::new();
         short_fields.insert(desc_attr, ContentValue::LocalizedText(short_locale));
         let constraint_err =
-            validate_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
+            validate_publish_content(&doc_type, &draft_content(short_fields), &config).unwrap_err();
         assert!(matches!(
             &constraint_err[0],
             DomainError::InvalidFieldValue { reason, .. } if reason.contains("locale 'en'")
@@ -480,7 +468,7 @@ mod tests {
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(100))),
         );
 
-        let errors = validate_content(&doc_type, &draft_content(fields), &config).unwrap_err();
+        let errors = validate_publish_content(&doc_type, &draft_content(fields), &config).unwrap_err();
         assert_eq!(errors.len(), 1);
         assert!(matches!(
             &errors[0],

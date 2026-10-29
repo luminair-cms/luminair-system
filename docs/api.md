@@ -89,7 +89,7 @@ Conflict errors occur when the requested command is valid in isolation but confl
 | `already_published` | Calling `publish` on a clean `Published` document that has no pending working draft edits (`DS-17`). | `{"document_id": UUID}` | Do not re-publish. The document is already live with identical content. |
 | `draft_and_publish_disabled` | Calling `publish` or `unpublish` on a document type with `draft_and_publish: false` (`DS-07`). | `{"document_type": string}` | Single-lifecycle documents are updated directly via `PUT /api/v1/content/:type/:id` without explicit publication. |
 | `version_mismatch` | Optimistic Concurrency Control failure: document version in database does not match `expected_version`. | `{"expected_version": int, "found_version": int}` | Re-fetch the latest document state (`GET ...?view=working`), resolve diffs, and retry. |
-| `single_type_already_exists` | Calling `create` on a `Singleton` document type when an instance already exists. | `{"document_type_id": string}` | Use `PUT` to update the existing singleton instance. |
+| `singleton_already_exists` | Calling `create` on a `Singleton` document type when an instance already exists. | `{"document_type_id": string}` | Use `PUT` to update the existing singleton instance. |
 | `access_request_already_active` | User submitted an access request while an active request is already pending. | `{"user_id": string}` | Await review of the existing pending request. |
 | `user_already_enrolled` | User submitted an access request but already has active roles in the system. | `{"user_id": string}` | Log in directly; user is already provisioned. |
 
@@ -195,7 +195,7 @@ export function getLocalizedErrorMessage(t: (key: string, opt?: any) => string, 
     "already_published": "This document is already published with no pending changes.",
     "draft_and_publish_disabled": "Document type '{{document_type}}' does not support the draft-and-publish workflow.",
     "version_mismatch": "The document was modified by another editor. Please refresh to load the latest changes.",
-    "single_type_already_exists": "An instance of this single-type document already exists.",
+    "singleton_already_exists": "An instance of this singleton document already exists.",
     "unauthorized": "You lack permission to perform this action.",
     "access_not_requested": "You do not have access to the studio yet. Please submit an access request.",
     "access_pending": "Your access request is currently under review by an administrator.",
@@ -212,7 +212,7 @@ export function getLocalizedErrorMessage(t: (key: string, opt?: any) => string, 
     "already_published": "Документ уже опубликован и не содержит ожидающих изменений.",
     "draft_and_publish_disabled": "Тип документа «{{document_type}}» не поддерживает черновики; изменения публикуются сразу.",
     "version_mismatch": "Документ был изменён другим редактором. Пожалуйста, обновите страницу.",
-    "single_type_already_exists": "Экземпляр этого документа уже создан (тип-одиночка).",
+    "singleton_already_exists": "Экземпляр этого документа уже создан (тип-одиночка / singleton).",
     "unauthorized": "У вас недостаточно прав для выполнения этого действия.",
     "access_not_requested": "У вас пока нет доступа к панели. Пожалуйста, отправьте заявку на доступ.",
     "access_pending": "Ваша заявка на доступ ожидает рассмотрения администратором.",

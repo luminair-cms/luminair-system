@@ -9,7 +9,7 @@ use domain::content::{
     DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
     DocumentSnapshot, DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader,
     SnapshotId, SnapshotReason, UnpublishDraftResolution, VersionView, extract_display_identity,
-    validate_content, validate_publish_content,
+    validate_draft_content, validate_publish_content,
 };
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentKind, DocumentType, DocumentTypeId, RelationType};
@@ -401,7 +401,7 @@ where
                 .await?
         {
             return Err(ApplicationError::Domain(
-                DomainError::SingleTypeAlreadyExists(cmd.document_type.clone()),
+                DomainError::SingletonAlreadyExists(cmd.document_type.clone()),
             ));
         }
 
@@ -409,8 +409,15 @@ where
             DocumentInstance::new(cmd.document_type.clone(), caller.actor.clone(), Utc::now());
         instance.replace_fields(cmd.fields);
 
-        // Schema constraint and required field validation
-        if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
+        // Schema constraint and required field validation:
+        // Draft-and-publish workflows use lenient draft validation (required fields optional until publish);
+        // Single-lifecycle types immediately publish and require strict validation.
+        let validation_res = if doc_type.options.draft_and_publish {
+            validate_draft_content(doc_type, &instance.content, &self.context.config)
+        } else {
+            validate_publish_content(doc_type, &instance.content, &self.context.config)
+        };
+        if let Err(errs) = validation_res {
             let params = errs
                 .iter()
                 .map(crate::errors::InvalidParam::from_domain_error)
@@ -518,8 +525,15 @@ where
             instance.set_field(attr, val);
         }
 
-        // Revalidate against schema constraints
-        if let Err(errs) = validate_content(doc_type, &instance.content, &self.context.config) {
+        // Revalidate against schema constraints:
+        // Draft-and-publish workflows use lenient draft validation;
+        // Single-lifecycle types immediately publish and require strict validation.
+        let validation_res = if doc_type.options.draft_and_publish {
+            validate_draft_content(doc_type, &instance.content, &self.context.config)
+        } else {
+            validate_publish_content(doc_type, &instance.content, &self.context.config)
+        };
+        if let Err(errs) = validation_res {
             let params = errs
                 .iter()
                 .map(crate::errors::InvalidParam::from_domain_error)
@@ -1204,14 +1218,14 @@ mod tests {
             .await
             .expect("first create succeeds");
 
-        // Second creation must fail with SingleTypeAlreadyExists
+        // Second creation must fail with SingletonAlreadyExists
         let second = service
             .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
             .await;
 
         assert!(matches!(
             second,
-            Err(ApplicationError::Domain(DomainError::SingleTypeAlreadyExists(id))) if id == doc_type.id
+            Err(ApplicationError::Domain(DomainError::SingletonAlreadyExists(id))) if id == doc_type.id
         ));
     }
 

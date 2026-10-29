@@ -19,7 +19,7 @@ luminair-service-aws-dsql/
 
 - **Contains**: entities, value objects, aggregates, domain events, repository *traits* (ports), domain errors, structured into 5 DDD subdomains:
   - `auth`: Identity & Access Management
-  - `schema`: Schema Metadata & Type System. Loaded in `infrastructure` from json and available as &'static
+  - `schema`: Schema Metadata & Type System (`DocumentKind::Singleton` represents the widely used singleton / single-instance concept, corresponding to Strapi's "SingleType"; `DocumentKind::Collection` represents collection types). Loaded in `infrastructure` from json and available as &'static
   - `content`: Content Lifecycle & Storage
   - `system`: System Configuration & Localization. Loaded in `infrastructure` from json and available as &'static
   - `common`: Ubiquitous Value Objects
@@ -57,7 +57,7 @@ No reverse dependencies. Domain traits (repository ports) are defined in `domain
 | Command / Query | `application` — separate structs, no mixing |
 | Domain Event | `domain` — raised by aggregates, handled in `application` |
 | Error types | Each crate has its own; `infrastructure` maps all to HTTP status codes (see below) |
-| Schema-driven | Content types defined via JSON schema; `domain` owns the schema entity |
+| Schema-driven | Content types defined via JSON schema; `domain` owns the schema entity (`DocumentKind::Singleton` models the singleton concept widely used across CMS architectures, corresponding to Strapi's SingleType concept, alongside `DocumentKind::Collection`) |
 | Asymmetric Hybrid Persistence | `domain` (ports) / `infrastructure` (impl) — see [`ADR-004`](./adr/ADR-004-draft-and-publish-table-pattern.md) |
 
 ## Content Persistence Pattern (ADR-004)
@@ -100,9 +100,7 @@ In alignment with Hexagonal Architecture and DDD boundaries:
 
 1. **`domain`**: Defines `DomainError` capturing business rule and aggregate invariant violations. Strictly free of I/O, framework dependencies, or transport concepts.
 2. **`application`**: Defines `ApplicationError` and machine-readable enum codes (e.g. `ConflictCode`). Transport-agnostic; communicates *why* a use case failed along with contextual metadata (`details: Option<Value>`).
-3. **`infrastructure` (Driving Adapter)**: The HTTP web layer (Axum) is the sole owner of transport concerns. It maps `ApplicationError` and `DomainError` into [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) Problem Details (`application/problem+json`), assigns HTTP status codes (`StatusCode::CONFLICT`, `NOT_FOUND`, etc.), and implements `axum::response::IntoResponse`.
-
-*(Note: During early milestones, `ProblemDetails` and HTTP status mapping temporarily reside in `application::errors` as a transitional bridge; they will be moved to `infrastructure::http::errors` when the Axum routing adapter is implemented).*
+3. **`infrastructure` (Driving Adapter)**: The HTTP web layer (Axum) in `infrastructure::api::errors` is the sole owner of transport concerns. It maps `ApplicationError` and `DomainError` into [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) Problem Details (`application/problem+json`), assigns HTTP status codes (`StatusCode::CONFLICT`, `NOT_FOUND`, etc.), and implements `axum::response::IntoResponse`. (Transitional bridges in `application` have been eliminated).
 
 ## UI Layer (Admin Studio)
 

@@ -23,8 +23,8 @@ pub enum ConflictCode {
     AlreadyPublished,
     /// Optimistic concurrency control failure: expected version did not match current version.
     VersionMismatch,
-    /// A single-type instance already exists for this document type.
-    SingleTypeAlreadyExists,
+    /// A singleton instance already exists for this document type.
+    SingletonAlreadyExists,
     /// A generic conflict condition occurred.
     GenericConflict,
 }
@@ -143,7 +143,7 @@ impl ConflictCode {
             Self::DraftAndPublishDisabled => "draft_and_publish_disabled",
             Self::AlreadyPublished => "already_published",
             Self::VersionMismatch => "version_mismatch",
-            Self::SingleTypeAlreadyExists => "single_type_already_exists",
+            Self::SingletonAlreadyExists => "singleton_already_exists",
             Self::GenericConflict => "generic_conflict",
         }
     }
@@ -318,7 +318,7 @@ impl ApplicationError {
             Self::Domain(d) => match d {
                 DomainError::DocumentTypeNotFound(_) => "document_type_not_found",
                 DomainError::DocumentInstanceNotFound(_) => "document_instance_not_found",
-                DomainError::SingleTypeAlreadyExists(_) => "single_type_already_exists",
+                DomainError::SingletonAlreadyExists(_) => "singleton_already_exists",
                 DomainError::InvalidFieldValue { .. } => "invalid_field_value",
                 DomainError::UnknownLocale(_) => "unknown_locale",
                 DomainError::UnknownAttribute(_) => "unknown_attribute",
@@ -352,7 +352,7 @@ impl ApplicationError {
                 DomainError::DocumentTypeNotFound(_)
                 | DomainError::DocumentInstanceNotFound(_)
                 | DomainError::AccessRequestNotFound(_) => 404,
-                DomainError::SingleTypeAlreadyExists(_)
+                DomainError::SingletonAlreadyExists(_)
                 | DomainError::AccessRequestAlreadyActive(_)
                 | DomainError::UserAlreadyEnrolled(_) => 409,
                 DomainError::Unauthorized(_) => 403,
