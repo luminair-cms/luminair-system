@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
 use domain::auth::Permission;
 use domain::content::{
     extract_display_identity, validate_draft_content, validate_publish_content, DocumentHeader,
@@ -16,8 +18,6 @@ use domain::schema::{
     AttributeId, DocumentKind, DocumentType, DocumentTypeId, RelationDefinition, RelationType,
 };
 use domain::system::SystemContext;
-use indexmap::IndexMap;
-use uuid::Uuid;
 
 use crate::commands::documents::{
     CreateDocumentCommand, DeleteDocumentCommand, DiscardDraftCommand, FindByIdCommand,
@@ -232,22 +232,6 @@ where
         Ok(enriched)
     }
 
-    /// Fetches relations and attaches them to a single instance if requested.
-    async fn enrich_single(
-        &self,
-        type_id: &DocumentTypeId,
-        populate: &[AttributeId],
-        instance: DocumentInstance,
-    ) -> Result<DocumentInstance, ApplicationError> {
-        if populate.is_empty() {
-            return Ok(instance);
-        }
-        let mut enriched = self.enrich(type_id, populate, vec![instance]).await?;
-        enriched.pop().ok_or_else(|| {
-            ApplicationError::Internal("enriched instance missing from batch result".into())
-        })
-    }
-
     /// Validates relational actions against schema registry invariants and applies them to the document instance.
     ///
     /// # Errors
@@ -259,343 +243,10 @@ where
         relations: HashMap<AttributeId, RelationAction>,
     ) -> Result<(), ApplicationError> {
         for (attr, action) in relations {
-            let rel = Self::validate_owning_relation(doc_type, &attr)?;
+            let rel = validate_owning_relation(doc_type, &attr)?;
             let is_has_one = rel.relation_type == RelationType::HasOne;
-            Self::apply_relation_action(instance, attr, action, is_has_one)?;
+            apply_relation_action(instance, attr, action, is_has_one)?;
         }
-        Ok(())
-    }
-
-    fn validate_owning_relation<'a>(
-        doc_type: &'a DocumentType,
-        attr: &AttributeId,
-    ) -> Result<&'a RelationDefinition, ApplicationError> {
-        let rel = doc_type.relations.get(attr).ok_or_else(|| {
-            ApplicationError::validation_single(
-                attr.to_string(),
-                format!(
-                    "relation attribute '{attr}' is not defined for document type '{}'",
-                    doc_type.id
-                ),
-                "unknown_attribute",
-            )
-        })?;
-
-        if !rel.relation_type.is_owning() {
-            return Err(ApplicationError::validation_single(
-                attr.to_string(),
-                format!(
-                    "relation attribute '{attr}' is an inverse-side relation; mutate from owner type '{:?}'",
-                    rel.relation_type
-                ),
-                "invalid_relation",
-            ));
-        }
-
-        Ok(rel)
-    }
-
-    fn apply_relation_action(
-        instance: &mut DocumentInstance,
-        attr: AttributeId,
-        action: RelationAction,
-        is_has_one: bool,
-    ) -> Result<(), ApplicationError> {
-        match action {
-            RelationAction::Set(target_ids) => {
-                Self::apply_set_relation(instance, attr, target_ids, is_has_one)
-            }
-            RelationAction::Connect(target_ids) => {
-                Self::apply_connect_relation(instance, &attr, target_ids, is_has_one)
-            }
-            RelationAction::Disconnect(target_ids) => {
-                instance.disconnect_relations(&attr, &target_ids);
-                Ok(())
-            }
-            RelationAction::Unset => {
-                instance.unset_relations(&attr);
-                Ok(())
-            }
-        }
-    }
-
-    fn apply_set_relation(
-        instance: &mut DocumentInstance,
-        attr: AttributeId,
-        target_ids: Vec<DocumentInstanceId>,
-        is_has_one: bool,
-    ) -> Result<(), ApplicationError> {
-        let unique: HashSet<_> = target_ids.iter().collect();
-        if is_has_one && unique.len() > 1 {
-            return Err(ApplicationError::validation_single(
-                attr.to_string(),
-                format!(
-                    "relation '{attr}' is HasOne but received {} target IDs",
-                    unique.len()
-                ),
-                "cardinality_violation",
-            ));
-        }
-        instance.set_relations(attr, target_ids);
-        Ok(())
-    }
-
-    fn apply_connect_relation(
-        instance: &mut DocumentInstance,
-        attr: &AttributeId,
-        target_ids: Vec<DocumentInstanceId>,
-        is_has_one: bool,
-    ) -> Result<(), ApplicationError> {
-        if is_has_one {
-            let mut unique: HashSet<_> = target_ids.iter().collect();
-            if let Some(existing) = instance.relations.get(attr) {
-                for r in existing {
-                    unique.insert(&r.target_instance_id);
-                }
-            }
-            if unique.len() > 1 {
-                return Err(ApplicationError::validation_single(
-                    attr.to_string(),
-                    format!("relation '{attr}' is HasOne and cannot have multiple targets connected"),
-                    "cardinality_violation",
-                ));
-            }
-        }
-        instance.connect_relations(attr, target_ids);
-        Ok(())
-    }
-
-    /// Captures the superseded snapshot for single-lifecycle (`draft_and_publish: false`) documents.
-    fn capture_superseded_single_lifecycle_snapshot(
-        doc_type: &DocumentType,
-        instance: &DocumentInstance,
-        actor: &domain::auth::ActorId,
-    ) -> Option<DocumentSnapshot> {
-        if doc_type.options.draft_and_publish {
-            return None;
-        }
-        capture_superseded_live_snapshot(Some(instance), actor.clone(), Utc::now())
-    }
-
-    /// Applies partial field updates to a document instance.
-    fn apply_field_updates(
-        instance: &mut DocumentInstance,
-        fields: HashMap<AttributeId, domain::content::ContentValue>,
-    ) {
-        for (attr, val) in fields {
-            instance.set_field(attr, val);
-        }
-    }
-
-    /// Validates publish eligibility invariants (draft_and_publish support, state, OCC).
-    fn validate_publish_eligibility(
-        doc_type: &DocumentType,
-        instance: &DocumentInstance,
-        expected_version: Option<u32>,
-    ) -> Result<(), ApplicationError> {
-        if !doc_type.options.draft_and_publish {
-            return Err(ApplicationError::draft_publish_disabled_conflict(
-                &doc_type.info.title,
-            ));
-        }
-
-        if matches!(
-            instance.content.publication_state,
-            PublicationState::Published { .. }
-        ) {
-            return Err(ApplicationError::already_published_conflict(instance.id));
-        }
-
-        if let Some(expected) = expected_version
-            && instance.audit.version != expected
-        {
-            return Err(ApplicationError::version_mismatch_conflict(
-                expected,
-                instance.audit.version,
-            ));
-        }
-
-        Ok(())
-    }
-
-    /// Validates unpublish eligibility invariants (draft_and_publish support, current state).
-    fn validate_unpublish_eligibility(
-        doc_type: &DocumentType,
-        instance: &DocumentInstance,
-    ) -> Result<(), ApplicationError> {
-        if !doc_type.options.draft_and_publish {
-            return Err(ApplicationError::draft_publish_disabled_conflict(
-                &doc_type.info.title,
-            ));
-        }
-
-        if matches!(
-            instance.content.publication_state,
-            PublicationState::Draft | PublicationState::Unpublished { .. }
-        ) {
-            return Err(ApplicationError::Domain(
-                DomainError::InvalidStateTransition {
-                    reason: "cannot unpublish a document that is not currently published"
-                        .to_string(),
-                },
-            ));
-        }
-
-        Ok(())
-    }
-
-    /// Validates content according to the document type's lifecycle mode (lenient draft vs strict publish).
-    fn validate_content_for_type(
-        &self,
-        doc_type: &DocumentType,
-        instance: &DocumentInstance,
-    ) -> Result<(), ApplicationError> {
-        let validation_res = if doc_type.options.draft_and_publish {
-            validate_draft_content(doc_type, &instance.content, &self.context.config)
-        } else {
-            validate_publish_content(doc_type, &instance.content, &self.context.config)
-        };
-
-        validation_res.map_err(|errs| {
-            let params = errs
-                .iter()
-                .map(crate::errors::InvalidParam::from_domain_error)
-                .collect();
-            ApplicationError::Validation(params)
-        })
-    }
-
-    /// Validates content strictly for publishing.
-    fn validate_content_for_publish(
-        &self,
-        doc_type: &DocumentType,
-        instance: &DocumentInstance,
-    ) -> Result<(), ApplicationError> {
-        validate_publish_content(doc_type, &instance.content, &self.context.config).map_err(
-            |errs| {
-                let params = errs
-                    .iter()
-                    .map(crate::errors::InvalidParam::from_domain_error)
-                    .collect();
-                ApplicationError::Validation(params)
-            },
-        )
-    }
-
-    /// Enforces singleton document kind guard: at most one document instance per singleton type.
-    async fn check_singleton_guard(&self, doc_type: &DocumentType) -> Result<(), ApplicationError> {
-        if doc_type.kind == DocumentKind::Singleton
-            && self.instance_repo.exists_for_type(&doc_type.id).await?
-        {
-            return Err(ApplicationError::Domain(
-                DomainError::SingletonAlreadyExists(doc_type.id.clone()),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Persists a freshly created document instance as draft or auto-published according to type options.
-    async fn persist_new_instance(
-        &self,
-        doc_type: &DocumentType,
-        instance: &mut DocumentInstance,
-        display_values: &IndexMap<AttributeId, String>,
-        display_title: &str,
-        actor: &domain::auth::ActorId,
-    ) -> Result<(), ApplicationError> {
-        if doc_type.options.draft_and_publish {
-            self.instance_repo
-                .save_draft(instance, display_values, display_title)
-                .await?;
-        } else {
-            let now = Utc::now();
-            let rev = instance.publish(actor.clone(), now)?;
-            self.instance_repo
-                .publish(instance, rev, display_values, display_title, None)
-                .await?;
-        }
-        Ok(())
-    }
-
-    /// Persists a restored document instance as draft or live published according to type options.
-    async fn persist_restored_instance(
-        &self,
-        doc_type: &DocumentType,
-        instance: &mut DocumentInstance,
-        display_values: &IndexMap<AttributeId, String>,
-        display_title: &str,
-        actor: &domain::auth::ActorId,
-        now: DateTime<Utc>,
-    ) -> Result<(), ApplicationError> {
-        if doc_type.options.draft_and_publish {
-            self.instance_repo
-                .save_draft(instance, display_values, display_title)
-                .await?;
-        } else {
-            let prev_published = self
-                .instance_repo
-                .find_by_id(&doc_type.id, instance.id, VersionView::Published)
-                .await?;
-            let prev_snapshot = capture_superseded_live_snapshot(
-                prev_published.as_ref(),
-                actor.clone(),
-                now,
-            );
-            let rev = instance.publish(actor.clone(), now)?;
-            self.instance_repo
-                .publish(
-                    instance,
-                    rev,
-                    display_values,
-                    display_title,
-                    prev_snapshot.as_ref(),
-                )
-                .await?;
-        }
-        Ok(())
-    }
-
-    /// Enriches admin headers with relational display titles (Phase 2 batch query).
-    async fn enrich_admin_headers_relational_display(
-        &self,
-        doc_type: &DocumentType,
-        items: &mut [DocumentHeader],
-    ) -> Result<(), ApplicationError> {
-        let Some(rel_def) = doc_type.relational_display_field() else {
-            return Ok(());
-        };
-
-        let target_ids: Vec<DocumentInstanceId> = items
-            .iter()
-            .filter_map(|header| {
-                header
-                    .relational_display_target
-                    .as_ref()
-                    .filter(|(attr, _)| attr == &rel_def.id)
-                    .map(|(_, target_id)| *target_id)
-            })
-            .collect();
-
-        if target_ids.is_empty() {
-            return Ok(());
-        }
-
-        let titles = self
-            .instance_repo
-            .find_display_titles_by_ids(&rel_def.target, &target_ids)
-            .await?;
-
-        let effective_fields = doc_type.effective_display_fields();
-
-        for header in items {
-            if let Some((attr, target_id)) = &header.relational_display_target
-                && attr == &rel_def.id
-                && let Some(target_title) = titles.get(target_id)
-            {
-                header.enrich_relational_display(&effective_fields, &rel_def.id, target_title);
-            }
-        }
-
         Ok(())
     }
 }
@@ -689,21 +340,8 @@ where
         self.validate_content_for_type(doc_type, &instance)?;
         self.validate_and_apply_relations(doc_type, &mut instance, cmd.relations)?;
 
-        let (display_values, display_title) = extract_display_identity(
-            doc_type,
-            instance.id,
-            instance.fields(),
-            &self.context.config.default_locale,
-        );
-
-        self.persist_new_instance(
-            doc_type,
-            &mut instance,
-            &display_values,
-            &display_title,
-            &caller.actor,
-        )
-        .await?;
+        self.persist_new_instance(doc_type, &mut instance, &caller.actor)
+            .await?;
 
         self.enrich_single(cmd.document_type, &cmd.populate, instance)
             .await
@@ -714,26 +352,14 @@ where
         caller: &CallerContext,
         cmd: UpdateDocumentCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
-        let mut instance = self
-            .instance_repo
-            .find_by_id(
+        let (doc_type, mut instance) = self
+            .load_working_instance_with_permission(
+                caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                VersionView::Working,
+                |tid| Permission::UpdateDocument(Some(tid)),
             )
-            .await?
-            .ok_or(ApplicationError::Domain(
-                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
-            ))?;
-
-        caller.check_permission(
-            &Permission::UpdateDocument(Some(instance.document_type_id.clone())),
-            Some(&instance),
-        )?;
-
-        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
+            .await?;
 
         if let Some(expected) = cmd.expected_version
             && instance.audit.version != expected
@@ -744,41 +370,22 @@ where
             ));
         }
 
-        // Validate and apply schema mutations
-        let prev_published_snapshot = Self::capture_superseded_single_lifecycle_snapshot(
+        let prev_published_snapshot = capture_superseded_single_lifecycle_snapshot(
             doc_type,
             &instance,
             &caller.actor,
         );
-        Self::apply_field_updates(&mut instance, cmd.fields);
+        apply_field_updates(&mut instance, cmd.fields);
         self.validate_content_for_type(doc_type, &instance)?;
         self.validate_and_apply_relations(doc_type, &mut instance, cmd.relations)?;
 
-        let (display_values, display_title) = extract_display_identity(
+        self.persist_updated_instance(
             doc_type,
-            instance.id,
-            instance.fields(),
-            &self.context.config.default_locale,
-        );
-
-        if doc_type.options.draft_and_publish {
-            instance.edit_draft(caller.actor.clone(), Utc::now());
-            self.instance_repo
-                .save_draft(&instance, &display_values, &display_title)
-                .await?;
-        } else {
-            let now = Utc::now();
-            let rev = instance.publish(caller.actor.clone(), now)?;
-            self.instance_repo
-                .publish(
-                    &instance,
-                    rev,
-                    &display_values,
-                    &display_title,
-                    prev_published_snapshot.as_ref(),
-                )
-                .await?;
-        }
+            &mut instance,
+            &caller.actor,
+            prev_published_snapshot.as_ref(),
+        )
+        .await?;
 
         self.enrich_single(cmd.document_type, &cmd.populate, instance)
             .await
@@ -789,22 +396,14 @@ where
         caller: &CallerContext,
         cmd: DeleteDocumentCommand,
     ) -> Result<(), ApplicationError> {
-        let instance = self
-            .instance_repo
-            .find_by_id(
+        let (_doc_type, _instance) = self
+            .load_working_instance_with_permission(
+                caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                VersionView::Working,
+                |tid| Permission::DeleteDocument(Some(tid)),
             )
-            .await?
-            .ok_or(ApplicationError::Domain(
-                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
-            ))?;
-
-        caller.check_permission(
-            &Permission::DeleteDocument(Some(instance.document_type_id.clone())),
-            Some(&instance),
-        )?;
+            .await?;
 
         self.instance_repo
             .delete(cmd.document_type, cmd.document_instance_id)
@@ -817,28 +416,16 @@ where
         caller: &CallerContext,
         cmd: PublishDocumentCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
-        let mut instance = self
-            .instance_repo
-            .find_by_id(
+        let (doc_type, mut instance) = self
+            .load_working_instance_with_permission(
+                caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                VersionView::Working,
+                |tid| Permission::PublishDocument(Some(tid)),
             )
-            .await?
-            .ok_or(ApplicationError::Domain(
-                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
-            ))?;
+            .await?;
 
-        caller.check_permission(
-            &Permission::PublishDocument(Some(instance.document_type_id.clone())),
-            Some(&instance),
-        )?;
-
-        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
-
-        Self::validate_publish_eligibility(doc_type, &instance, cmd.expected_version)?;
+        validate_publish_eligibility(doc_type, &instance, cmd.expected_version)?;
         self.validate_content_for_publish(doc_type, &instance)?;
 
         let now = Utc::now();
@@ -858,7 +445,6 @@ where
         );
 
         let rev = instance.publish(caller.actor.clone(), now)?;
-
         let (display_values, display_title) = extract_display_identity(
             doc_type,
             instance.id,
@@ -884,28 +470,16 @@ where
         caller: &CallerContext,
         cmd: UnpublishDocumentCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
-        let mut instance = self
-            .instance_repo
-            .find_by_id(
+        let (doc_type, mut instance) = self
+            .load_working_instance_with_permission(
+                caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                VersionView::Working,
+                |tid| Permission::PublishDocument(Some(tid)),
             )
-            .await?
-            .ok_or(ApplicationError::Domain(
-                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
-            ))?;
+            .await?;
 
-        caller.check_permission(
-            &Permission::PublishDocument(Some(instance.document_type_id.clone())),
-            Some(&instance),
-        )?;
-
-        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
-
-        Self::validate_unpublish_eligibility(doc_type, &instance)?;
+        validate_unpublish_eligibility(doc_type, &instance)?;
 
         let live_published = self
             .instance_repo
@@ -948,26 +522,14 @@ where
         caller: &CallerContext,
         cmd: DiscardDraftCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
-        self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
-
-        let mut instance = self
-            .instance_repo
-            .find_by_id(
+        let (_doc_type, mut instance) = self
+            .load_working_instance_with_permission(
+                caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                VersionView::Working,
+                |tid| Permission::UpdateDocument(Some(tid)),
             )
-            .await?
-            .ok_or(ApplicationError::Domain(
-                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
-            ))?;
-
-        caller.check_permission(
-            &Permission::UpdateDocument(Some(instance.document_type_id.clone())),
-            Some(&instance),
-        )?;
+            .await?;
 
         instance.discard_draft()?;
 
@@ -984,26 +546,14 @@ where
         caller: &CallerContext,
         cmd: RestoreSnapshotCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
-        let mut instance = self
-            .instance_repo
-            .find_by_id(
+        let (doc_type, mut instance) = self
+            .load_working_instance_with_permission(
+                caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                VersionView::Working,
+                |tid| Permission::UpdateDocument(Some(tid)),
             )
-            .await?
-            .ok_or(ApplicationError::Domain(
-                DomainError::DocumentInstanceNotFound(cmd.document_instance_id),
-            ))?;
-
-        caller.check_permission(
-            &Permission::UpdateDocument(Some(instance.document_type_id.clone())),
-            Some(&instance),
-        )?;
-
-        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
+            .await?;
 
         // Draft guard: fresh drafts that have never been published cannot restore snapshots (LC-13)
         if matches!(instance.content.publication_state, PublicationState::Draft) {
@@ -1024,28 +574,11 @@ where
             })?;
 
         let now = Utc::now();
-
-        // If in Modified state, require explicit confirmation before overwriting pending working draft edits
         check_restore_conflict(&instance, &cmd)?;
-
         instance.restore_snapshot(&snapshot, caller.actor.clone(), now)?;
 
-        let (display_values, display_title) = extract_display_identity(
-            doc_type,
-            instance.id,
-            instance.fields(),
-            &self.context.config.default_locale,
-        );
-
-        self.persist_restored_instance(
-            doc_type,
-            &mut instance,
-            &display_values,
-            &display_title,
-            &caller.actor,
-            now,
-        )
-        .await?;
+        self.persist_restored_instance(doc_type, &mut instance, &caller.actor, now)
+            .await?;
 
         Ok(instance)
     }
@@ -1121,6 +654,422 @@ where
     }
 }
 
+impl<R, S> DocumentsServiceImpl<R, S>
+where
+    R: DocumentInstanceRepository + 'static,
+    S: DocumentSnapshotRepository + 'static,
+{
+    async fn load_working_instance_with_permission(
+        &self,
+        caller: &CallerContext,
+        type_id: &DocumentTypeId,
+        instance_id: DocumentInstanceId,
+        permission: impl FnOnce(DocumentTypeId) -> Permission,
+    ) -> Result<(&'static DocumentType, DocumentInstance), ApplicationError> {
+        let instance = self
+            .instance_repo
+            .find_by_id(type_id, instance_id, VersionView::Working)
+            .await?
+            .ok_or(ApplicationError::Domain(
+                DomainError::DocumentInstanceNotFound(instance_id),
+            ))?;
+
+        caller.check_permission(
+            &permission(instance.document_type_id.clone()),
+            Some(&instance),
+        )?;
+
+        let doc_type = self.context.find_type(type_id).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(type_id.clone()))
+        })?;
+
+        Ok((doc_type, instance))
+    }
+
+    async fn check_singleton_guard(&self, doc_type: &DocumentType) -> Result<(), ApplicationError> {
+        if doc_type.kind == DocumentKind::Singleton
+            && self.instance_repo.exists_for_type(&doc_type.id).await?
+        {
+            return Err(ApplicationError::Domain(
+                DomainError::SingletonAlreadyExists(doc_type.id.clone()),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn persist_new_instance(
+        &self,
+        doc_type: &DocumentType,
+        instance: &mut DocumentInstance,
+        actor: &domain::auth::ActorId,
+    ) -> Result<(), ApplicationError> {
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        if doc_type.options.draft_and_publish {
+            self.instance_repo
+                .save_draft(instance, &display_values, &display_title)
+                .await?;
+        } else {
+            let now = Utc::now();
+            let rev = instance.publish(actor.clone(), now)?;
+            self.instance_repo
+                .publish(instance, rev, &display_values, &display_title, None)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn persist_updated_instance(
+        &self,
+        doc_type: &DocumentType,
+        instance: &mut DocumentInstance,
+        actor: &domain::auth::ActorId,
+        prev_published_snapshot: Option<&DocumentSnapshot>,
+    ) -> Result<(), ApplicationError> {
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        if doc_type.options.draft_and_publish {
+            instance.edit_draft(actor.clone(), Utc::now());
+            self.instance_repo
+                .save_draft(instance, &display_values, &display_title)
+                .await?;
+        } else {
+            let now = Utc::now();
+            let rev = instance.publish(actor.clone(), now)?;
+            self.instance_repo
+                .publish(
+                    instance,
+                    rev,
+                    &display_values,
+                    &display_title,
+                    prev_published_snapshot,
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn persist_restored_instance(
+        &self,
+        doc_type: &DocumentType,
+        instance: &mut DocumentInstance,
+        actor: &domain::auth::ActorId,
+        now: DateTime<Utc>,
+    ) -> Result<(), ApplicationError> {
+        let (display_values, display_title) = extract_display_identity(
+            doc_type,
+            instance.id,
+            instance.fields(),
+            &self.context.config.default_locale,
+        );
+
+        if doc_type.options.draft_and_publish {
+            self.instance_repo
+                .save_draft(instance, &display_values, &display_title)
+                .await?;
+        } else {
+            let prev_published = self
+                .instance_repo
+                .find_by_id(&doc_type.id, instance.id, VersionView::Published)
+                .await?;
+            let prev_snapshot = capture_superseded_live_snapshot(
+                prev_published.as_ref(),
+                actor.clone(),
+                now,
+            );
+            let rev = instance.publish(actor.clone(), now)?;
+            self.instance_repo
+                .publish(
+                    instance,
+                    rev,
+                    &display_values,
+                    &display_title,
+                    prev_snapshot.as_ref(),
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn enrich_single(
+        &self,
+        type_id: &DocumentTypeId,
+        populate: &[AttributeId],
+        instance: DocumentInstance,
+    ) -> Result<DocumentInstance, ApplicationError> {
+        if populate.is_empty() {
+            return Ok(instance);
+        }
+        let mut enriched = self.enrich(type_id, populate, vec![instance]).await?;
+        enriched.pop().ok_or_else(|| {
+            ApplicationError::Internal("enriched instance missing from batch result".into())
+        })
+    }
+
+    async fn enrich_admin_headers_relational_display(
+        &self,
+        doc_type: &DocumentType,
+        items: &mut [DocumentHeader],
+    ) -> Result<(), ApplicationError> {
+        let Some(rel_def) = doc_type.relational_display_field() else {
+            return Ok(());
+        };
+
+        let target_ids: Vec<DocumentInstanceId> = items
+            .iter()
+            .filter_map(|header| {
+                header
+                    .relational_display_target
+                    .as_ref()
+                    .filter(|(attr, _)| attr == &rel_def.id)
+                    .map(|(_, target_id)| *target_id)
+            })
+            .collect();
+
+        if target_ids.is_empty() {
+            return Ok(());
+        }
+
+        let titles = self
+            .instance_repo
+            .find_display_titles_by_ids(&rel_def.target, &target_ids)
+            .await?;
+
+        let effective_fields = doc_type.effective_display_fields();
+
+        for header in items {
+            if let Some((attr, target_id)) = &header.relational_display_target
+                && attr == &rel_def.id
+                && let Some(target_title) = titles.get(target_id)
+            {
+                header.enrich_relational_display(&effective_fields, &rel_def.id, target_title);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_content_for_type(
+        &self,
+        doc_type: &DocumentType,
+        instance: &DocumentInstance,
+    ) -> Result<(), ApplicationError> {
+        let validation_res = if doc_type.options.draft_and_publish {
+            validate_draft_content(doc_type, &instance.content, &self.context.config)
+        } else {
+            validate_publish_content(doc_type, &instance.content, &self.context.config)
+        };
+
+        validation_res.map_err(|errs| {
+            let params = errs
+                .iter()
+                .map(crate::errors::InvalidParam::from_domain_error)
+                .collect();
+            ApplicationError::Validation(params)
+        })
+    }
+
+    fn validate_content_for_publish(
+        &self,
+        doc_type: &DocumentType,
+        instance: &DocumentInstance,
+    ) -> Result<(), ApplicationError> {
+        validate_publish_content(doc_type, &instance.content, &self.context.config).map_err(
+            |errs| {
+                let params = errs
+                    .iter()
+                    .map(crate::errors::InvalidParam::from_domain_error)
+                    .collect();
+                ApplicationError::Validation(params)
+            },
+        )
+    }
+}
+
+fn validate_owning_relation<'a>(
+    doc_type: &'a DocumentType,
+    attr: &AttributeId,
+) -> Result<&'a RelationDefinition, ApplicationError> {
+    let rel = doc_type.relations.get(attr).ok_or_else(|| {
+        ApplicationError::validation_single(
+            attr.to_string(),
+            format!(
+                "relation attribute '{attr}' is not defined for document type '{}'",
+                doc_type.id
+            ),
+            "unknown_attribute",
+        )
+    })?;
+
+    if !rel.relation_type.is_owning() {
+        return Err(ApplicationError::validation_single(
+            attr.to_string(),
+            format!(
+                "relation attribute '{attr}' is an inverse-side relation; mutate from owner type '{:?}'",
+                rel.relation_type
+            ),
+            "invalid_relation",
+        ));
+    }
+
+    Ok(rel)
+}
+
+fn apply_relation_action(
+    instance: &mut DocumentInstance,
+    attr: AttributeId,
+    action: RelationAction,
+    is_has_one: bool,
+) -> Result<(), ApplicationError> {
+    match action {
+        RelationAction::Set(target_ids) => {
+            apply_set_relation(instance, attr, target_ids, is_has_one)
+        }
+        RelationAction::Connect(target_ids) => {
+            apply_connect_relation(instance, &attr, target_ids, is_has_one)
+        }
+        RelationAction::Disconnect(target_ids) => {
+            instance.disconnect_relations(&attr, &target_ids);
+            Ok(())
+        }
+        RelationAction::Unset => {
+            instance.unset_relations(&attr);
+            Ok(())
+        }
+    }
+}
+
+fn apply_set_relation(
+    instance: &mut DocumentInstance,
+    attr: AttributeId,
+    target_ids: Vec<DocumentInstanceId>,
+    is_has_one: bool,
+) -> Result<(), ApplicationError> {
+    let unique: HashSet<_> = target_ids.iter().collect();
+    if is_has_one && unique.len() > 1 {
+        return Err(ApplicationError::validation_single(
+            attr.to_string(),
+            format!(
+                "relation '{attr}' is HasOne but received {} target IDs",
+                unique.len()
+            ),
+            "cardinality_violation",
+        ));
+    }
+    instance.set_relations(attr, target_ids);
+    Ok(())
+}
+
+fn apply_connect_relation(
+    instance: &mut DocumentInstance,
+    attr: &AttributeId,
+    target_ids: Vec<DocumentInstanceId>,
+    is_has_one: bool,
+) -> Result<(), ApplicationError> {
+    if is_has_one {
+        let mut unique: HashSet<_> = target_ids.iter().collect();
+        if let Some(existing) = instance.relations.get(attr) {
+            for r in existing {
+                unique.insert(&r.target_instance_id);
+            }
+        }
+        if unique.len() > 1 {
+            return Err(ApplicationError::validation_single(
+                attr.to_string(),
+                format!("relation '{attr}' is HasOne and cannot have multiple targets connected"),
+                "cardinality_violation",
+            ));
+        }
+    }
+    instance.connect_relations(attr, target_ids);
+    Ok(())
+}
+
+fn apply_field_updates(
+    instance: &mut DocumentInstance,
+    fields: HashMap<AttributeId, domain::content::ContentValue>,
+) {
+    for (attr, val) in fields {
+        instance.set_field(attr, val);
+    }
+}
+
+fn validate_publish_eligibility(
+    doc_type: &DocumentType,
+    instance: &DocumentInstance,
+    expected_version: Option<u32>,
+) -> Result<(), ApplicationError> {
+    if !doc_type.options.draft_and_publish {
+        return Err(ApplicationError::draft_publish_disabled_conflict(
+            &doc_type.info.title,
+        ));
+    }
+
+    if matches!(
+        instance.content.publication_state,
+        PublicationState::Published { .. }
+    ) {
+        return Err(ApplicationError::already_published_conflict(instance.id));
+    }
+
+    if let Some(expected) = expected_version
+        && instance.audit.version != expected
+    {
+        return Err(ApplicationError::version_mismatch_conflict(
+            expected,
+            instance.audit.version,
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_unpublish_eligibility(
+    doc_type: &DocumentType,
+    instance: &DocumentInstance,
+) -> Result<(), ApplicationError> {
+    if !doc_type.options.draft_and_publish {
+        return Err(ApplicationError::draft_publish_disabled_conflict(
+            &doc_type.info.title,
+        ));
+    }
+
+    if matches!(
+        instance.content.publication_state,
+        PublicationState::Draft | PublicationState::Unpublished { .. }
+    ) {
+        return Err(ApplicationError::Domain(
+            DomainError::InvalidStateTransition {
+                reason: "cannot unpublish a document that is not currently published"
+                    .to_string(),
+            },
+        ));
+    }
+
+    Ok(())
+}
+
+fn capture_superseded_single_lifecycle_snapshot(
+    doc_type: &DocumentType,
+    instance: &DocumentInstance,
+    actor: &domain::auth::ActorId,
+) -> Option<DocumentSnapshot> {
+    if doc_type.options.draft_and_publish {
+        return None;
+    }
+    capture_superseded_live_snapshot(Some(instance), actor.clone(), Utc::now())
+}
+
 fn check_restore_conflict(
     instance: &DocumentInstance,
     cmd: &RestoreSnapshotCommand,
@@ -1141,26 +1090,6 @@ fn check_restore_conflict(
         ));
     }
     Ok(())
-}
-
-fn document_snapshot_from_instance(
-    instance: &DocumentInstance,
-    revision: u32,
-    actor: domain::auth::ActorId,
-    reason: SnapshotReason,
-    now: DateTime<Utc>,
-) -> DocumentSnapshot {
-    DocumentSnapshot {
-        id: SnapshotId::new(Uuid::now_v7()),
-        document_type_id: instance.document_type_id.clone(),
-        document_id: instance.id,
-        revision,
-        fields: instance.fields().clone(),
-        relations: instance.relations.clone(),
-        created_at: now,
-        created_by: actor,
-        reason,
-    }
 }
 
 fn capture_superseded_live_snapshot(
@@ -1197,6 +1126,26 @@ fn build_unpublish_snapshot(
         _ => 0,
     };
     document_snapshot_from_instance(instance, rev, actor, SnapshotReason::Unpublish, now)
+}
+
+fn document_snapshot_from_instance(
+    instance: &DocumentInstance,
+    revision: u32,
+    actor: domain::auth::ActorId,
+    reason: SnapshotReason,
+    now: DateTime<Utc>,
+) -> DocumentSnapshot {
+    DocumentSnapshot {
+        id: SnapshotId::new(Uuid::now_v7()),
+        document_type_id: instance.document_type_id.clone(),
+        document_id: instance.id,
+        revision,
+        fields: instance.fields().clone(),
+        relations: instance.relations.clone(),
+        created_at: now,
+        created_by: actor,
+        reason,
+    }
 }
 
 #[cfg(test)]
