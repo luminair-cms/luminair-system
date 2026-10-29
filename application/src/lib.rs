@@ -11,13 +11,14 @@ pub mod test_support;
 pub use commands::{
     ApproveAccessRequestCommand, CreateDocumentCommand, DeleteDocumentCommand, DiscardDraftCommand,
     FindByIdCommand, FindDocumentsCommand, GetSnapshotCommand, ListAdminHeadersCommand,
-    ListSnapshotsCommand, PublishDocumentCommand, RejectAccessRequestCommand, RelationAction,
-    RestoreSnapshotCommand, SubmitAccessRequestCommand, UnpublishDocumentCommand,
-    UpdateDocumentCommand, VersionView,
+    ListSnapshotsCommand, ListUsersCommand, PublishDocumentCommand, RejectAccessRequestCommand,
+    RelationAction, RestoreSnapshotCommand, SubmitAccessRequestCommand, SyncProfileCommand,
+    UnpublishDocumentCommand, UpdateDocumentCommand, VersionView,
 };
 pub use context::*;
 pub use errors::*;
 pub use services::{
     AccessRequestsService, AccessRequestsServiceImpl, DocumentsService, DocumentsServiceImpl,
     SchemaService, SchemaServiceImpl, SystemConfigService, SystemConfigServiceImpl,
+    UserDirectoryService, UserDirectoryServiceImpl,
 };
