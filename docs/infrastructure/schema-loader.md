@@ -213,6 +213,7 @@ Using an **untagged Serde enum** cleanly separates them without synthetic discri
 
 ```rust
 use std::collections::HashSet;
+use domain::schema::{DocumentKind, RelationType};
 use indexmap::IndexMap;
 use serde::Deserialize;
 
@@ -222,18 +223,10 @@ use serde::Deserialize;
 #[serde(rename_all = "camelCase")]
 pub struct DocumentRecord<'a> {
     #[serde(alias = "type")]
-    pub kind: DocumentKindDto,
+    pub kind: DocumentKind,
     pub info: DocumentInfoRecord<'a>,
     pub options: Option<DocumentOptionsRecord>,
     pub attributes: IndexMap<&'a str, AttributeRecord<'a>>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DocumentKindDto {
-    Collection,
-    #[serde(alias = "singleType")]
-    Singleton,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -263,8 +256,8 @@ pub struct DocumentOptionsRecord {
 pub enum AttributeRecord<'a> {
     /// Relational association targeting another document type.
     Relation {
-        #[serde(alias = "type")]
-        relation_type: RelationTypeDto,
+        #[serde(alias = "relation")]
+        relation_type: RelationType,
         target: &'a str,
     },
     /// Typed scalar field with validation constraints.
@@ -297,16 +290,6 @@ pub enum FieldTypeDto<'a> {
 pub struct DecimalBoundsDto {
     pub precision: u8,
     pub scale: u8,
-}
-
-/// Relation cardinality and direction matching domain `RelationType`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RelationTypeDto {
-    HasOne,
-    HasMany,
-    BelongsToOne,
-    BelongsToMany,
 }
 
 /// Permissive constraint DTO supporting standard and alias keys.

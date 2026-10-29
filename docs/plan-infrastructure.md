@@ -47,8 +47,8 @@ flowchart TD
 - [x] **Step 1.1: Zero-Copy Borrowed DTOs (`infrastructure/src/schema_loader/dto.rs`)**
   - Borrowed Serde records using `#[serde(bound = "'de: 'a")]` and `&'a str`.
   - `AttributeRecord<'a>` untagged enum with `Field` (`#[serde(alias = "type")] field_type`) and `Relation` (`#[serde(alias = "relation")] relation_type`, `target`) variants.
-  - `DocumentKindDto` supporting `"collection"`, `"singleton"`, and `"singleType"` aliases.
-  - `FieldTypeDto<'a>`, `DecimalBoundsDto`, `RelationTypeDto`, `ConstraintRecord<'a>`, `DocumentRecord<'a>`, `DocumentInfoRecord<'a>`, `DocumentOptionsRecord`, and `SystemConfigRecord<'a>`.
+  - Direct reuse of domain `DocumentKind` (`"collection"`, `"singleton"`) and `RelationType` without redundant mirror DTOs.
+  - `FieldTypeDto<'a>`, `DecimalBoundsDto`, `ConstraintRecord<'a>`, `DocumentRecord<'a>`, `DocumentInfoRecord<'a>`, `DocumentOptionsRecord`, and `SystemConfigRecord<'a>`.
   - Deterministic attribute ordering preserved using `IndexMap<&'a str, AttributeRecord<'a>>`.
 - [x] **Step 1.2: Identifier Sanitization & Validation (`infrastructure/src/persistence/naming/sanitize.rs`)**
   - Verify identifiers against `RESERVED_SQL_KEYWORDS` (e.g. `order`, `table`, `user`).

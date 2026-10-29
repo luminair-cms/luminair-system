@@ -3,6 +3,7 @@
 //! All DTOs borrow string slices directly from the file buffer (`&'a str`), eliminating
 //! intermediate heap allocations during parsing before conversion to domain types.
 
+use domain::schema::{DocumentKind, RelationType};
 use indexmap::IndexMap;
 use serde::Deserialize;
 
@@ -12,20 +13,11 @@ use serde::Deserialize;
 #[serde(rename_all = "camelCase")]
 pub struct DocumentRecord<'a> {
     #[serde(alias = "type")]
-    pub kind: DocumentKindDto,
+    pub kind: DocumentKind,
     pub info: DocumentInfoRecord<'a>,
     #[serde(default)]
     pub options: Option<DocumentOptionsRecord>,
     pub attributes: IndexMap<&'a str, AttributeRecord<'a>>,
-}
-
-/// Document kind (collection vs singleton).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DocumentKindDto {
-    Collection,
-    #[serde(alias = "singleType")]
-    Singleton,
 }
 
 /// Metadata describing the document type and composite display fields.
@@ -59,7 +51,7 @@ pub enum AttributeRecord<'a> {
     /// Relational association targeting another document type.
     Relation {
         #[serde(alias = "relation")]
-        relation_type: RelationTypeDto,
+        relation_type: RelationType,
         target: &'a str,
     },
     /// Typed scalar field with validation constraints.
@@ -95,16 +87,6 @@ pub struct DecimalBoundsDto {
     pub scale: u8,
 }
 
-/// Relation cardinality and direction matching domain `RelationType`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RelationTypeDto {
-    HasOne,
-    HasMany,
-    BelongsToOne,
-    BelongsToMany,
-}
-
 /// Attribute constraint DTO supporting standard keys and aliases.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(bound = "'de: 'a")]
@@ -129,26 +111,6 @@ pub struct SystemConfigRecord<'a> {
     pub available_locales: Vec<&'a str>,
     #[serde(default)]
     pub instance_name: Option<&'a str>,
-}
-
-impl From<DocumentKindDto> for domain::schema::DocumentKind {
-    fn from(dto: DocumentKindDto) -> Self {
-        match dto {
-            DocumentKindDto::Collection => domain::schema::DocumentKind::Collection,
-            DocumentKindDto::Singleton => domain::schema::DocumentKind::Singleton,
-        }
-    }
-}
-
-impl From<RelationTypeDto> for domain::schema::RelationType {
-    fn from(dto: RelationTypeDto) -> Self {
-        match dto {
-            RelationTypeDto::HasOne => domain::schema::RelationType::HasOne,
-            RelationTypeDto::HasMany => domain::schema::RelationType::HasMany,
-            RelationTypeDto::BelongsToOne => domain::schema::RelationType::BelongsToOne,
-            RelationTypeDto::BelongsToMany => domain::schema::RelationType::BelongsToMany,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -215,7 +177,7 @@ mod tests {
 
         let record: DocumentRecord =
             serde_json::from_str(json).expect("deserialize DocumentRecord");
-        assert_eq!(record.kind, DocumentKindDto::Collection);
+        assert_eq!(record.kind, DocumentKind::Collection);
         assert_eq!(record.info.singular_name, "article");
         assert_eq!(record.info.plural_name, "articles");
         assert_eq!(record.info.display_name, "Blog Article");
@@ -267,7 +229,7 @@ mod tests {
                 relation_type,
                 target,
             } => {
-                assert_eq!(*relation_type, RelationTypeDto::HasOne);
+                assert_eq!(*relation_type, RelationType::HasOne);
                 assert_eq!(*target, "category");
             }
             _ => panic!("expected relation"),
@@ -279,7 +241,7 @@ mod tests {
                 relation_type,
                 target,
             } => {
-                assert_eq!(*relation_type, RelationTypeDto::BelongsToOne);
+                assert_eq!(*relation_type, RelationType::BelongsToOne);
                 assert_eq!(*target, "author");
             }
             _ => panic!("expected relation"),
@@ -302,30 +264,18 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_document_kind_singleton_and_aliases() {
+    fn test_deserialize_document_kind_singleton_and_collection() {
         #[derive(Deserialize)]
         struct KindWrapper {
-            kind: DocumentKindDto,
+            kind: DocumentKind,
         }
 
         let json_singleton = r#"{ "kind": "singleton" }"#;
         let w: KindWrapper = serde_json::from_str(json_singleton).unwrap();
-        assert_eq!(w.kind, DocumentKindDto::Singleton);
-        assert_eq!(
-            domain::schema::DocumentKind::from(w.kind),
-            domain::schema::DocumentKind::Singleton
-        );
-
-        let json_single_type = r#"{ "kind": "singleType" }"#;
-        let w2: KindWrapper = serde_json::from_str(json_single_type).unwrap();
-        assert_eq!(w2.kind, DocumentKindDto::Singleton);
+        assert_eq!(w.kind, DocumentKind::Singleton);
 
         let json_collection = r#"{ "kind": "collection" }"#;
-        let w3: KindWrapper = serde_json::from_str(json_collection).unwrap();
-        assert_eq!(w3.kind, DocumentKindDto::Collection);
-        assert_eq!(
-            domain::schema::DocumentKind::from(w3.kind),
-            domain::schema::DocumentKind::Collection
-        );
+        let w2: KindWrapper = serde_json::from_str(json_collection).unwrap();
+        assert_eq!(w2.kind, DocumentKind::Collection);
     }
 }

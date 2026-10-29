@@ -11,13 +11,13 @@ use domain::common::DisplayName;
 use domain::schema::{
     AttributeId, DocumentType, DocumentTypeInfo, DocumentTypeOptions, FieldConstraint,
     FieldDefinition, FieldType, IntegerSize, PrimitiveType, RegexPattern, RelationDefinition,
-    SchemaRegistry,
+    RelationType, SchemaRegistry,
 };
 use domain::system::{LocaleId, SystemConfig, SystemConfigId, SystemContext};
 
 use super::dto::{
     AttributeRecord, ConstraintRecord, DocumentInfoRecord, DocumentOptionsRecord, DocumentRecord,
-    FieldTypeDto, RelationTypeDto, SystemConfigRecord,
+    FieldTypeDto, SystemConfigRecord,
 };
 use super::error::SchemaLoaderError;
 use crate::persistence::naming::is_reserved_sql_keyword;
@@ -199,7 +199,7 @@ pub fn parse_document_type(
 
     Ok(DocumentType {
         id: info.singular_name.clone(),
-        kind: record.kind.into(),
+        kind: record.kind,
         info,
         options,
         fields,
@@ -362,7 +362,7 @@ fn parse_field_attribute(
 /// Parses a relation definition with cardinality and target document type identifier.
 fn parse_relation_attribute(
     attr_id: AttributeId,
-    relation_type: RelationTypeDto,
+    relation_type: RelationType,
     target: &str,
 ) -> Result<RelationDefinition, SchemaLoaderError> {
     let target_id = domain::schema::DocumentTypeId::try_new(target).map_err(|e| {
@@ -372,7 +372,7 @@ fn parse_relation_attribute(
     })?;
     Ok(RelationDefinition {
         id: attr_id,
-        relation_type: relation_type.into(),
+        relation_type,
         target: target_id,
     })
 }

@@ -221,3 +221,13 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
      - `GET /api/v1/auth/users`: Lists and searches user profiles for the Admin Studio role-assignment picker (enforces `Permission::ManageUsers`).
      - `POST /api/v1/auth/profile/sync`: Synchronizes authenticated IdP claims upon SPA login or profile changes.
   4. **Spec-Backed Testing & Traceability**: Declarative behavioral specification `docs/specs/application/user-directory-service.md` covers rules `UD-01` through `UD-07`, verified by `application/tests/ud_user_directory_service.rs` and passing `spec_traceability`. End-to-end integration verified via `infrastructure/tests/api_test.rs::test_08_user_directory_and_profile_sync`.
+
+---
+
+### 2026-10-29 — Schema Loader DTO Simplification (Direct Domain Enum Reuse)
+
+- **Context**: Streamlining schema loading DTOs by removing redundant mirror enums (`DocumentKindDto`, `RelationTypeDto`) in favor of direct reuse of domain value objects that already implement `serde::Deserialize`.
+- **Decisions**:
+  1. **Direct Enum Reuse**: Removed `DocumentKindDto` and `RelationTypeDto` in `infrastructure::schema_loader::dto`. `DocumentRecord<'a>` and `AttributeRecord<'a>::Relation` now directly borrow/use `domain::schema::DocumentKind` and `domain::schema::RelationType`.
+  2. **Eliminated Conversions & Aliases**: Removed `From<DocumentKindDto>` and `From<RelationTypeDto>` boilerplate and retired the legacy `"singleType"` alias. All canonical schemas declare `"kind": "singleton"` or `"kind": "collection"`.
+  3. **Verification**: 100% test coverage maintained across unit and integration suites (`cargo test --workspace`).
