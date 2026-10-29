@@ -1,6 +1,6 @@
 //! Spec: docs/specs/domain/authorization-service.md — generated from behavior specification rules.
 
-use domain::auth::{ActorId, AuthorizationService, Permission, Role, RoleId};
+use domain::auth::{ActorId, AuthorizationService, Permission, PermissionCheck, Role, RoleId};
 use domain::content::DocumentInstance;
 use domain::test_support::{
     admin_role, fixture_document_instance, create_doc_type_id, create_service_id, create_user_id,
@@ -223,7 +223,8 @@ fn test_az_authorization_decision_table() {
             TargetInstance::None => (&other_user, None),
         };
 
-        let result = AuthorizationService::can(user, &case.action, inst_opt, &case.roles);
+        let check: PermissionCheck<'_> = (&case.action).into();
+        let result = AuthorizationService::can(user, &check, inst_opt, &case.roles);
 
         if result != case.expected {
             failures.push(format!(
@@ -254,7 +255,7 @@ fn test_az_actor_authorization_rules() {
     // "AZ-19": System actor bypasses all checks even with empty roles
     let az_19_result = AuthorizationService::can_actor(
         &ActorId::System,
-        &Permission::PublishDocument(Some(article_type.clone())),
+        &PermissionCheck::publish_document(&article_type),
         Some(&instance),
         &[],
     );
@@ -267,7 +268,7 @@ fn test_az_actor_authorization_rules() {
     let service_actor = ActorId::Service(create_service_id("sync-worker"));
     let az_20_denied = AuthorizationService::can_actor(
         &service_actor,
-        &Permission::ReadDocument(Some(article_type.clone())),
+        &PermissionCheck::read_document(&article_type),
         Some(&instance),
         &[],
     );
@@ -278,7 +279,7 @@ fn test_az_actor_authorization_rules() {
 
     let az_20_granted = AuthorizationService::can_actor(
         &service_actor,
-        &Permission::PublishDocument(Some(article_type.clone())),
+        &PermissionCheck::publish_document(&article_type),
         Some(&instance),
         &[publisher_article_role],
     );

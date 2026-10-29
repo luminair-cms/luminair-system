@@ -3,7 +3,7 @@
 use std::future::Future;
 
 use chrono::Utc;
-use domain::auth::{Permission, UserId, UserProfile, UserProfileRepository};
+use domain::auth::{UserId, UserProfile, UserProfileRepository};
 use domain::common::Page;
 
 use crate::commands::user_directory::{ListUsersCommand, SyncProfileCommand};
@@ -86,7 +86,7 @@ where
         caller: &CallerContext,
         cmd: ListUsersCommand,
     ) -> Result<Page<UserProfile>, ApplicationError> {
-        caller.check_permission(&Permission::ManageUsers, None)?;
+        caller.check_manage_users()?;
         let page = self
             .repo
             .list_users(cmd.query.as_deref(), cmd.pagination)
@@ -101,7 +101,7 @@ where
     ) -> Result<Option<UserProfile>, ApplicationError> {
         let is_self = caller.user_id() == Some(user_id);
         if !is_self {
-            caller.check_permission(&Permission::ManageUsers, None)?;
+            caller.check_manage_users()?;
         }
         let profile = self.repo.find_by_id(user_id).await?;
         Ok(profile)
@@ -136,6 +136,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::auth::Permission;
     use std::collections::HashMap;
     use std::sync::{Arc, RwLock};
 

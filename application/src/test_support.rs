@@ -185,84 +185,81 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
     async fn find_by_type(
         &self,
         type_id: &DocumentTypeId,
+        view: VersionView,
         pagination: Pagination,
         filters: Vec<FieldFilter>,
     ) -> Result<Page<DocumentInstance>, DomainError> {
-        let store = self.instances.read().map_err(lock_error)?;
+        match view {
+            VersionView::Published => {
+                let pub_store = self.published.read().map_err(lock_error)?;
+                let inst_store = self.instances.read().map_err(lock_error)?;
 
-        let mut filtered: Vec<DocumentInstance> = store
-            .values()
-            .filter(|inst| inst.document_type_id == *type_id && matches_filters(inst, &filters))
-            .cloned()
-            .collect();
-        // Deterministic order (oldest first, id as tie-breaker): HashMap order is random.
-        filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
+                let mut filtered: Vec<DocumentInstance> = if !pub_store.is_empty() {
+                    pub_store
+                        .values()
+                        .filter(|inst| inst.document_type_id == *type_id && matches_filters(inst, &filters))
+                        .cloned()
+                        .collect()
+                } else {
+                    inst_store
+                        .values()
+                        .filter(|inst| {
+                            inst.document_type_id == *type_id
+                                && matches!(
+                                    inst.content.publication_state,
+                                    PublicationState::Published { .. } | PublicationState::Modified { .. }
+                                )
+                                && matches_filters(inst, &filters)
+                        })
+                        .cloned()
+                        .collect()
+                };
+                filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
 
-        let total = filtered.len() as u64;
-        let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
-            as usize;
-        let items: Vec<DocumentInstance> = filtered
-            .into_iter()
-            .skip(start)
-            .take(pagination.page_size as usize)
-            .collect();
+                let total = filtered.len() as u64;
+                let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
+                    as usize;
+                let items: Vec<DocumentInstance> = filtered
+                    .into_iter()
+                    .skip(start)
+                    .take(pagination.page_size as usize)
+                    .collect();
 
-        Ok(Page {
-            items,
-            total,
-            page: pagination.page,
-            page_size: pagination.page_size,
-        })
-    }
-
-    async fn find_published(
-        &self,
-        type_id: &DocumentTypeId,
-        pagination: Pagination,
-        filters: Vec<FieldFilter>,
-    ) -> Result<Page<DocumentInstance>, DomainError> {
-        let pub_store = self.published.read().map_err(lock_error)?;
-        let inst_store = self.instances.read().map_err(lock_error)?;
-
-        let mut filtered: Vec<DocumentInstance> = if !pub_store.is_empty() {
-            pub_store
-                .values()
-                .filter(|inst| inst.document_type_id == *type_id && matches_filters(inst, &filters))
-                .cloned()
-                .collect()
-        } else {
-            inst_store
-                .values()
-                .filter(|inst| {
-                    inst.document_type_id == *type_id
-                        && matches!(
-                            inst.content.publication_state,
-                            PublicationState::Published { .. } | PublicationState::Modified { .. }
-                        )
-                        && matches_filters(inst, &filters)
+                Ok(Page {
+                    items,
+                    total,
+                    page: pagination.page,
+                    page_size: pagination.page_size,
                 })
-                .cloned()
-                .collect()
-        };
-        filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
+            }
+            VersionView::Working => {
+                let store = self.instances.read().map_err(lock_error)?;
 
-        let total = filtered.len() as u64;
-        let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
-            as usize;
-        let items: Vec<DocumentInstance> = filtered
-            .into_iter()
-            .skip(start)
-            .take(pagination.page_size as usize)
-            .collect();
+                let mut filtered: Vec<DocumentInstance> = store
+                    .values()
+                    .filter(|inst| inst.document_type_id == *type_id && matches_filters(inst, &filters))
+                    .cloned()
+                    .collect();
+                filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
 
-        Ok(Page {
-            items,
-            total,
-            page: pagination.page,
-            page_size: pagination.page_size,
-        })
+                let total = filtered.len() as u64;
+                let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
+                    as usize;
+                let items: Vec<DocumentInstance> = filtered
+                    .into_iter()
+                    .skip(start)
+                    .take(pagination.page_size as usize)
+                    .collect();
+
+                Ok(Page {
+                    items,
+                    total,
+                    page: pagination.page,
+                    page_size: pagination.page_size,
+                })
+            }
+        }
     }
-
     async fn list_admin_headers(
         &self,
         type_id: &DocumentTypeId,
@@ -854,7 +851,7 @@ mod tests {
             .await
             .unwrap();
 
-        let page = repo.find_by_type(t, all(), vec![]).await.unwrap();
+        let page = repo.find_by_type(t, VersionView::Working, all(), vec![]).await.unwrap();
         assert_eq!(page.total, 4);
         assert_eq!(repo.count(t, vec![]).await.unwrap(), 4);
     }
@@ -865,7 +862,7 @@ mod tests {
         let f = vec![filter("title", text("a"))];
 
         assert_eq!(repo.count(t, f.clone()).await.unwrap(), 2);
-        let page = repo.find_by_type(t, all(), f).await.unwrap();
+        let page = repo.find_by_type(t, VersionView::Working, all(), f).await.unwrap();
         assert_eq!(page.total, 2);
         assert_eq!(page.items.len(), 2);
     }
@@ -914,6 +911,7 @@ mod tests {
         let p1 = repo
             .find_by_type(
                 t,
+                VersionView::Working,
                 Pagination {
                     page: 1,
                     page_size: 2,
@@ -925,6 +923,7 @@ mod tests {
         let p3 = repo
             .find_by_type(
                 t,
+                VersionView::Working,
                 Pagination {
                     page: 3,
                     page_size: 2,

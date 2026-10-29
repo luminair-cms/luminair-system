@@ -1,4 +1,4 @@
-use super::role::{Permission, Role};
+use super::role::{PermissionCheck, Role};
 use super::user::{ActorId, UserId};
 use crate::content::instance::DocumentInstance;
 
@@ -14,7 +14,7 @@ impl AuthorizationService {
     #[must_use]
     pub fn can(
         user_id: &UserId,
-        action: &Permission,
+        action: &PermissionCheck<'_>,
         instance: Option<&DocumentInstance>,
         roles: &[Role],
     ) -> bool {
@@ -25,9 +25,9 @@ impl AuthorizationService {
             && inst.is_owned_by(user_id)
         {
             match action {
-                Permission::ReadDocument(_)
-                | Permission::UpdateDocument(_)
-                | Permission::DeleteDocument(_) => return true,
+                PermissionCheck::ReadDocument(_)
+                | PermissionCheck::UpdateDocument(_)
+                | PermissionCheck::DeleteDocument(_) => return true,
                 _ => {}
             }
         }
@@ -43,7 +43,7 @@ impl AuthorizationService {
     #[must_use]
     pub fn can_actor(
         actor: &ActorId,
-        action: &Permission,
+        action: &PermissionCheck<'_>,
         instance: Option<&DocumentInstance>,
         roles: &[Role],
     ) -> bool {
@@ -68,7 +68,7 @@ mod tests {
     use super::*;
     use uuid::Uuid;
 
-    use crate::auth::role::RoleId;
+    use crate::auth::role::{Permission, RoleId};
     use crate::schema::DocumentTypeId;
     use crate::test_support::{
         admin_role, create_doc_type_id, create_user_id, fixture_document_instance,
@@ -88,19 +88,19 @@ mod tests {
         // Owner may read, update, and delete without any role
         assert!(AuthorizationService::can(
             &owner,
-            &Permission::ReadDocument(Some(type_id.clone())),
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
             &[]
         ));
         assert!(AuthorizationService::can(
             &owner,
-            &Permission::UpdateDocument(Some(type_id.clone())),
+            &PermissionCheck::update_document(&type_id),
             Some(&instance),
             &[]
         ));
         assert!(AuthorizationService::can(
             &owner,
-            &Permission::DeleteDocument(Some(type_id)),
+            &PermissionCheck::delete_document(&type_id),
             Some(&instance),
             &[]
         ));
@@ -112,7 +112,7 @@ mod tests {
         // Owner cannot publish without an explicit role
         assert!(!AuthorizationService::can(
             &owner,
-            &Permission::PublishDocument(Some(type_id)),
+            &PermissionCheck::publish_document(&type_id),
             Some(&instance),
             &[]
         ));
@@ -121,26 +121,24 @@ mod tests {
     #[test]
     fn test_rbac_explicit_permission_granted() {
         let (_, other, type_id, instance) = make_test_fixture();
-        let action = Permission::ReadDocument(Some(type_id.clone()));
         let role = Role {
             id: RoleId::new(Uuid::now_v7()),
             name: "reader".into(),
             description: None,
-            permissions: vec![Permission::ReadDocument(Some(type_id))],
+            permissions: vec![Permission::ReadDocument(Some(type_id.clone()))],
         };
 
         assert!(AuthorizationService::can(
             &other,
-            &action,
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
-            &[role]
+            std::slice::from_ref(&role)
         ));
     }
 
     #[test]
     fn test_rbac_wildcard_permission() {
         let (_, other, type_id, instance) = make_test_fixture();
-        let action = Permission::ReadDocument(Some(type_id));
         let role = Role {
             id: RoleId::new(Uuid::now_v7()),
             name: "global_reader".into(),
@@ -150,38 +148,36 @@ mod tests {
 
         assert!(AuthorizationService::can(
             &other,
-            &action,
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
-            &[role]
+            std::slice::from_ref(&role)
         ));
     }
 
     #[test]
     fn test_rbac_wrong_permission_denied() {
         let (_, other, type_id, instance) = make_test_fixture();
-        let action = Permission::DeleteDocument(Some(type_id.clone()));
         let role = Role {
             id: RoleId::new(Uuid::now_v7()),
             name: "reader".into(),
-            permissions: vec![Permission::ReadDocument(Some(type_id))],
+            permissions: vec![Permission::ReadDocument(Some(type_id.clone()))],
             description: None,
         };
 
         assert!(!AuthorizationService::can(
             &other,
-            &action,
+            &PermissionCheck::delete_document(&type_id),
             Some(&instance),
-            &[role]
+            std::slice::from_ref(&role)
         ));
     }
 
     #[test]
     fn test_no_roles_denied() {
         let (_, other, type_id, instance) = make_test_fixture();
-        let action = Permission::ReadDocument(Some(type_id));
         assert!(!AuthorizationService::can(
             &other,
-            &action,
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
             &[]
         ));
@@ -190,10 +186,9 @@ mod tests {
     #[test]
     fn test_admin_all_permissions() {
         let (_, other, type_id, instance) = make_test_fixture();
-        let action = Permission::DeleteDocument(Some(type_id));
         assert!(AuthorizationService::can(
             &other,
-            &action,
+            &PermissionCheck::delete_document(&type_id),
             Some(&instance),
             &[admin_role()]
         ));
@@ -202,17 +197,16 @@ mod tests {
     #[test]
     fn test_can_actor_system_allowed_unconditionally() {
         let (_, _, type_id, instance) = make_test_fixture();
-        let action = Permission::PublishDocument(Some(type_id));
         // System actor is allowed even with no roles and publishing action
         assert!(AuthorizationService::can_actor(
             &ActorId::System,
-            &action,
+            &PermissionCheck::publish_document(&type_id),
             Some(&instance),
             &[]
         ));
         assert!(AuthorizationService::can_actor(
             &ActorId::System,
-            &action,
+            &PermissionCheck::publish_document(&type_id),
             None,
             &[]
         ));
@@ -227,14 +221,14 @@ mod tests {
         // Owner can read/update without role
         assert!(AuthorizationService::can_actor(
             &owner_actor,
-            &Permission::ReadDocument(Some(type_id.clone())),
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
             &[]
         ));
         // Owner cannot publish without role
         assert!(!AuthorizationService::can_actor(
             &owner_actor,
-            &Permission::PublishDocument(Some(type_id.clone())),
+            &PermissionCheck::publish_document(&type_id),
             Some(&instance),
             &[]
         ));
@@ -242,7 +236,7 @@ mod tests {
         // Other cannot read without role
         assert!(!AuthorizationService::can_actor(
             &other_actor,
-            &Permission::ReadDocument(Some(type_id.clone())),
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
             &[]
         ));
@@ -255,9 +249,9 @@ mod tests {
         };
         assert!(AuthorizationService::can_actor(
             &other_actor,
-            &Permission::ReadDocument(Some(type_id)),
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
-            &[role]
+            std::slice::from_ref(&role)
         ));
     }
 
@@ -270,7 +264,7 @@ mod tests {
         // Service has no owner privileges even if instance is present
         assert!(!AuthorizationService::can_actor(
             &service_actor,
-            &Permission::ReadDocument(Some(type_id.clone())),
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
             &[]
         ));
@@ -284,15 +278,15 @@ mod tests {
         };
         assert!(AuthorizationService::can_actor(
             &service_actor,
-            &Permission::ReadDocument(Some(type_id.clone())),
+            &PermissionCheck::read_document(&type_id),
             Some(&instance),
-            &[role]
+            std::slice::from_ref(&role)
         ));
 
         // Service with admin role is allowed
         assert!(AuthorizationService::can_actor(
             &service_actor,
-            &Permission::PublishDocument(Some(type_id)),
+            &PermissionCheck::publish_document(&type_id),
             Some(&instance),
             &[admin_role()]
         ));

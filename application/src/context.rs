@@ -1,7 +1,10 @@
 //! Security and caller identity context.
 
-use domain::auth::{ActorId, AuthorizationService, Permission, Role, RoleId, ServiceId, UserId};
+use domain::auth::{
+    ActorId, AuthorizationService, PermissionCheck, Role, RoleId, ServiceId, UserId,
+};
 use domain::content::DocumentInstance;
+use domain::schema::DocumentTypeId;
 
 use crate::errors::ApplicationError;
 
@@ -36,6 +39,7 @@ impl CallerContext {
     /// Creates an internal system caller context with administrative privileges.
     #[must_use]
     pub fn system() -> Self {
+        use domain::auth::Permission;
         let admin_role = Role {
             id: RoleId::new(uuid::Uuid::nil()),
             name: "system_admin".to_string(),
@@ -71,17 +75,18 @@ impl CallerContext {
     /// 3. RBAC (across all assigned roles).
     /// 4. Default DENY.
     #[must_use]
-    pub fn can(&self, action: &Permission, instance: Option<&DocumentInstance>) -> bool {
+    pub fn can(&self, action: &PermissionCheck<'_>, instance: Option<&DocumentInstance>) -> bool {
         AuthorizationService::can_actor(&self.actor, action, instance, &self.roles)
     }
 
-    /// Enforces that the caller has permission to perform `action` on the optional `instance`.
+    /// Enforces that the caller has permission to perform `action` on the optional `instance`
+    /// without any allocations on the authorized path.
     ///
     /// # Errors
     /// Returns [`ApplicationError::Unauthorized`] if the caller lacks permission.
     pub fn check_permission(
         &self,
-        action: &Permission,
+        action: &PermissionCheck<'_>,
         instance: Option<&DocumentInstance>,
     ) -> Result<(), ApplicationError> {
         if self.can(action, instance) {
@@ -89,9 +94,65 @@ impl CallerContext {
         } else {
             Err(ApplicationError::Unauthorized {
                 actor: self.actor.clone(),
-                action: action.clone(),
+                action: action.to_permission(),
             })
         }
+    }
+
+    /// Checks if the caller has permission to create a document of the specified type.
+    pub fn check_create_document(&self, type_id: &DocumentTypeId) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::create_document(type_id), None)
+    }
+
+    /// Checks if the caller has permission to read a document of the specified type.
+    pub fn check_read_document(
+        &self,
+        type_id: &DocumentTypeId,
+        instance: Option<&DocumentInstance>,
+    ) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::read_document(type_id), instance)
+    }
+
+    /// Checks if the caller has permission to update a document of the specified type.
+    pub fn check_update_document(
+        &self,
+        type_id: &DocumentTypeId,
+        instance: Option<&DocumentInstance>,
+    ) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::update_document(type_id), instance)
+    }
+
+    /// Checks if the caller has permission to delete a document of the specified type.
+    pub fn check_delete_document(
+        &self,
+        type_id: &DocumentTypeId,
+        instance: Option<&DocumentInstance>,
+    ) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::delete_document(type_id), instance)
+    }
+
+    /// Checks if the caller has permission to publish a document of the specified type.
+    pub fn check_publish_document(
+        &self,
+        type_id: &DocumentTypeId,
+        instance: Option<&DocumentInstance>,
+    ) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::publish_document(type_id), instance)
+    }
+
+    /// Checks if the caller has permission to manage schema.
+    pub fn check_manage_schema(&self) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::ManageSchema, None)
+    }
+
+    /// Checks if the caller has permission to manage roles.
+    pub fn check_manage_roles(&self) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::ManageRoles, None)
+    }
+
+    /// Checks if the caller has permission to manage users.
+    pub fn check_manage_users(&self) -> Result<(), ApplicationError> {
+        self.check_permission(&PermissionCheck::ManageUsers, None)
     }
 }
 
@@ -99,6 +160,7 @@ impl CallerContext {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use domain::auth::Permission;
     use domain::schema::DocumentTypeId;
     use uuid::Uuid;
 
@@ -113,16 +175,20 @@ mod tests {
         let ctx = CallerContext::system();
         let type_id = DocumentTypeId::try_new("article").unwrap();
 
-        assert!(ctx.can(&Permission::ManageSchema, None));
-        assert!(ctx.can(&Permission::ManageRoles, None));
-        assert!(ctx.can(&Permission::ManageUsers, None));
-        assert!(ctx.can(&Permission::CreateDocument(Some(type_id.clone())), None));
-        assert!(ctx.can(&Permission::PublishDocument(Some(type_id)), None));
+        assert!(ctx.can(&PermissionCheck::ManageSchema, None));
+        assert!(ctx.can(&PermissionCheck::ManageRoles, None));
+        assert!(ctx.can(&PermissionCheck::ManageUsers, None));
+        assert!(ctx.can(&PermissionCheck::create_document(&type_id), None));
+        assert!(ctx.can(&PermissionCheck::publish_document(&type_id), None));
 
-        assert!(
-            ctx.check_permission(&Permission::ManageSchema, None)
-                .is_ok()
-        );
+        assert!(ctx.check_manage_schema().is_ok());
+        assert!(ctx.check_manage_roles().is_ok());
+        assert!(ctx.check_manage_users().is_ok());
+        assert!(ctx.check_create_document(&type_id).is_ok());
+        assert!(ctx.check_read_document(&type_id, None).is_ok());
+        assert!(ctx.check_update_document(&type_id, None).is_ok());
+        assert!(ctx.check_delete_document(&type_id, None).is_ok());
+        assert!(ctx.check_publish_document(&type_id, None).is_ok());
     }
 
     #[test]
@@ -131,7 +197,7 @@ mod tests {
         let ctx = CallerContext::new(user_id.clone(), Vec::new());
         let type_id = DocumentTypeId::try_new("article").unwrap();
 
-        let res = ctx.check_permission(&Permission::DeleteDocument(Some(type_id.clone())), None);
+        let res = ctx.check_delete_document(&type_id, None);
         match res {
             Err(ApplicationError::Unauthorized { actor, action }) => {
                 assert_eq!(actor, ActorId::User(user_id));
@@ -148,33 +214,21 @@ mod tests {
         let (type_id, instance) = make_test_instance(&owner);
 
         // Owner may read and update without any role
-        assert!(ctx.can(
-            &Permission::UpdateDocument(Some(type_id.clone())),
-            Some(&instance)
-        ));
-        assert!(ctx.can(
-            &Permission::ReadDocument(Some(type_id.clone())),
-            Some(&instance)
-        ));
-        assert!(
-            ctx.check_permission(
-                &Permission::UpdateDocument(Some(type_id.clone())),
-                Some(&instance)
-            )
-            .is_ok()
-        );
-        assert!(
-            ctx.check_permission(
-                &Permission::DeleteDocument(Some(type_id.clone())),
-                Some(&instance)
-            )
-            .is_ok()
-        );
+        assert!(ctx.can(&PermissionCheck::update_document(&type_id), Some(&instance)));
+        assert!(ctx.can(&PermissionCheck::read_document(&type_id), Some(&instance)));
+        assert!(ctx.check_update_document(&type_id, Some(&instance)).is_ok());
+        assert!(ctx.check_delete_document(&type_id, Some(&instance)).is_ok());
+        assert!(ctx.check_read_document(&type_id, Some(&instance)).is_ok());
+
         // Publish require explicit RBAC — owner rule does not apply
         assert!(!ctx.can(
-            &Permission::PublishDocument(Some(type_id.clone())),
+            &PermissionCheck::publish_document(&type_id),
             Some(&instance)
-        ))
+        ));
+        assert!(
+            ctx.check_publish_document(&type_id, Some(&instance))
+                .is_err()
+        );
     }
 
     #[test]
@@ -189,8 +243,8 @@ mod tests {
         };
         let ctx = CallerContext::new(user, vec![role]);
 
-        assert!(ctx.can(&Permission::CreateDocument(Some(type_id.clone())), None));
-        assert!(!ctx.can(&Permission::DeleteDocument(Some(type_id)), None));
+        assert!(ctx.check_create_document(&type_id).is_ok());
+        assert!(ctx.check_delete_document(&type_id, None).is_err());
     }
 
     #[test]
@@ -206,10 +260,10 @@ mod tests {
         let ctx = CallerContext::service(service_id.clone(), vec![role]);
 
         assert_eq!(ctx.user_id(), None);
-        assert!(ctx.can(&Permission::CreateDocument(Some(type_id.clone())), None));
-        assert!(!ctx.can(&Permission::DeleteDocument(Some(type_id.clone())), None));
+        assert!(ctx.check_create_document(&type_id).is_ok());
+        assert!(ctx.check_delete_document(&type_id, None).is_err());
 
-        let res = ctx.check_permission(&Permission::DeleteDocument(Some(type_id.clone())), None);
+        let res = ctx.check_delete_document(&type_id, None);
         match res {
             Err(ApplicationError::Unauthorized { actor, action }) => {
                 assert_eq!(actor, ActorId::Service(service_id));

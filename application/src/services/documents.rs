@@ -6,7 +6,6 @@ use std::future::Future;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use domain::auth::Permission;
 use domain::content::{
     extract_display_identity, validate_draft_content, validate_publish_content, DocumentHeader,
     DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, DocumentSnapshot,
@@ -27,6 +26,13 @@ use crate::commands::documents::{
 };
 use crate::context::CallerContext;
 use crate::errors::ApplicationError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkingInstanceAction {
+    Update,
+    Delete,
+    Publish,
+}
 
 /// Port trait defining use cases for document instances.
 pub trait DocumentsService: Send + Sync + 'static {
@@ -261,28 +267,18 @@ where
         caller: &CallerContext,
         cmd: FindDocumentsCommand,
     ) -> Result<(Vec<DocumentInstance>, u64), ApplicationError> {
-        caller.check_permission(
-            &Permission::ReadDocument(Some(cmd.document_type.clone())),
-            None,
-        )?;
+        caller.check_read_document(cmd.document_type, None)?;
 
         self.context.find_type(cmd.document_type).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
         })?;
 
         // Sequential fetch for MVP (routes to published wide table for visitors, or drafts store for working copies)
-        let page = match cmd.view {
-            VersionView::Published => {
-                self.instance_repo
-                    .find_published(cmd.document_type, cmd.pagination, cmd.filters.clone())
-                    .await?
-            }
-            VersionView::Working => {
-                self.instance_repo
-                    .find_by_type(cmd.document_type, cmd.pagination, cmd.filters.clone())
-                    .await?
-            }
-        };
+        // Unified fetch routed by VersionView: Published targets live wide table, Working targets draft/modified state
+        let page = self
+            .instance_repo
+            .find_by_type(cmd.document_type, cmd.view, cmd.pagination, cmd.filters)
+            .await?;
         let count = page.total;
 
         // Two-phase batch relation enrichment
@@ -306,10 +302,7 @@ where
             return Ok(None);
         };
 
-        caller.check_permission(
-            &Permission::ReadDocument(Some(instance.document_type_id.clone())),
-            Some(&instance),
-        )?;
+        caller.check_read_document(&instance.document_type_id, Some(&instance))?;
 
         let enriched = self
             .enrich_single(cmd.document_type, &cmd.populate, instance)
@@ -322,10 +315,7 @@ where
         caller: &CallerContext,
         cmd: CreateDocumentCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
-        caller.check_permission(
-            &Permission::CreateDocument(Some(cmd.document_type.clone())),
-            None,
-        )?;
+        caller.check_create_document(cmd.document_type)?;
 
         let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
@@ -357,7 +347,7 @@ where
                 caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                |tid| Permission::UpdateDocument(Some(tid)),
+                WorkingInstanceAction::Update,
             )
             .await?;
 
@@ -401,7 +391,7 @@ where
                 caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                |tid| Permission::DeleteDocument(Some(tid)),
+                WorkingInstanceAction::Delete,
             )
             .await?;
 
@@ -421,7 +411,7 @@ where
                 caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                |tid| Permission::PublishDocument(Some(tid)),
+                WorkingInstanceAction::Publish,
             )
             .await?;
 
@@ -475,7 +465,7 @@ where
                 caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                |tid| Permission::PublishDocument(Some(tid)),
+                WorkingInstanceAction::Publish,
             )
             .await?;
 
@@ -527,7 +517,7 @@ where
                 caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                |tid| Permission::UpdateDocument(Some(tid)),
+                WorkingInstanceAction::Update,
             )
             .await?;
 
@@ -551,7 +541,7 @@ where
                 caller,
                 cmd.document_type,
                 cmd.document_instance_id,
-                |tid| Permission::UpdateDocument(Some(tid)),
+                WorkingInstanceAction::Update,
             )
             .await?;
 
@@ -588,10 +578,7 @@ where
         caller: &CallerContext,
         cmd: ListAdminHeadersCommand,
     ) -> Result<(Vec<DocumentHeader>, u64), ApplicationError> {
-        caller.check_permission(
-            &Permission::ReadDocument(Some(cmd.document_type.clone())),
-            None,
-        )?;
+        caller.check_read_document(cmd.document_type, None)?;
 
         let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
@@ -613,10 +600,7 @@ where
         caller: &CallerContext,
         cmd: ListSnapshotsCommand,
     ) -> Result<Vec<SnapshotHeader>, ApplicationError> {
-        caller.check_permission(
-            &Permission::ReadDocument(Some(cmd.document_type.clone())),
-            None,
-        )?;
+        caller.check_read_document(cmd.document_type, None)?;
 
         self.context.find_type(cmd.document_type).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
@@ -635,10 +619,7 @@ where
         caller: &CallerContext,
         cmd: GetSnapshotCommand,
     ) -> Result<DocumentSnapshot, ApplicationError> {
-        caller.check_permission(
-            &Permission::ReadDocument(Some(cmd.document_type.clone())),
-            None,
-        )?;
+        caller.check_read_document(cmd.document_type, None)?;
 
         self.context.find_type(cmd.document_type).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
@@ -664,7 +645,7 @@ where
         caller: &CallerContext,
         type_id: &DocumentTypeId,
         instance_id: DocumentInstanceId,
-        permission: impl FnOnce(DocumentTypeId) -> Permission,
+        action: WorkingInstanceAction,
     ) -> Result<(&'static DocumentType, DocumentInstance), ApplicationError> {
         let instance = self
             .instance_repo
@@ -674,10 +655,17 @@ where
                 DomainError::DocumentInstanceNotFound(instance_id),
             ))?;
 
-        caller.check_permission(
-            &permission(instance.document_type_id.clone()),
-            Some(&instance),
-        )?;
+        match action {
+            WorkingInstanceAction::Update => {
+                caller.check_update_document(&instance.document_type_id, Some(&instance))?;
+            }
+            WorkingInstanceAction::Delete => {
+                caller.check_delete_document(&instance.document_type_id, Some(&instance))?;
+            }
+            WorkingInstanceAction::Publish => {
+                caller.check_publish_document(&instance.document_type_id, Some(&instance))?;
+            }
+        }
 
         let doc_type = self.context.find_type(type_id).ok_or_else(|| {
             ApplicationError::Domain(DomainError::DocumentTypeNotFound(type_id.clone()))

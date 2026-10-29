@@ -104,6 +104,7 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
     async fn find_by_type(
         &self,
         type_id: &DocumentTypeId,
+        view: VersionView,
         pagination: Pagination,
         filters: Vec<FieldFilter>,
     ) -> Result<Page<DocumentInstance>, DomainError> {
@@ -111,42 +112,54 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
             .context
             .find_type(type_id)
             .ok_or_else(|| DomainError::DocumentTypeNotFound(type_id.clone()))?;
-
-        if !doc_type.options.draft_and_publish {
-            return self.find_published(type_id, pagination, filters).await;
-        }
-
         let type_naming = self.naming.require(type_id)?;
-        let page = fetch_working_page(&self.pool, type_naming, &filters, pagination).await?;
-        Ok(page)
-    }
 
-    async fn find_published(
-        &self,
-        type_id: &DocumentTypeId,
-        pagination: Pagination,
-        filters: Vec<FieldFilter>,
-    ) -> Result<Page<DocumentInstance>, DomainError> {
-        let type_naming = self.naming.require(type_id)?;
-        let total = fetch_published_count(&self.pool, type_naming, &filters).await?;
-        if total == 0 {
-            return Ok(Page {
-                items: Vec::new(),
-                total: 0,
-                page: pagination.page,
-                page_size: pagination.page_size,
-            });
+        match view {
+            VersionView::Published => {
+                let total = fetch_published_count(&self.pool, type_naming, &filters).await?;
+                if total == 0 {
+                    return Ok(Page {
+                        items: Vec::new(),
+                        total: 0,
+                        page: pagination.page,
+                        page_size: pagination.page_size,
+                    });
+                }
+
+                let items = fetch_published_page(&self.pool, type_naming, &filters, pagination).await?;
+                Ok(Page {
+                    items,
+                    total,
+                    page: pagination.page,
+                    page_size: pagination.page_size,
+                })
+            }
+            VersionView::Working => {
+                if !doc_type.options.draft_and_publish {
+                    let total = fetch_published_count(&self.pool, type_naming, &filters).await?;
+                    if total == 0 {
+                        return Ok(Page {
+                            items: Vec::new(),
+                            total: 0,
+                            page: pagination.page,
+                            page_size: pagination.page_size,
+                        });
+                    }
+
+                    let items = fetch_published_page(&self.pool, type_naming, &filters, pagination).await?;
+                    return Ok(Page {
+                        items,
+                        total,
+                        page: pagination.page,
+                        page_size: pagination.page_size,
+                    });
+                }
+
+                let page = fetch_working_page(&self.pool, type_naming, &filters, pagination).await?;
+                Ok(page)
+            }
         }
-
-        let items = fetch_published_page(&self.pool, type_naming, &filters, pagination).await?;
-        Ok(Page {
-            items,
-            total,
-            page: pagination.page,
-            page_size: pagination.page_size,
-        })
     }
-
     async fn list_admin_headers(
         &self,
         type_id: &DocumentTypeId,

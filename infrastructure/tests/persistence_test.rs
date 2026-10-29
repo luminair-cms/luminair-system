@@ -556,9 +556,9 @@ async fn assert_lifecycle_publish_and_relations(
     ));
 
     let pub_page = instance_repo
-        .find_published(article_type_id, Pagination::default(), vec![])
+        .find_by_type(article_type_id, VersionView::Published, Pagination::default(), vec![])
         .await
-        .expect("find_published");
+        .expect("find_by_type published");
     assert!(pub_page.items.iter().any(|item| item.id == article.id));
 
     let cat_attr = AttributeId::try_new("category").expect("valid attr id");
@@ -640,9 +640,9 @@ async fn assert_lifecycle_working_edits(
     ));
 
     let pub_page = instance_repo
-        .find_published(article_type_id, Pagination::default(), vec![])
+        .find_by_type(article_type_id, VersionView::Published, Pagination::default(), vec![])
         .await
-        .expect("find_published while modified");
+        .expect("find_by_type published while modified");
     assert!(pub_page.items.iter().any(|item| item.id == article.id));
 
     let headers_page = instance_repo

@@ -1,6 +1,6 @@
 //! Schema application service.
 
-use domain::auth::Permission;
+use domain::auth::{Permission, PermissionCheck};
 use domain::errors::DomainError;
 use domain::schema::{DocumentType, DocumentTypeId};
 use domain::system::SystemContext;
@@ -53,16 +53,16 @@ impl SchemaService for SchemaServiceImpl {
             .context
             .all_types()
             .filter(|dt| {
-                caller.can(&Permission::ReadDocument(Some(dt.id.clone())), None)
-                    || caller.can(&Permission::ManageSchema, None)
+                caller.can(&PermissionCheck::read_document(&dt.id), None)
+                    || caller.can(&PermissionCheck::ManageSchema, None)
             })
             .cloned()
             .collect();
 
         // If caller cannot read any types and lacks ManageSchema/wildcard, deny
         if types.is_empty()
-            && !caller.can(&Permission::ManageSchema, None)
-            && !caller.can(&Permission::ReadDocument(None), None)
+            && !caller.can(&PermissionCheck::ManageSchema, None)
+            && !caller.can(&PermissionCheck::ReadDocument(None), None)
         {
             return Err(ApplicationError::Unauthorized {
                 actor: caller.actor.clone(),
@@ -78,8 +78,8 @@ impl SchemaService for SchemaServiceImpl {
         caller: &CallerContext,
         type_id: &DocumentTypeId,
     ) -> Result<DocumentType, ApplicationError> {
-        if !caller.can(&Permission::ReadDocument(Some(type_id.clone())), None)
-            && !caller.can(&Permission::ManageSchema, None)
+        if !caller.can(&PermissionCheck::read_document(type_id), None)
+            && !caller.can(&PermissionCheck::ManageSchema, None)
         {
             return Err(ApplicationError::Unauthorized {
                 actor: caller.actor.clone(),

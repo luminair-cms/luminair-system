@@ -5,7 +5,7 @@ use std::future::Future;
 
 use chrono::Utc;
 use domain::auth::{
-    AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository, Permission,
+    AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository,
     RoleRepository, UserRoleAssignment, UserRoleAssignmentRepository,
 };
 use domain::errors::DomainError;
@@ -130,7 +130,7 @@ where
         caller: &CallerContext,
         cmd: ApproveAccessRequestCommand,
     ) -> Result<Vec<UserRoleAssignment>, ApplicationError> {
-        caller.check_permission(&Permission::ManageUsers, None)?;
+        caller.check_manage_users()?;
 
         let mut request = self
             .access_request_repo
@@ -169,7 +169,7 @@ where
         caller: &CallerContext,
         cmd: RejectAccessRequestCommand,
     ) -> Result<AccessRequest, ApplicationError> {
-        caller.check_permission(&Permission::ManageUsers, None)?;
+        caller.check_manage_users()?;
 
         let mut request = self
             .access_request_repo
@@ -200,7 +200,7 @@ where
 
         // Requester can view their own request; other users require ManageUsers
         if caller.user_id() != Some(&request.user_id) {
-            caller.check_permission(&Permission::ManageUsers, None)?;
+            caller.check_manage_users()?;
         }
 
         Ok(request)
@@ -210,7 +210,7 @@ where
         &self,
         caller: &CallerContext,
     ) -> Result<Vec<AccessRequest>, ApplicationError> {
-        caller.check_permission(&Permission::ManageUsers, None)?;
+        caller.check_manage_users()?;
         let pending = self.access_request_repo.find_pending().await?;
         Ok(pending)
     }
@@ -221,7 +221,7 @@ mod tests {
     use super::*;
 
     use domain::auth::{
-        AccessRequestStatus, Role, RoleId, UserId, UserRoleAssignment, UserRoleAssignmentId,
+        AccessRequestStatus, Permission, Role, RoleId, UserId, UserRoleAssignment, UserRoleAssignmentId,
     };
     use domain::common::{DisplayName, Email};
     use uuid::Uuid;

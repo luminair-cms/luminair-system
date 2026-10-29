@@ -50,6 +50,80 @@ pub enum Permission {
     ManageUsers,
 }
 
+/// Zero-allocation borrowed representation of an action permission check.
+///
+/// Holds references to [`DocumentTypeId`] to avoid cloning across the authorization hot path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PermissionCheck<'a> {
+    ManageSchema,
+    CreateDocument(Option<&'a DocumentTypeId>),
+    ReadDocument(Option<&'a DocumentTypeId>),
+    UpdateDocument(Option<&'a DocumentTypeId>),
+    DeleteDocument(Option<&'a DocumentTypeId>),
+    PublishDocument(Option<&'a DocumentTypeId>),
+    ManageRoles,
+    ManageUsers,
+}
+
+impl<'a> PermissionCheck<'a> {
+    #[must_use]
+    pub const fn create_document(type_id: &'a DocumentTypeId) -> Self {
+        Self::CreateDocument(Some(type_id))
+    }
+
+    #[must_use]
+    pub const fn read_document(type_id: &'a DocumentTypeId) -> Self {
+        Self::ReadDocument(Some(type_id))
+    }
+
+    #[must_use]
+    pub const fn update_document(type_id: &'a DocumentTypeId) -> Self {
+        Self::UpdateDocument(Some(type_id))
+    }
+
+    #[must_use]
+    pub const fn delete_document(type_id: &'a DocumentTypeId) -> Self {
+        Self::DeleteDocument(Some(type_id))
+    }
+
+    #[must_use]
+    pub const fn publish_document(type_id: &'a DocumentTypeId) -> Self {
+        Self::PublishDocument(Some(type_id))
+    }
+
+    /// Converts this borrowed permission check into an owned [`Permission`], cloning any borrowed identifiers.
+    ///
+    /// Primarily used when constructing detailed unauthorized errors on the error path.
+    #[must_use]
+    pub fn to_permission(&self) -> Permission {
+        match *self {
+            Self::ManageSchema => Permission::ManageSchema,
+            Self::CreateDocument(opt) => Permission::CreateDocument(opt.cloned()),
+            Self::ReadDocument(opt) => Permission::ReadDocument(opt.cloned()),
+            Self::UpdateDocument(opt) => Permission::UpdateDocument(opt.cloned()),
+            Self::DeleteDocument(opt) => Permission::DeleteDocument(opt.cloned()),
+            Self::PublishDocument(opt) => Permission::PublishDocument(opt.cloned()),
+            Self::ManageRoles => Permission::ManageRoles,
+            Self::ManageUsers => Permission::ManageUsers,
+        }
+    }
+}
+
+impl<'a> From<&'a Permission> for PermissionCheck<'a> {
+    fn from(p: &'a Permission) -> Self {
+        match p {
+            Permission::ManageSchema => Self::ManageSchema,
+            Permission::CreateDocument(opt) => Self::CreateDocument(opt.as_ref()),
+            Permission::ReadDocument(opt) => Self::ReadDocument(opt.as_ref()),
+            Permission::UpdateDocument(opt) => Self::UpdateDocument(opt.as_ref()),
+            Permission::DeleteDocument(opt) => Self::DeleteDocument(opt.as_ref()),
+            Permission::PublishDocument(opt) => Self::PublishDocument(opt.as_ref()),
+            Permission::ManageRoles => Self::ManageRoles,
+            Permission::ManageUsers => Self::ManageUsers,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Role {
     pub id: RoleId,
@@ -69,31 +143,31 @@ pub struct UserRoleAssignment {
 
 impl Role {
     #[must_use]
-    pub fn has_permission(&self, action: &Permission) -> bool {
+    pub fn has_permission(&self, action: &PermissionCheck<'_>) -> bool {
         self.permissions.iter().any(|p| p.matches(action))
     }
 }
 
 impl Permission {
-    /// Checks if this permission satisfies the requested action.
+    /// Checks if this permission satisfies the requested action check.
     /// `None` indicates a wildcard granting access to all document types.
     #[must_use]
-    pub fn matches(&self, action: &Permission) -> bool {
+    pub fn matches(&self, action: &PermissionCheck<'_>) -> bool {
         match (self, action) {
-            (Permission::ManageSchema, Permission::ManageSchema)
-            | (Permission::ManageRoles, Permission::ManageRoles)
-            | (Permission::ManageUsers, Permission::ManageUsers)
-            | (Permission::CreateDocument(None), Permission::CreateDocument(_))
-            | (Permission::ReadDocument(None), Permission::ReadDocument(_))
-            | (Permission::UpdateDocument(None), Permission::UpdateDocument(_))
-            | (Permission::DeleteDocument(None), Permission::DeleteDocument(_))
-            | (Permission::PublishDocument(None), Permission::PublishDocument(_)) => true,
-            (Permission::CreateDocument(Some(a)), Permission::CreateDocument(Some(b)))
-            | (Permission::ReadDocument(Some(a)), Permission::ReadDocument(Some(b)))
-            | (Permission::UpdateDocument(Some(a)), Permission::UpdateDocument(Some(b)))
-            | (Permission::DeleteDocument(Some(a)), Permission::DeleteDocument(Some(b)))
-            | (Permission::PublishDocument(Some(a)), Permission::PublishDocument(Some(b))) => {
-                a == b
+            (Permission::ManageSchema, PermissionCheck::ManageSchema)
+            | (Permission::ManageRoles, PermissionCheck::ManageRoles)
+            | (Permission::ManageUsers, PermissionCheck::ManageUsers)
+            | (Permission::CreateDocument(None), PermissionCheck::CreateDocument(_))
+            | (Permission::ReadDocument(None), PermissionCheck::ReadDocument(_))
+            | (Permission::UpdateDocument(None), PermissionCheck::UpdateDocument(_))
+            | (Permission::DeleteDocument(None), PermissionCheck::DeleteDocument(_))
+            | (Permission::PublishDocument(None), PermissionCheck::PublishDocument(_)) => true,
+            (Permission::CreateDocument(Some(a)), PermissionCheck::CreateDocument(Some(b)))
+            | (Permission::ReadDocument(Some(a)), PermissionCheck::ReadDocument(Some(b)))
+            | (Permission::UpdateDocument(Some(a)), PermissionCheck::UpdateDocument(Some(b)))
+            | (Permission::DeleteDocument(Some(a)), PermissionCheck::DeleteDocument(Some(b)))
+            | (Permission::PublishDocument(Some(a)), PermissionCheck::PublishDocument(Some(b))) => {
+                a == *b
             }
             _ => false,
         }
@@ -111,21 +185,27 @@ mod tests {
         let type_b = create_doc_type_id("author");
 
         let wildcard = Permission::ReadDocument(None);
-        let exact_a = Permission::ReadDocument(Some(type_a));
-        let exact_b = Permission::ReadDocument(Some(type_b));
+        let exact_a = Permission::ReadDocument(Some(type_a.clone()));
 
         // Wildcard matches any type
-        assert!(wildcard.matches(&exact_a));
-        assert!(wildcard.matches(&exact_b));
+        assert!(wildcard.matches(&PermissionCheck::read_document(&type_a)));
+        assert!(wildcard.matches(&PermissionCheck::read_document(&type_b)));
 
         // Exact matches only same type
-        assert!(exact_a.matches(&exact_a));
-        assert!(!exact_a.matches(&exact_b));
-        assert!(!exact_a.matches(&wildcard));
+        assert!(exact_a.matches(&PermissionCheck::read_document(&type_a)));
+        assert!(!exact_a.matches(&PermissionCheck::read_document(&type_b)));
+        assert!(!exact_a.matches(&PermissionCheck::ReadDocument(None)));
 
         // Different actions do not match
-        assert!(!Permission::ManageSchema.matches(&exact_a));
-        assert!(!Permission::CreateDocument(None).matches(&exact_a));
+        assert!(!Permission::ManageSchema.matches(&PermissionCheck::read_document(&type_a)));
+        assert!(
+            !Permission::CreateDocument(None).matches(&PermissionCheck::read_document(&type_a))
+        );
+
+        assert_eq!(
+            PermissionCheck::read_document(&type_a).to_permission(),
+            exact_a
+        );
     }
 
     #[test]
@@ -134,65 +214,62 @@ mod tests {
         let other_type = create_doc_type_id("author");
 
         // System-level permissions
-        assert!(Permission::ManageSchema.matches(&Permission::ManageSchema));
-        assert!(!Permission::ManageSchema.matches(&Permission::ManageRoles));
-        assert!(Permission::ManageRoles.matches(&Permission::ManageRoles));
-        assert!(Permission::ManageUsers.matches(&Permission::ManageUsers));
+        assert!(Permission::ManageSchema.matches(&PermissionCheck::ManageSchema));
+        assert!(!Permission::ManageSchema.matches(&PermissionCheck::ManageRoles));
+        assert!(Permission::ManageRoles.matches(&PermissionCheck::ManageRoles));
+        assert!(Permission::ManageUsers.matches(&PermissionCheck::ManageUsers));
 
         // Create
         assert!(
-            Permission::CreateDocument(None)
-                .matches(&Permission::CreateDocument(Some(doc_type.clone())))
+            Permission::CreateDocument(None).matches(&PermissionCheck::create_document(&doc_type))
         );
         assert!(
             Permission::CreateDocument(Some(doc_type.clone()))
-                .matches(&Permission::CreateDocument(Some(doc_type.clone())))
+                .matches(&PermissionCheck::create_document(&doc_type))
         );
         assert!(
             !Permission::CreateDocument(Some(doc_type.clone()))
-                .matches(&Permission::CreateDocument(Some(other_type.clone())))
+                .matches(&PermissionCheck::create_document(&other_type))
         );
 
         // Update
         assert!(
-            Permission::UpdateDocument(None)
-                .matches(&Permission::UpdateDocument(Some(doc_type.clone())))
+            Permission::UpdateDocument(None).matches(&PermissionCheck::update_document(&doc_type))
         );
         assert!(
             Permission::UpdateDocument(Some(doc_type.clone()))
-                .matches(&Permission::UpdateDocument(Some(doc_type.clone())))
+                .matches(&PermissionCheck::update_document(&doc_type))
         );
         assert!(
             !Permission::UpdateDocument(Some(doc_type.clone()))
-                .matches(&Permission::UpdateDocument(Some(other_type.clone())))
+                .matches(&PermissionCheck::update_document(&other_type))
         );
 
         // Delete
         assert!(
-            Permission::DeleteDocument(None)
-                .matches(&Permission::DeleteDocument(Some(doc_type.clone())))
+            Permission::DeleteDocument(None).matches(&PermissionCheck::delete_document(&doc_type))
         );
         assert!(
             Permission::DeleteDocument(Some(doc_type.clone()))
-                .matches(&Permission::DeleteDocument(Some(doc_type.clone())))
+                .matches(&PermissionCheck::delete_document(&doc_type))
         );
         assert!(
             !Permission::DeleteDocument(Some(doc_type.clone()))
-                .matches(&Permission::DeleteDocument(Some(other_type.clone())))
+                .matches(&PermissionCheck::delete_document(&other_type))
         );
 
         // Publish
         assert!(
             Permission::PublishDocument(None)
-                .matches(&Permission::PublishDocument(Some(doc_type.clone())))
+                .matches(&PermissionCheck::publish_document(&doc_type))
         );
         assert!(
             Permission::PublishDocument(Some(doc_type.clone()))
-                .matches(&Permission::PublishDocument(Some(doc_type.clone())))
+                .matches(&PermissionCheck::publish_document(&doc_type))
         );
         assert!(
             !Permission::PublishDocument(Some(doc_type.clone()))
-                .matches(&Permission::PublishDocument(Some(other_type)))
+                .matches(&PermissionCheck::publish_document(&other_type))
         );
     }
 
@@ -210,11 +287,11 @@ mod tests {
         };
 
         // Granted via wildcard
-        assert!(role.has_permission(&Permission::ReadDocument(Some(doc_type.clone()))));
+        assert!(role.has_permission(&PermissionCheck::read_document(&doc_type)));
         // Granted via exact match
-        assert!(role.has_permission(&Permission::UpdateDocument(Some(doc_type.clone()))));
+        assert!(role.has_permission(&PermissionCheck::update_document(&doc_type)));
         // Denied - action not in permissions
-        assert!(!role.has_permission(&Permission::DeleteDocument(Some(doc_type))));
-        assert!(!role.has_permission(&Permission::ManageSchema));
+        assert!(!role.has_permission(&PermissionCheck::delete_document(&doc_type)));
+        assert!(!role.has_permission(&PermissionCheck::ManageSchema));
     }
 }
