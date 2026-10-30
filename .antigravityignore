@@ -1,0 +1,89 @@
+# ==============================================================================
+# .antigravityignore - Ignore rules for Antigravity AI Agent
+# ==============================================================================
+# This file specifies patterns for files and directories that Antigravity
+# should exclude from codebase indexing, search, and context ingestion to
+# optimize prompt token limits, avoid context bloat, and protect sensitive data.
+# ==============================================================================
+
+# --- Rust Build Outputs & Binaries ---
+/target/
+target/
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+*.rs.bk
+*.wasm
+
+# --- Lockfiles & Generated Manifests ---
+# Excluded to avoid context window bloat; consult Cargo.toml for dependencies
+Cargo.lock
+.ai/Cargo.lock
+
+# --- Version Control ---
+.git/
+.svn/
+.hg/
+
+# --- IDEs & Editors ---
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+
+# --- Environment & Sensitive Credentials ---
+# Never index local secrets, keys, or credentials
+.env
+.env.*
+!.env.example
+.ai/local/
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+secrets/
+id_rsa*
+id_ed25519*
+
+# --- Agent Transcripts, Internal State & Scratch ---
+.system_generated/
+.antigravity/
+.gemini/
+.claude/
+scratch/
+
+# --- Temporary Files, Logs & Caches ---
+*.log
+logs/
+*.tmp
+*.temp
+tmp/
+.cache/
+CACHEDIR.TAG
+
+# --- Operating System Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# --- Database & Local Storage Files ---
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
