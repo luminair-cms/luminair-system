@@ -38,14 +38,14 @@ async fn dispatch_mode(
     context: &'static SystemContext,
 ) -> Result<CliOutcome, CliError> {
     match config.mode {
-        RunMode::Test => Ok(CliOutcome::Test(execute_test_mode(config, context))),
+        RunMode::Validate => Ok(CliOutcome::Validate(execute_test_mode(config, context))),
         RunMode::DryRun => Ok(CliOutcome::DryRun(
             execute_dry_run_mode(config, context).await?,
         )),
         RunMode::Migrate => Ok(CliOutcome::Migrate(
             execute_migrate_mode(config, context).await?,
         )),
-        RunMode::Service => Ok(execute_service_mode(config, context).await?),
+        RunMode::Serve => Ok(execute_service_mode(config, context).await?),
     }
 }
 
@@ -106,19 +106,19 @@ mod tests {
     async fn test_run_test_mode_success() {
         let schema_dir = write_test_schemas_dir();
         let config = CliConfig {
-            mode: RunMode::Test,
+            mode: RunMode::Validate,
             schema_dir: schema_dir.clone(),
             ..CliConfig::default()
         };
 
-        let result = run(&config).await.expect("run should succeed in test mode");
+        let result = run(&config).await.expect("run should succeed in validate mode");
         match result {
-            CliOutcome::Test(report) => {
+            CliOutcome::Validate(report) => {
                 assert_eq!(report.default_locale, "en");
                 assert_eq!(report.document_types.len(), 1);
                 assert_eq!(report.document_types[0].id, "post");
             }
-            _ => panic!("expected CliOutcome::Test"),
+            _ => panic!("expected CliOutcome::Validate"),
         }
 
         let _ = std::fs::remove_dir_all(&schema_dir);

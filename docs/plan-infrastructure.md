@@ -25,7 +25,7 @@ flowchart TD
     P4B["Phase 4B: Composition Root & Health Checker (Complete)<br/>(PersistenceContainer, AppContainer, HealthCheckService, ProductionHttpState)"]
     P5["Phase 5: Authentication & Authorization (Complete)<br/>(OIDC JWT, Service Tokens, User Profile Directory & Sync, AuthContextResolver, Caller / OnboardingUser)"]
     P6["Phase 6: REST API & Axum HTTP Layer (Complete)<br/>(Generic HttpState, Has* traits, Zero-Clone Codecs, RFC 9457 ProblemDetails, 25 Routes across 21 Operations)"]
-    P7["Phase 7: Cloud Runtime & DSQL IAM Integration (Complete)<br/>(RunMode::Service, AWS DSQL IAM token rotation, graceful HTTP shutdown)"]
+    P7["Phase 7: Cloud Runtime & DSQL IAM Integration (Complete)<br/>(RunMode::Serve, AWS DSQL IAM token rotation, graceful HTTP shutdown)"]
 
     P1 --> P2
     P2 --> P3
@@ -134,9 +134,9 @@ flowchart TD
 #### Phase 4A: CLI Modes (`Test`, `DryRun`, `Migrate`), Binary Entry Point & Docker Compose (Complete)
 
 - [x] **Step 4A.1: CLI Configuration & Reports (`infrastructure/src/cli/config.rs`, `report.rs`, `error.rs`)**
-  - `CliConfig`, `RunMode` (`Test`, `DryRun`, `Migrate`), and `OutputFormat` (`Text`, `Json`).
+  - `CliConfig`, `RunMode` (`Validate`, `DryRun`, `Migrate`, `Serve`), and `OutputFormat` (`Text`, `Json`).
   - Layered configuration resolution: `Defaults` $\rightarrow$ JSON config file (`--config` / `LUMINAIR_CONFIG_FILE`) $\rightarrow$ `LUMINAIR_*` env vars $\rightarrow$ CLI flags.
-  - `CliOutcome` (`Test(ConfigTestReport)`, `DryRun(DryRunReport)`, `Migrate(MigrationReport)`) with text/JSON rendering and file output (`write_report`).
+  - `CliOutcome` (`Validate(ConfigTestReport)`, `DryRun(DryRunReport)`, `Migrate(MigrationReport)`, `Serve(ServiceReport)`) with text/JSON rendering and file output (`write_report`).
 - [x] **Step 4A.2: Mode Workers & Dispatcher (`infrastructure/src/cli/runner.rs`, `test_config.rs`, `dry_run.rs`, `migrate.rs`)**
   - `run(config: &CliConfig) -> Result<CliOutcome, CliError>` loading `&'static SystemContext` and dispatching to mode workers.
   - `execute_test_mode`: Offline config and schema validation report.
@@ -144,17 +144,17 @@ flowchart TD
   - `execute_migrate_mode`: Static SQLx migrations + dynamic schema synchronization returning `MigrationReport`.
 - [x] **Step 4A.3: Binary Entry Point & Docker Compose (`infrastructure/src/main.rs`, `docker-compose.yml`, `Dockerfile`, `config/cli-config.json`)**
   - `main.rs` entry point with `tracing_subscriber` (stderr) and `ExitCode` handling.
-  - Prepared config file (`config/cli-config.json`), `docker-compose.yml` services (`cli-test`, `cli-dry-run-offline`, `cli-dry-run`, `cli-migrate` under profile `cli`), and CLI integration tests (`infrastructure/tests/cli_test.rs`).
+  - Prepared config file (`config/cli-config.json`), `docker-compose.yml` services (`cli-validate`, `cli-dry-run-offline`, `cli-dry-run`, `cli-migrate` under profile `cli`), and CLI integration tests (`infrastructure/tests/cli_test.rs`).
 
-#### Phase 4B: Composition Root (`container.rs`), Health Checker & `Service` Mode
+#### Phase 4B: Composition Root (`container.rs`), Health Checker & `Serve` Mode
 
 - [x] **Step 4B.1: Composition Root Wiring (`infrastructure/src/container.rs`)**
   - Assemble `PersistenceContainer` (initializing `&'static SchemaNaming` via `SchemaNaming::from_registry(&context.schema)` and constructing all 6 `Sqlx*Repository` adapters: `SqlxDocumentInstanceRepository`, `SqlxDocumentSnapshotRepository`, `SqlxRoleRepository`, `SqlxUserRoleAssignmentRepository`, `SqlxAccessRequestRepository`, `SqlxUserProfileRepository`).
   - Assemble `AppContainer` (`from_pool_and_context`) wiring `DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`, `UserDirectoryServiceImpl`, `SqlxHealthChecker`, and `SqlxAuthResolver`, plus `AppContainer::http_state() -> ProductionHttpState`.
 - [x] **Step 4B.2: Health Checker (`infrastructure/src/health.rs`)**
   - Implement `HealthStatus` (`Healthy`, `Unhealthy { reason }`), `HealthCheckService` port trait, `SqlxHealthChecker` (`/healthz` liveness and `/ready` readiness via `SELECT 1` on `PgPool`), and `AlwaysHealthyChecker`.
-- [x] **Step 4B.3: `RunMode::Service` Worker (`infrastructure/src/cli/service.rs`)**
-  - Extend `RunMode`, `CliConfig`, and `CliOutcome` with HTTP server settings (`host`, `port`, auth configuration) and `RunMode::Service` startup.
+- [x] **Step 4B.3: `RunMode::Serve` Worker (`infrastructure/src/cli/service.rs`)**
+  - Extend `RunMode`, `CliConfig`, and `CliOutcome` with HTTP server settings (`host`, `port`, auth configuration) and `RunMode::Serve` startup.
 
 ---
 
@@ -210,7 +210,7 @@ flowchart TD
     end
 
     subgraph S2["2. HTTP Service Daemon (cli/service.rs & cli/config.rs)"]
-        CFG["CliConfig Extension<br/>(RunMode::Service, http_host, http_port, auth settings)"]
+        CFG["CliConfig Extension<br/>(RunMode::Serve, http_host, http_port, auth settings)"]
         CONT["AppContainer::from_pool_and_context"]
         ROUT["build_router(container.http_state())"]
         SERV["axum::serve(listener, router).with_graceful_shutdown()"]
@@ -224,10 +224,10 @@ flowchart TD
 
 
 - [x] **Step 7.1: HTTP Service Worker & Graceful Shutdown (`infrastructure/src/cli/service.rs`, `config.rs`, `runner.rs`, `report.rs`)**
-  - Extend `RunMode` with `RunMode::Service` and `CliConfig` with HTTP settings (`http_host`, `http_port`, `auto_migrate`, `oidc_jwt_secret`, `oidc_jwt_public_key_pem`, `oidc_issuer`, `oidc_audience`, `service_tokens`).
+  - Extend `RunMode` with `RunMode::Serve` and `CliConfig` with HTTP settings (`http_host`, `http_port`, `auto_migrate`, `oidc_jwt_secret`, `oidc_jwt_public_key_pem`, `oidc_issuer`, `oidc_audience`, `service_tokens`).
   - Implement `execute_service_mode` orchestrator binding `tokio::net::TcpListener` and mounting `build_router(container.http_state())`.
   - Handle cross-platform graceful termination via `tokio::signal::ctrl_c()` (`SIGINT`) and Unix `SIGTERM`, passing shutdown signal to `axum::serve(listener, router).with_graceful_shutdown()`.
-  - Output structured `ServiceReport` via `CliOutcome::Service`.
+  - Output structured `ServiceReport` via `CliOutcome::Serve`.
 - [x] **Step 7.2: AWS Aurora DSQL Connection Factory (`infrastructure/src/persistence/connection.rs`)**
   - Implement `create_connection_pool` supporting both standard PostgreSQL (`postgres://...`) and Aurora DSQL (`*.dsql.[region].on.aws`).
   - Implement `DsqlTokenProvider` trait with local SigV4 / environment token generator.

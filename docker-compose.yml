@@ -16,8 +16,8 @@
 #    - Pre-configured client: luminair-admin-spa (redirects to :5173/callback, :3000/callback)
 #
 # 2. Run CLI commands by hand:
-#    - Test mode (in-memory schema validation, no DB required):
-#      docker compose run --rm cli-test
+#    - Validate mode (in-memory schema validation, no DB required):
+#      docker compose run --rm cli-validate
 #
 #    - Offline dry-run mode (offline schema & config validation, no DB required):
 #      docker compose run --rm cli-dry-run-offline
@@ -68,7 +68,7 @@ services:
       retries: 5
       start_period: 3s
 
-  cli-test:
+  cli-validate:
     build:
       context: .
       dockerfile: Dockerfile
@@ -76,7 +76,7 @@ services:
       - "cli"
     volumes:
       - ./config:/app/config:ro
-    command: ["--config", "/app/config/cli-config.json", "--mode", "test"]
+    command: ["--config", "/app/config/cli-config.json", "--mode", "validate"]
 
   cli-dry-run-offline:
     build:
@@ -140,7 +140,7 @@ services:
       LUMINAIR_OIDC_AUDIENCE: "luminair-admin-spa"
     volumes:
       - ./config:/app/config:ro
-    command: ["--config", "/app/config/cli-config.json", "--mode", "service"]
+    command: ["--config", "/app/config/cli-config.json", "--mode", "serve"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
       interval: 5s

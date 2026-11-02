@@ -1,5 +1,5 @@
 {
-  "mode": "test",
+  "mode": "validate",
   "schemaDir": "./config/schemas",
   "databaseUrl": "postgres://luminair:luminair@localhost:5432/luminair",
   "maxDbConnections": 5,

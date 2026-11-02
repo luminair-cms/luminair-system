@@ -116,13 +116,15 @@ pub struct ServiceReport {
 #[serde(tag = "mode", rename_all = "camelCase")]
 pub enum CliOutcome {
     /// Result of offline configuration and schema validation.
-    Test(ConfigTestReport),
+    #[serde(alias = "test")]
+    Validate(ConfigTestReport),
     /// Result of dry-run migration planning and DDL preview.
     DryRun(DryRunReport),
     /// Result of live database migration execution.
     Migrate(MigrationReport),
     /// Result of HTTP server daemon execution.
-    Service(ServiceReport),
+    #[serde(alias = "service")]
+    Serve(ServiceReport),
 }
 
 // ---------------------------------------------------------------------------
@@ -253,10 +255,10 @@ impl fmt::Display for ServiceReport {
 impl fmt::Display for CliOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Test(report) => write!(f, "{report}"),
+            Self::Validate(report) => write!(f, "{report}"),
             Self::DryRun(report) => write!(f, "{report}"),
             Self::Migrate(report) => write!(f, "{report}"),
-            Self::Service(report) => write!(f, "{report}"),
+            Self::Serve(report) => write!(f, "{report}"),
         }
     }
 }
@@ -317,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_render_config_test_outcome_text_and_json() {
-        let outcome = CliOutcome::Test(sample_test_report());
+        let outcome = CliOutcome::Validate(sample_test_report());
 
         let text = outcome.render(OutputFormat::Text).unwrap();
         assert!(text.contains("=== Configuration & Schema Test Report ==="));
@@ -325,7 +327,7 @@ mod tests {
         assert!(text.contains("Status: OK"));
 
         let json = outcome.render(OutputFormat::Json).unwrap();
-        assert!(json.contains("\"mode\": \"test\""));
+        assert!(json.contains("\"mode\": \"validate\""));
         assert!(json.contains("\"schemaDir\": \"./config/schemas\""));
         assert!(json.contains("\"defaultLocale\": \"en\""));
     }
@@ -361,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_write_report_to_file() {
-        let outcome = CliOutcome::Test(sample_test_report());
+        let outcome = CliOutcome::Validate(sample_test_report());
         let temp_dir = std::env::temp_dir();
         let target_file = temp_dir.join("test_write_report.txt");
 

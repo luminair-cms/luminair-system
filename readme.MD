@@ -25,10 +25,10 @@ Luminair provides a CLI (in the `infrastructure` binary) supporting four executi
 
 | Mode | Description | Requires Database? |
 |---|---|---|
-| `test` | Loads and validates `cli-config.json`, `system-config.json`, and all `document-types/*.json` schemas into `SystemContext`, outputting a configuration & schema summary report. | No |
+| `validate` | Loads and validates `cli-config.json`, `system-config.json`, and all `document-types/*.json` schemas into `SystemContext`, outputting a configuration & schema summary report. | No |
 | `dry-run` | Loads config and schemas, plans static + dynamic migration steps (either offline against an empty schema with `--offline`, or against a live PostgreSQL database), and outputs all planned steps and generated DDL SQL without modifying the database. | Optional (`--offline` supported) |
 | `migrate` | Connects to PostgreSQL, executes embedded static migrations and dynamic schema synchronization, and writes a migration execution report. | Yes |
-| `service` | Starts the Axum HTTP REST API service, optionally applies migrations automatically on boot (`autoMigrate`), and serves `/api/v1/*` endpoints. | Yes |
+| `serve` | Starts the Axum HTTP REST API service, optionally applies migrations automatically on boot (`autoMigrate`), and serves `/api/v1/*` endpoints. | Yes |
 
 ### 1. Run via Docker Compose
 
@@ -52,9 +52,9 @@ docker compose up -d
   - `editor@luminair.dev` (Subject: `08a1d7f3-editor-sub`)
 - **Configured Client**: `luminair-admin-spa` (Redirect URIs: `http://localhost:5173/callback`, `http://localhost:3000/callback`)
 
-#### A. Test Mode (Config & Schema Validation — No DB Required)
+#### A. Validate Mode (Config & Schema Validation — No DB Required)
 ```bash
-docker compose run --rm cli-test
+docker compose run --rm cli-validate
 ```
 
 #### B. Offline Dry-Run Mode (Preview All Steps & Generated DDL SQL — No DB Required)
@@ -98,7 +98,7 @@ You can also run all modes directly from the workspace root without Docker (or a
 
 ```bash
 # 1. Validate configuration and schemas:
-cargo run -p infrastructure -- --config config/cli-config.json --mode test
+cargo run -p infrastructure -- --config config/cli-config.json --mode validate
 
 # 2. Preview all migration steps and DDL SQL offline:
 cargo run -p infrastructure -- --config config/cli-config.json --mode dry-run --offline
@@ -109,7 +109,7 @@ cargo run -p infrastructure -- --config config/cli-config.json --mode dry-run
 cargo run -p infrastructure -- --config config/cli-config.json --mode migrate
 
 # 4. Start the HTTP REST service:
-cargo run -p infrastructure -- --config config/cli-config.json --mode service
+cargo run -p infrastructure -- --config config/cli-config.json --mode serve
 ```
 
 ## Environment Variables
@@ -129,18 +129,18 @@ Configuration settings are resolved in the following priority order (highest to 
 | Environment Variable | CLI Flag Equivalent | Default | Description |
 |---|---|---|---|
 | `LUMINAIR_CONFIG_FILE` | `--config <PATH>` | None | Path to base JSON configuration file (e.g. `./config/cli-config.json`). |
-| `LUMINAIR_MODE` | `--mode <MODE>` | `test` | Runtime execution mode: `test`, `dry-run`, `migrate`, or `service`. |
+| `LUMINAIR_MODE` | `--mode <MODE>` | `validate` | Runtime execution mode: `validate`, `dry-run`, `migrate`, or `serve`. |
 | `LUMINAIR_SCHEMA_DIR` | `--schema-dir <DIR>` | `./config/schemas` | Root directory containing `system-config.json` and `document-types/*.json`. |
-| `LUMINAIR_DATABASE_URL`<br/>*(or `DATABASE_URL`)* | `--database-url <URL>` | None | Database connection string (PostgreSQL or Amazon Aurora DSQL). Required for `migrate` and `service` modes. |
+| `LUMINAIR_DATABASE_URL`<br/>*(or `DATABASE_URL`)* | `--database-url <URL>` | None | Database connection string (PostgreSQL or Amazon Aurora DSQL). Required for `migrate` and `serve` modes. |
 | `LUMINAIR_DSQL_AUTH_TOKEN` | — | None | AWS IAM authentication token for Amazon Aurora DSQL connections. |
 | `LUMINAIR_MAX_DB_CONNECTIONS` | `--max-db-connections <N>` | `5` | Maximum number of concurrent connections in the SQL pool. |
-| `LUMINAIR_SAFETY_POLICY` | `--safety-policy <POLICY>` | `additive` | Dynamic DDL schema migration policy: `additive` (`additive-only`) or `destructive` (`allow-destructive`). |
-| `LUMINAIR_OFFLINE` | `--offline` | `false` | Run without attempting database connectivity (applicable to `test` and `dry-run` modes). |
+| `LUMINAIR_SAFETY_POLICY` | `--safety-policy <POLICY>` | `additive` | Dynamic DDL schema migration policy: `additive` or `destructive`. |
+| `LUMINAIR_OFFLINE` | `--offline` | `false` | Run without attempting database connectivity (applicable to `validate` and `dry-run` modes). |
 | `LUMINAIR_OUTPUT_FORMAT` | `--format <FORMAT>` | `text` | CLI report output format (`text` or `json`). |
 | `LUMINAIR_OUTPUT_PATH` | `--output-path <PATH>` | None *(stdout)* | Optional file destination path to write the execution or migration report. |
-| `LUMINAIR_HTTP_HOST` | `--http-host <HOST>` | `127.0.0.1` | Network interface address to bind the HTTP REST service in `service` mode. |
-| `LUMINAIR_HTTP_PORT` | `--http-port <PORT>` | `8080` | Port to bind the HTTP REST service in `service` mode. |
-| `LUMINAIR_AUTO_MIGRATE` | `--auto-migrate` | `false` | Automatically apply static migrations and sync dynamic schema on startup in `service` mode. |
+| `LUMINAIR_HTTP_HOST` | `--http-host <HOST>` | `127.0.0.1` | Network interface address to bind the HTTP REST service in `serve` mode. |
+| `LUMINAIR_HTTP_PORT` | `--http-port <PORT>` | `8080` | Port to bind the HTTP REST service in `serve` mode. |
+| `LUMINAIR_AUTO_MIGRATE` | `--auto-migrate` | `false` | Automatically apply static migrations and sync dynamic schema on startup in `serve` mode. |
 | `LUMINAIR_OIDC_ISSUER` | `--oidc-issuer <URL>` | None | Expected OpenID Connect issuer (`iss` claim), e.g. `http://localhost:5556/dex` or `https://cognito-idp.<region>.amazonaws.com/<user-pool-id>`. |
 | `LUMINAIR_OIDC_AUDIENCE` | `--oidc-audience <AUD>` | None | Expected OpenID Connect audience (`aud` claim), e.g. `luminair-admin-spa` or AWS Cognito App Client ID. |
 | `LUMINAIR_OIDC_JWT_PUBLIC_KEY_PEM` | `--oidc-jwt-public-key-pem <PEM>` | None | RS256 RSA public key in PEM format used to verify OIDC JWT signatures (e.g. from AWS Cognito). |
@@ -162,7 +162,7 @@ Save the following as `.env` in the repository root:
 # ==============================================================================
 
 # Execution Mode & Schema Location
-LUMINAIR_MODE=service
+LUMINAIR_MODE=serve
 LUMINAIR_SCHEMA_DIR=./config/schemas
 
 # HTTP Server Configuration
@@ -234,7 +234,7 @@ For cloud-native production deployments on AWS (Amazon ECS Fargate, EKS, or AWS 
 # ==============================================================================
 
 # Execution Mode & Schema Location
-LUMINAIR_MODE=service
+LUMINAIR_MODE=serve
 LUMINAIR_SCHEMA_DIR=/app/config/schemas
 
 # HTTP Server Configuration (Binds to 0.0.0.0 inside container)

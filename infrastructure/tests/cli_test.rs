@@ -40,14 +40,14 @@ async fn test_cli_test_mode_with_prepared_config_succeeds() {
         .expect("prepared cli-config.json must load successfully");
 
     config.schema_dir = root.join("config/schemas");
-    assert_eq!(config.mode, RunMode::Test);
+    assert_eq!(config.mode, RunMode::Validate);
 
     let outcome = run(&config)
         .await
         .expect("CLI test mode execution must succeed");
 
-    let CliOutcome::Test(report) = outcome else {
-        panic!("expected CliOutcome::Test, got: {outcome:?}");
+    let CliOutcome::Validate(report) = outcome else {
+        panic!("expected CliOutcome::Validate, got: {outcome:?}");
     };
 
     assert_eq!(report.default_locale, "en");
@@ -67,7 +67,7 @@ async fn test_cli_test_mode_with_prepared_config_succeeds() {
 async fn test_cli_test_mode_rejects_invalid_schema() {
     let guard = create_broken_schema_dir();
     let config = CliConfig {
-        mode: RunMode::Test,
+        mode: RunMode::Validate,
         schema_dir: guard.path.clone(),
         ..CliConfig::default()
     };
@@ -186,7 +186,7 @@ fn test_cli_service_mode_config_parsing_and_flags() {
     let args = [
         "luminair",
         "--mode",
-        "service",
+        "serve",
         "--host",
         "127.0.0.1",
         "--port",
@@ -203,7 +203,7 @@ fn test_cli_service_mode_config_parsing_and_flags() {
     ];
 
     let config = CliConfig::parse_from_iter(args).expect("CLI arg parsing should succeed");
-    assert_eq!(config.mode, RunMode::Service);
+    assert_eq!(config.mode, RunMode::Serve);
     assert_eq!(config.http_host, "127.0.0.1");
     assert_eq!(config.http_port, 9090);
     assert!(config.auto_migrate);
@@ -226,14 +226,14 @@ fn test_cli_service_mode_config_parsing_and_flags() {
 fn test_cli_service_mode_validation_rejects_missing_database_url() {
     let root = workspace_root();
     let config = CliConfig {
-        mode: RunMode::Service,
+        mode: RunMode::Serve,
         schema_dir: root.join("config/schemas"),
         database_url: None,
         ..CliConfig::default()
     };
     let err = config.validate().expect_err("should reject missing database_url");
     assert!(
-        matches!(err, CliError::Config(msg) if msg.contains("database_url is required for 'service' mode"))
+        matches!(err, CliError::Config(msg) if msg.contains("database_url is required for 'serve' mode"))
     );
 }
 
@@ -241,7 +241,7 @@ fn test_cli_service_mode_validation_rejects_missing_database_url() {
 fn test_cli_service_mode_validation_rejects_zero_port() {
     let root = workspace_root();
     let config = CliConfig {
-        mode: RunMode::Service,
+        mode: RunMode::Serve,
         schema_dir: root.join("config/schemas"),
         database_url: Some("postgres://localhost:5432/db".to_string()),
         http_port: 0,
@@ -261,7 +261,7 @@ fn test_cli_service_report_rendering() {
         bind_address: "127.0.0.1:8080".to_string(),
         status: "Shutdown cleanly".to_string(),
     };
-    let outcome = CliOutcome::Service(report);
+    let outcome = CliOutcome::Serve(report);
 
     let text = outcome.render(OutputFormat::Text).expect("text format");
     assert!(text.contains("=== Luminair HTTP Service Report ==="));
@@ -269,7 +269,7 @@ fn test_cli_service_report_rendering() {
     assert!(text.contains("Status:       Shutdown cleanly"));
 
     let json = outcome.render(OutputFormat::Json).expect("json format");
-    assert!(json.contains("\"mode\": \"service\""));
+    assert!(json.contains("\"mode\": \"serve\""));
     assert!(json.contains("\"bindAddress\": \"127.0.0.1:8080\""));
 }
 

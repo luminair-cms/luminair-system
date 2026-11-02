@@ -224,18 +224,19 @@ async fn dispatch_mode(
     context: &'static SystemContext,
 ) -> Result<CliOutcome, CliError> {
     match config.mode {
-        RunMode::Test => Ok(CliOutcome::Test(execute_test_mode(config, context))),
+        RunMode::Validate => Ok(CliOutcome::Validate(execute_test_mode(config, context))),
         RunMode::DryRun => Ok(CliOutcome::DryRun(
             execute_dry_run_mode(config, context).await?,
         )),
         RunMode::Migrate => Ok(CliOutcome::Migrate(
             execute_migrate_mode(config, context).await?,
         )),
+        RunMode::Serve => Ok(execute_service_mode(config, context).await?),
     }
 }
 ```
 
-*(Note: `RunMode::Service` in `cli/service.rs` is scheduled for Phase 4B.3 / Phase 7).*
+*(Note: `RunMode::Serve` in `cli/service.rs` implements graceful shutdown and HTTP daemon startup).*
 
 ### 4.1 Service Mode & Connection Factory Architecture
 
@@ -249,7 +250,7 @@ flowchart TD
     end
 
     subgraph S2["2. HTTP Service Daemon (cli/service.rs & cli/config.rs)"]
-        CFG["CliConfig Extension<br/>(RunMode::Service, http_host, http_port, auth settings)"]
+        CFG["CliConfig Extension<br/>(RunMode::Serve, http_host, http_port, auth settings)"]
         CONT["AppContainer::from_pool_and_context"]
         ROUT["build_router(container.http_state())"]
         SERV["axum::serve(listener, router).with_graceful_shutdown()"]

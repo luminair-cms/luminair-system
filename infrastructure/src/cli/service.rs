@@ -55,7 +55,7 @@ pub async fn execute_service_mode(
 
     serve_with_graceful_shutdown(listener, router).await?;
 
-    Ok(CliOutcome::Service(ServiceReport {
+    Ok(CliOutcome::Serve(ServiceReport {
         bind_address: local_addr.to_string(),
         status: "Shutdown cleanly".to_string(),
     }))
@@ -70,7 +70,7 @@ async fn setup_database(
     context: &'static SystemContext,
 ) -> Result<PgPool, CliError> {
     let db_url = config.database_url.as_deref().ok_or_else(|| {
-        CliError::Config("database_url is required for 'service' mode".to_string())
+        CliError::Config("database_url is required for 'serve' mode".to_string())
     })?;
 
     let pool = create_connection_pool(db_url, config.max_db_connections).await?;
