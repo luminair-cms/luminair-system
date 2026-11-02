@@ -3,7 +3,7 @@
 > Operational rules for [ADR-001](../adr/ADR-001-declarative-test-specifications.md).
 > Audience: **humans** and **AI agents**. Each part has a section for both.
 > Worked examples: [`examples.md`](./examples.md). Template: [`TEMPLATE.md`](./TEMPLATE.md).
-> Agent entry point: [`.ai/skills/spec-testing.md`](../../.ai/skills/spec-testing.md).
+> Agent entry point: [`.ai/skills/common/spec-testing.md`](../../.ai/skills/common/spec-testing.md).
 
 ## 0. Overview
 

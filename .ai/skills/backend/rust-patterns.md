@@ -9,7 +9,7 @@ It unifies architectural patterns, Domain-Driven Design (DDD) idioms, classic Go
 
 ### Hexagonal Crate Boundaries & Dependency Injection
 
-- Follow the three-crate boundary strictly (see [`docs/architecture.md`](../../docs/architecture.md)):
+- Follow the three-crate boundary strictly (see [`docs/architecture.md`](../../../docs/architecture.md)):
   - `domain` and `application` contain pure business and orchestration logic (zero SQL, HTTP, or filesystem I/O).
   - Repository ports (`trait DocumentInstanceRepository`, `trait RoleRepository`, etc.) are defined in `domain` and implemented only in `infrastructure`.
 - **Async Ports & Static Dependency Injection (RPITIT)**:
@@ -56,13 +56,6 @@ Every Rust source file follows top-down dependency ordering ("newspaper style"):
 3. **Implementations**: Inherent `impl`s first, trait `impl`s after.
 4. **Functions**: Public functions first in dependency order (high-level orchestrators first, subroutines after); private helpers follow.
 5. **Tests**: `#[cfg(test)] mod tests { ... }` at the bottom of the file.
-
-### Clean Code & Function Design
-
-Strictly follow [`.ai/skills/clean-code.md`](clean-code.md):
-- **SRP**: One responsibility and one reason to change per function/struct.
-- **SLAP**: High-level orchestrators coordinate steps and delegate raw I/O, parsing, SQL construction, and loops to focused helper functions.
-- **Size & Nesting**: Target 10–30 lines per function (flag > 40 lines), max nesting depth 2, guard clauses (`?`) fail fast at the top.
 
 ---
 
@@ -344,7 +337,7 @@ pub struct Json;
 
 - Place inline unit tests in `#[cfg(test)] mod tests` at the bottom of the module under test.
 - Use `#[tokio::test]` for async tests.
-- Follow [`.ai/skills/testing.md`](testing.md) and [`.ai/skills/spec-testing.md`](spec-testing.md) for integration and spec-traceable tests.
+- Follow [`testing.md`](testing.md) and [`.ai/skills/common/spec-testing.md`](../common/spec-testing.md) for integration and spec-traceable tests.
 
 ### Clippy & Anti-Patterns to Avoid
 

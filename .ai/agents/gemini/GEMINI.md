@@ -7,7 +7,7 @@
 Gemini automatically indexes the workspace. At session start, ensure loaded:
 1. `AGENTS.md`
 2. `.ai/context/project.md`
-3. Skill relevant to the task (e.g. [`.ai/skills/clean-code.md`](../skills/clean-code.md))
+3. Skill relevant to the task (e.g. [`.ai/skills/backend/clean-code.md`](../skills/backend/clean-code.md))
 
 ## Tool Hints
 

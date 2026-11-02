@@ -5,7 +5,7 @@
 - **Deciders**: Dmitri Astafiev
 - **Decision trigger**: the `application` crate (use cases) is implemented — reached; see [Decision](#decision)
 - **Research**: [`docs/research/declarative-test-specifications.md`](../research/declarative-test-specifications.md) (detailed examples for the domain model)
-- **Operational rules**: [`docs/specs/GUIDELINES.md`](../specs/GUIDELINES.md) and [`.ai/skills/spec-testing.md`](../../.ai/skills/spec-testing.md)
+- **Operational rules**: [`docs/specs/GUIDELINES.md`](../specs/GUIDELINES.md) and [`.ai/skills/common/spec-testing.md`](../../.ai/skills/common/spec-testing.md)
 
 ---
 
@@ -171,7 +171,7 @@ Consequence for the build: `domain` gets the same self dev-dependency with `test
 
 ### Follow-ups
 - [x] `docs/specs/` structure, template, guidelines and examples (`docs/specs/`).
-- [x] Skill for generating and reviewing tests from specs: [`.ai/skills/spec-testing.md`](../../.ai/skills/spec-testing.md); [`.ai/skills/testing.md`](../../.ai/skills/testing.md) updated.
+- [x] Skill for generating and reviewing tests from specs: [`.ai/skills/common/spec-testing.md`](../../.ai/skills/common/spec-testing.md); [`.ai/skills/backend/testing.md`](../../.ai/skills/backend/testing.md) updated.
 - [x] Fakes: `FieldFilter` honored, lock errors reported as `Storage`, deterministic paging.
 - [x] Initial draft specs (all `Draft`, awaiting human review).
 - [ ] Human review and approval of the draft specs, then blind test generation per spec file.

@@ -224,7 +224,20 @@ Complement to Architecture Decision Records (ADRs). Records tactical and operati
 
 ---
 
-### 2026-10-29 — Schema Loader DTO Simplification (Direct Domain Enum Reuse)
+### 2026-11-02 — Option B: Modular Rules & Skills Refactoring (Common, Backend, Frontend)
+
+- **Context**: Structural audit of `.ai` configuration to decouple hard invariant rules from on-demand procedural skills, and accommodate the planned `frontend/` (React 19 SPA per `docs/ui-architecture.md`).
+- **Decisions**:
+  1. **Option B Adopted**: Extracted hard constraints and invariant guardrails into dedicated modular rule files under `.ai/rules/`:
+     - `.ai/rules/common.md`: Human governance, hexagonal boundaries, RFC 9457 error contracts, security/secrets.
+     - `.ai/rules/backend-rust.md`: Pure domain logic, `nutype` Value Objects, `Decimal`, `Uuid::now_v7()`, zero `.unwrap()`, SLAP metrics (10–30 lines, max nesting 2), and `cargo clippy`.
+     - `.ai/rules/frontend-react.md`: Strict TypeScript (zero `any`), Mantine v7 design system invariants, TanStack Query/Router, and RFC 9457 UI localization.
+  2. **Modular Skills Reorganization (`.ai/skills/`)**:
+     - `common/`: `adr-process.md`, `spec-testing.md`, `review.md` (scorecard).
+     - `backend/`: `clean-code.md`, `rust-patterns.md`, `testing.md`.
+     - `frontend/`: `react-patterns.md`, `react-testing.md`.
+  3. **Root Entrypoint Alignment**: Updated `AGENTS.md` to index all modular rules and domain skills with updated relative links.
+
 
 - **Context**: Streamlining schema loading DTOs by removing redundant mirror enums (`DocumentKindDto`, `RelationTypeDto`) in favor of direct reuse of domain value objects that already implement `serde::Deserialize`.
 - **Decisions**:

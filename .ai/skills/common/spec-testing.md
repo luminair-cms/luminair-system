@@ -2,19 +2,19 @@
 
 Load this skill whenever:
 1. Drafting or reviewing behavioral specifications in `docs/specs/`.
-2. Generating Rust test code from approved behavior specifications.
+2. Generating Rust or frontend test code from approved behavior specifications.
 3. Reviewing test implementations against specifications.
 4. Handling failing tests generated from specifications (spec–code mismatches).
 
-Operational handbook: [`docs/specs/GUIDELINES.md`](../../docs/specs/GUIDELINES.md)
-Format template: [`docs/specs/TEMPLATE.md`](../../docs/specs/TEMPLATE.md)
-Reference examples: [`docs/specs/examples.md`](../../docs/specs/examples.md)
+Operational handbook: [`docs/specs/GUIDELINES.md`](../../../docs/specs/GUIDELINES.md)
+Format template: [`docs/specs/TEMPLATE.md`](../../../docs/specs/TEMPLATE.md)
+Reference examples: [`docs/specs/examples.md`](../../../docs/specs/examples.md)
 
 ---
 
 ## 1. Core Workflow Roles & Rules
 
-Per [`AGENTS.md`](../../AGENTS.md) §0 and [`ADR-001`](../../docs/adr/ADR-001-declarative-test-specifications.md):
+Per [`AGENTS.md`](../../../AGENTS.md), [`.ai/rules/common.md`](../../rules/common.md), and [`ADR-001`](../../../docs/adr/ADR-001-declarative-test-specifications.md):
 - **Specs First**: Main code behavior is governed by written specification rules.
 - **Human Owns Intent**: An AI agent may draft specs and suggest findings, but **ONLY a human can mark a rule as `Approved`**.
 - **Blind Generation**: When generating tests from an approved spec, the AI must NOT read function bodies or inline tests of the unit under test. Only public signatures, `test_support`, and the spec rules are permitted.

@@ -1,10 +1,12 @@
-# Skill: Writing Tests for Luminair
+# Skill: Writing Tests for Luminair (Backend)
 
-Load this skill when asked to write or modify tests.
-For the behavior specification approach, see [`ADR-001`](../../docs/adr/ADR-001-declarative-test-specifications.md) and [`.ai/skills/spec-testing.md`](spec-testing.md).
-For operational guidelines, see [`docs/specs/GUIDELINES.md`](../../docs/specs/GUIDELINES.md).
+Load this skill when asked to write or modify Rust tests.
+For the behavior specification approach, see [`ADR-001`](../../../docs/adr/ADR-001-declarative-test-specifications.md) and [`.ai/skills/common/spec-testing.md`](../common/spec-testing.md).
+For operational guidelines, see [`docs/specs/GUIDELINES.md`](../../../docs/specs/GUIDELINES.md).
 
-## Test Organization & Locations
+---
+
+## 1. Test Organization & Locations
 
 ```
 Kind of Test                     Location                      Access
@@ -16,12 +18,12 @@ Infrastructure integration tests infrastructure/tests/*.rs     Database & extern
 ```
 
 - **Spec-backed tests** (rules in `docs/specs/`) must live in `<crate>/tests/*.rs` as integration tests. They test external, observable behavior only.
-- **Inline unit tests** (`#[cfg(test)]`) are reserved for private algorithms, helpers, or legacy tests not yet migrated.
+- **Inline unit tests** (`#[cfg(test)]`) are reserved for private algorithms, helpers, or internal invariants.
 - **Fake repository self-tests** live directly inside `application/src/test_support.rs`.
 
 ---
 
-## Fake Repositories Pattern (Application Layer)
+## 2. Fake Repositories Pattern (Application Layer)
 
 Use the built-in thread-safe fake repositories from `application::test_support`:
 - `FakeDocumentInstanceRepository`: in-memory storage supporting filtering, deterministic pagination, and batch relation lookups.
@@ -54,7 +56,7 @@ async fn test_create_document_success() {
 
 ---
 
-## Integration Test Skeleton (Infrastructure Layer)
+## 3. Integration Test Skeleton (Infrastructure Layer)
 
 ```rust
 // infrastructure/tests/migrations_test.rs or repository_test.rs
@@ -69,7 +71,7 @@ async fn test_create_instance_persists_to_db(pool: PgPool) {
 
 ---
 
-## Naming & Traceability Conventions
+## 4. Naming & Traceability Conventions
 
 - Spec-backed use cases: `fn <prefix_lowercase>_<num>_<brief_description>()`, e.g. `fn ds_01_create_draft_success()`
 - Spec-backed table cases: field `id: "LC-01"` in `Case` struct
@@ -78,9 +80,9 @@ async fn test_create_instance_persists_to_db(pool: PgPool) {
 
 ---
 
-## What NOT to Do
+## 5. What NOT to Do
 
-- **NEVER** edit assertions when a spec-backed test fails — report a spec–code mismatch (see `.ai/skills/spec-testing.md`).
+- **NEVER** edit assertions when a spec-backed test fails — report a spec–code mismatch (see [`.ai/skills/common/spec-testing.md`](../common/spec-testing.md)).
 - **NEVER** inspect private fields or implementation details in spec-backed tests.
 - Do not call `.unwrap()` in tests — use `.expect("descriptive reason")` for setup or `?` with `Result`.
 - Do not share global mutable state between tests (use isolated instances or `Box::leak` for immutable read-only contexts).

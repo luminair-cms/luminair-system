@@ -22,14 +22,28 @@ Read in this order:
 
 *(Note: `docs/roadmap.md` and `docs/data-model.md` are planned milestone artifacts).*
 
-## 2. Load Skills Before Acting
+## 2. Rules & Skills Index
 
-| Task | Skill to load |
-|---|---|
-| Writing or modifying Rust code | [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md), [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md) |
-| Writing or modifying tests | [`.ai/skills/testing.md`](.ai/skills/testing.md), [`.ai/skills/spec-testing.md`](.ai/skills/spec-testing.md) |
-| Reviewing / self-reviewing code | [`.ai/skills/review.md`](.ai/skills/review.md), [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md), [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md) |
-| Investigating a topic / drafting an ADR | [`.ai/skills/adr-process.md`](.ai/skills/adr-process.md) |
+Rules are **mandatory invariants** that must never be violated. Skills are **on-demand runbooks** loaded when performing specific tasks.
+
+### A. Modular Rules
+
+- **Common Rules**: [`.ai/rules/common.md`](.ai/rules/common.md) — Human governance, hexagonal boundaries, RFC 9457 error contracts, security.
+- **Backend (Rust) Rules**: [`.ai/rules/backend-rust.md`](.ai/rules/backend-rust.md) — Strict domain purity, `nutype`, `Decimal`, `Uuid::now_v7()`, zero `.unwrap()`, SLAP metrics, `cargo clippy`.
+- **Frontend (React) Rules**: [`.ai/rules/frontend-react.md`](.ai/rules/frontend-react.md) — Strict TypeScript, Mantine v7 design system, TanStack Query/Router, RFC 9457 i18n localization.
+
+### B. Skills by Domain
+
+| Domain | Task | Skill to load |
+|---|---|---|
+| **Common** | Investigating a topic / drafting an ADR | [`.ai/skills/common/adr-process.md`](.ai/skills/common/adr-process.md) |
+| **Common** | Behavior specification & mismatch handling | [`.ai/skills/common/spec-testing.md`](.ai/skills/common/spec-testing.md) |
+| **Common** | Reviewing / self-reviewing code | [`.ai/skills/common/review.md`](.ai/skills/common/review.md) |
+| **Backend** | Writing or refactoring clean Rust code | [`.ai/skills/backend/clean-code.md`](.ai/skills/backend/clean-code.md) |
+| **Backend** | Rust idioms, GoF patterns & type design | [`.ai/skills/backend/rust-patterns.md`](.ai/skills/backend/rust-patterns.md) |
+| **Backend** | Writing Rust tests (unit, fake repos, sqlx) | [`.ai/skills/backend/testing.md`](.ai/skills/backend/testing.md) |
+| **Frontend** | React 19, Mantine, Query & Zustand patterns | [`.ai/skills/frontend/react-patterns.md`](.ai/skills/frontend/react-patterns.md) |
+| **Frontend** | Frontend component & hook testing (Vitest, RTL, MSW) | [`.ai/skills/frontend/react-testing.md`](.ai/skills/frontend/react-testing.md) |
 
 ## 3. Memory (Persistent Context)
 
@@ -51,14 +65,16 @@ Read in this order:
 
 ## 4. Mandatory Workflow Rules
 
-- **Automatic Post-Coding Self-Review**: Immediately after modifying, refactoring, or writing any code in *any* session, the agent **must automatically execute the review checklist** in [`.ai/skills/review.md`](.ai/skills/review.md) before concluding the task or presenting results.
-- **Clean Code & SLAP/SRP**: All code must strictly conform to Single Responsibility Principle (SRP) and Single Level of Abstraction Principle (SLAP) as defined in [`.ai/skills/clean-code.md`](.ai/skills/clean-code.md). High-level orchestrators must delegate details to focused helper functions (target 10–30 lines per function, max nesting depth 2).
-- **All code must pass**: `cargo clippy -- -D warnings` and `cargo test --workspace`
-- **Code Organization & Ordering**: Follow "newspaper style" item ordering from [`.ai/skills/rust-patterns.md`](.ai/skills/rust-patterns.md): types first, functions/impls after; public functions first in dependency order, private helpers after; tests at the bottom.
-- **New endpoints**: add an entry to `docs/api.md`
-- **Architecture changes**: create a new ADR in `docs/adr/` following [`.ai/skills/adr-process.md`](.ai/skills/adr-process.md) (next free number; structure as in [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md)) and add it to the ADR index above
-- **Generating tests**: never derive expected behavior from the implementation; if a test fails, report it as a spec–code mismatch instead of changing the assertion (see [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md))
-- **Never put domain logic in `infrastructure` crate** — see architecture doc
+- **Automatic Post-Coding Self-Review**: Immediately after modifying, refactoring, or writing any code in *any* session, the agent **must automatically execute the review checklist** in [`.ai/skills/common/review.md`](.ai/skills/common/review.md) before concluding the task or presenting results.
+- **Clean Code & SLAP/SRP**: All code must strictly conform to Single Responsibility Principle (SRP) and Single Level of Abstraction Principle (SLAP) as defined in [`.ai/rules/backend-rust.md`](.ai/rules/backend-rust.md) and [`.ai/skills/backend/clean-code.md`](.ai/skills/backend/clean-code.md). High-level orchestrators must delegate details to focused helper functions (target 10–30 lines per function, max nesting depth 2).
+- **All code must pass**:
+  - Rust: `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`
+  - Frontend: `npm run lint` and `tsc --noEmit`
+- **Code Organization & Ordering**: Follow "newspaper style" item ordering from [`.ai/rules/backend-rust.md`](.ai/rules/backend-rust.md) and [`.ai/skills/backend/rust-patterns.md`](.ai/skills/backend/rust-patterns.md): types first, functions/impls after; public functions first in dependency order, private helpers after; tests at the bottom.
+- **New endpoints**: add an entry to `docs/api.md` matching RFC 9457 error format and standard response envelopes.
+- **Architecture changes**: create a new ADR in `docs/adr/` following [`.ai/skills/common/adr-process.md`](.ai/skills/common/adr-process.md) (next free number; structure as in [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md)) and add it to the ADR index above. Only humans can accept ADRs.
+- **Generating tests**: never derive expected behavior from the implementation; if a test fails, report it as a spec–code mismatch instead of changing the assertion (see [`.ai/rules/common.md`](.ai/rules/common.md) and [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md)). Only humans can approve specification rules.
+- **Never put domain logic in `infrastructure` crate** — pure business logic in `domain` and `application`.
 
 ## 5. Sensitive / Local Files
 

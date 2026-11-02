@@ -14,7 +14,7 @@ This skill defines the full AI-driven process from open question to recorded dec
 4. LOG          →  .ai/context/decisions.md entry
 ```
 
-Never skip phases. Never set an ADR status to `Accepted` yourself — only humans do that.
+> **GOVERNANCE RULE**: Never skip phases. The AI agent **must NEVER set an ADR status to `Accepted`** itself — only humans do that. Speculative architecture changes must not be implemented without an accepted ADR or user confirmation.
 
 ---
 
@@ -57,7 +57,7 @@ Never skip phases. Never set an ADR status to `Accepted` yourself — only human
 
 **Trigger**: investigation is complete, or user says "write an ADR for X".
 
-1. Create `docs/adr/ADR-NNN-short-title.md` following the structure of [`ADR-001`](../../docs/adr/ADR-001-declarative-test-specifications.md)
+1. Create `docs/adr/ADR-NNN-short-title.md` following the structure of [`ADR-001`](../../../docs/adr/ADR-001-declarative-test-specifications.md)
    - Pick the next available number by listing `docs/adr/`
    - Add the new ADR to the ADR index in `AGENTS.md`
 2. Fill in **all sections** — especially *Considered Alternatives* (minimum two options)
@@ -98,21 +98,16 @@ After any decision (accepted or rejected):
 
 ```
 You:
-1. Create docs/research/ui-framework-options.md
-   - Research Leptos (Rust/Wasm), React (separate repo), HTMX
-   - Document bundle size, DSQL integration, deployment model, team skills
-2. Create docs/adr/ADR-002-ui-framework.md (status: Proposed)
-   - Three options: Leptos, React (separate repo), HTMX+axum
-   - Recommendation: whichever the research supports
-3. Present to user, wait for approval
-4. On approval: update ADR status, implement, log to decisions.md
+1. Search docs, create docs/research/ui-framework.md (factual comparison)
+2. Inform user: "Research complete. Key findings: ... Ready to draft an ADR?"
+User: "Yes, write an ADR proposing React."
+You:
+3. Create docs/adr/ADR-007-ui-framework.md (Status: Proposed)
+4. Add to AGENTS.md ADR table
+5. Inform user: "ADR-007 drafted with status Proposed. Awaiting your decision."
+User: "Looks good, let's go with it."
+You:
+6. Update ADR-007 status to Accepted
+7. Append to .ai/context/decisions.md
+8. Now proceed to implement or design next steps
 ```
-
----
-
-## Rules
-
-- Research notes live in `docs/research/` and are **always committed** (valuable shared knowledge)
-- ADR drafts are **immediately committed** (even as `Proposed`) so the decision process is transparent
-- Never mix investigation prose into an ADR — keep ADRs crisp; link to research notes for details
-- If investigation reveals the answer is obvious, it's OK to skip the research note and go straight to ADR

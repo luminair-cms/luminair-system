@@ -7,7 +7,7 @@ This is a **Rust** project using **Hexagonal Architecture** with three crates: `
 Before suggesting code, refer to:
 - [`AGENTS.md`](../AGENTS.md) — workflow rules and skill loading guide
 - [`docs/architecture.md`](../docs/architecture.md) — crate boundaries and dependency rules
-- [`.ai/skills/rust-patterns.md`](../.ai/skills/rust-patterns.md) — project Rust conventions
+- [`.ai/skills/backend/rust-patterns.md`](../.ai/skills/backend/rust-patterns.md) — project Rust conventions
 
 ## Critical Rules
 
@@ -23,5 +23,5 @@ Update [`docs/api.md`](../docs/api.md) with the new route.
 
 ## When Writing Tests
 
-Follow [`.ai/skills/testing.md`](../.ai/skills/testing.md) — use fake repositories in `application` tests,
+Follow [`.ai/skills/backend/testing.md`](../.ai/skills/backend/testing.md) — use fake repositories in `application` tests,
 `#[sqlx::test]` in `infrastructure` tests.
