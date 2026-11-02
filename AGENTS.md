@@ -70,7 +70,7 @@ Rules are **mandatory invariants** that must never be violated. Skills are **on-
 - **All code must pass**:
   - Rust: `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`
   - Frontend: `npm run lint` and `tsc --noEmit`
-- **Code Organization & Ordering**: Follow "newspaper style" item ordering from [`.ai/rules/backend-rust.md`](.ai/rules/backend-rust.md) and [`.ai/skills/backend/rust-patterns.md`](.ai/skills/backend/rust-patterns.md): types first, functions/impls after; public functions first in dependency order, private helpers after; tests at the bottom.
+- **Code Organization & Ordering**: Follow "newspaper style" top-down item ordering from [`.ai/rules/backend-rust.md`](.ai/rules/backend-rust.md) and [`.ai/rules/frontend-react.md`](.ai/rules/frontend-react.md): primary public entry points, components, and orchestrators first in dependency order, followed by private leaf helpers and workers below; tests at the bottom.
 - **New endpoints**: add an entry to `docs/api.md` matching RFC 9457 error format and standard response envelopes.
 - **Architecture changes**: create a new ADR in `docs/adr/` following [`.ai/skills/common/adr-process.md`](.ai/skills/common/adr-process.md) (next free number; structure as in [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md)) and add it to the ADR index above. Only humans can accept ADRs.
 - **Generating tests**: never derive expected behavior from the implementation; if a test fails, report it as a spec–code mismatch instead of changing the assertion (see [`.ai/rules/common.md`](.ai/rules/common.md) and [`ADR-001`](./docs/adr/ADR-001-declarative-test-specifications.md)). Only humans can approve specification rules.

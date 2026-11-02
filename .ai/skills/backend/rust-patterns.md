@@ -149,10 +149,9 @@ fn run(cmd: Cmd, data: &mut Vec<String>) {
 }
 ```
 
-### Domain Primitives: Primary Keys, Decimals & Deterministic Collections
+### Domain Primitives: Collections & Zero-Allocation Lookups
 
-- **Primary Keys (`Uuid::now_v7()`)**: Always use time-ordered `uuid::Uuid::now_v7()`. Never use auto-increment integers or database sequences (AWS Aurora DSQL does not support sequences).
-- **Exact Decimals (`rust_decimal::Decimal`)**: Always use `Decimal` for financial amounts, schema numeric bounds, and precision numbers. Never use `f32` or `f64` in domain models.
+- **Invariants**: Primary keys (`Uuid::now_v7()`) and exact decimals (`Decimal`) are governed by [`.ai/rules/backend-rust.md`](../../rules/backend-rust.md).
 - **Deterministic Collections (`IndexMap` / `IndexSet`)**: Use `indexmap::IndexMap` and `indexmap::IndexSet` whenever schema field order, attribute order, or insertion order must be preserved deterministically.
 - **Zero-Allocation Lookups (`Borrow`)**: Implement `std::borrow::Borrow<IdType>` on domain definitions stored in `IndexSet` or `HashSet` to enable `set.get(&id)` without cloning.
 
@@ -341,9 +340,7 @@ pub struct Json;
 
 ### Clippy & Anti-Patterns to Avoid
 
-All code must pass `cargo clippy --workspace --all-targets -- -D warnings`.
+All code must pass `cargo clippy --workspace --all-targets -- -D warnings`. Prohibitions against `.unwrap()`, `Deref` inheritance, borrow-checker `.clone()`, and `#![deny(warnings)]` are strictly enforced by [`.ai/rules/backend-rust.md`](../../rules/backend-rust.md).
 
-- **No `Deref` for inheritance**: Never simulate subclassing with `Deref`; use composition and explicit traits or delegation methods.
-- **No `.clone()` to silence the borrow checker**: Rethink ownership first — pass borrowed slices (`&str`, `&[T]`), move owned values out of collections with `.remove(&k)` when consuming, or use `Arc` / startup `&'static` deliberately.
-- **No `#![deny(warnings)]` in library crates**: Enforce `-D warnings` via `cargo clippy` in CI/workflows so new compiler lints do not break builds prematurely.
 - **Avoid common clippy pitfalls**: Unused `mut`, needless borrows (`&*foo` → `foo.as_ref()`), single-arm `match` where `if let` is clearer, and unchecked `as` integer casts (`u32 as i32` → `i32::try_from(...)`).
+- **Idiomatic alternatives to `.clone()`**: Pass borrowed slices (`&str`, `&[T]`), move owned values out of collections with `.remove(&k)` when consuming, or design startup `&'static` contexts via `Box::leak`.

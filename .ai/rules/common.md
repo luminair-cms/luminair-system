@@ -16,7 +16,7 @@ These non-negotiable rules and invariant guardrails apply unconditionally to all
 
 ---
 
-## 2. Layering, Decoupling & Hexagonal Boundaries
+## 2. Layering & Architectural Boundaries
 
 - **Pure Business Logic**: Core domain and business logic must remain decoupled from external wire formats, network protocols, and specific database engines.
 - **Anti-Corruption Layer (ACL)**: External representations (REST DTOs, database rows, configuration schemas) must never bleed directly into domain models. Explicit codecs, mappers, or builders must translate across layer boundaries.
@@ -33,11 +33,10 @@ These non-negotiable rules and invariant guardrails apply unconditionally to all
 
 ---
 
-## 4. Security & Safety
+## 4. Security & Input Validation
 
 - **Zero Secrets**: Never commit secrets, tokens, credentials, or private configuration to version control.
-- **No SQL String Concatenation**: All database queries must be strictly parameterized through AST builders or query engines (e.g. `sea-query`, `sqlx`). Dynamic string interpolation in SQL is strictly forbidden.
-- **Boundary Validation**: Validate all external user inputs before delegating to domain logic.
+- **Boundary Validation & Sanitization**: Validate and sanitize all external user inputs at the boundary before processing or delegating to domain logic.
 
 ---
 

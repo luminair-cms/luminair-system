@@ -20,6 +20,8 @@ These non-negotiable rules and invariants govern all Rust code across `domain`, 
 - **Database Migrations**:
   - Migration filenames must be prefixed with a timestamp (`YYYYMMDDHHMMSS_name.sql`).
   - Migrations must be marked strictly `-- no-transaction` because Aurora DSQL does not support transactional DDL.
+- **Parameterized Queries (No String Concatenation)**:
+  - All database queries must be strictly parameterized through AST builders or query engines (e.g. `sea-query`, `sqlx`). Dynamic string interpolation or concatenation in SQL is strictly forbidden.
 
 ---
 
@@ -74,5 +76,3 @@ These non-negotiable rules and invariants govern all Rust code across `domain`, 
   - Inline `#[cfg(test)] mod tests` in `src/` is strictly for private internal algorithms and helper invariants.
 - **Zero Infrastructure Bleed**:
   - Domain and application tests must **never** import `sqlx`, live database pools, or infrastructure types. Use in-memory fakes from `application::test_support`.
-- **Assertion Preservation**:
-  - If a spec-backed test fails against code, **NEVER** edit assertions to match unexpected code behavior. Report a `SPEC–CODE MISMATCH` immediately.

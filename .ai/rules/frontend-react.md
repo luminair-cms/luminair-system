@@ -64,3 +64,14 @@ These non-negotiable rules and invariants govern all frontend code in `frontend/
 - **Single Responsibility**:
   - Presentational components focus solely on rendering UI and firing callbacks.
   - Custom hooks or container components encapsulate API calls, query mutations, and state management.
+
+---
+
+## 7. Newspaper Code Layout (TypeScript & React)
+
+Every source file (`.ts`, `.tsx`) must follow top-down dependency ordering:
+1. **Imports**: External libraries/frameworks (`react`, `@mantine/*`, `@tanstack/*`) → internal shared aliases (`@/api`, `@/components`) → local relative imports (`./helpers`)
+2. **Types & Interfaces**: Component prop types, form values interfaces, and local state types
+3. **Primary Export**: The main component, custom hook, or service entry point appears at the top
+4. **Internal Helpers & Sub-Components**: Private leaf rendering functions, specialized child sub-components, and transformation helpers follow below
+5. **Constants & Static Metadata**: Default values, static options, and style configs at the bottom
