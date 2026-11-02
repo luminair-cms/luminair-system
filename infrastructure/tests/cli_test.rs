@@ -1,6 +1,6 @@
 //! Integration tests for the Luminair CLI subsystem (`infrastructure::cli`).
 //!
-//! Validates `test`, `dry-run`, and `migrate` modes against prepared configuration
+//! Validates `validate`, `dry-run`, and `migrate` modes against prepared configuration
 //! fixtures in `config/cli-config.json` and `config/schemas/`.
 
 use std::path::{Path, PathBuf};
@@ -33,7 +33,7 @@ impl Drop for TempDirGuard {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_cli_test_mode_with_prepared_config_succeeds() {
+async fn test_cli_validate_mode_with_prepared_config_succeeds() {
     let root = workspace_root();
     let config_path = root.join("config/cli-config.json");
     let mut config = CliConfig::from_json_file(&config_path)
@@ -44,7 +44,7 @@ async fn test_cli_test_mode_with_prepared_config_succeeds() {
 
     let outcome = run(&config)
         .await
-        .expect("CLI test mode execution must succeed");
+        .expect("CLI validate mode execution must succeed");
 
     let CliOutcome::Validate(report) = outcome else {
         panic!("expected CliOutcome::Validate, got: {outcome:?}");
@@ -64,7 +64,7 @@ async fn test_cli_test_mode_with_prepared_config_succeeds() {
 }
 
 #[tokio::test]
-async fn test_cli_test_mode_rejects_invalid_schema() {
+async fn test_cli_validate_mode_rejects_invalid_schema() {
     let guard = create_broken_schema_dir();
     let config = CliConfig {
         mode: RunMode::Validate,

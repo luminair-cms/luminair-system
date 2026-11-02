@@ -7,13 +7,13 @@ mod migrate;
 mod report;
 mod runner;
 mod service;
-mod test_config;
+mod validate;
 
 pub use config::{CliConfig, OutputFormat, RunMode, ServiceTokenConfig};
 pub use error::CliError;
 pub use report::{
     CliOutcome, ConfigTestReport, DocumentTypeSummary, DryRunReport, MigrationReport,
-    ServiceReport, StaticMigrationStatus, StaticMigrationStepSummary,
+    ServiceReport, StaticMigrationStatus, StaticMigrationStepSummary, ValidationReport,
 };
 pub use runner::run;
 pub use service::execute_service_mode;

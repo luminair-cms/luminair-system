@@ -31,10 +31,10 @@ pub struct DocumentTypeSummary {
     pub relation_count: usize,
 }
 
-/// Outcome report produced by the offline `test` run mode.
+/// Outcome report produced by the offline `validate` run mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ConfigTestReport {
+pub struct ValidationReport {
     /// Schema directory that was discovered and parsed.
     pub schema_dir: String,
     /// Default locale configured for the system.
@@ -46,6 +46,9 @@ pub struct ConfigTestReport {
     /// Whether a valid database connection URL was configured.
     pub database_url_configured: bool,
 }
+
+/// Backwards-compatible type alias for [`ValidationReport`].
+pub type ConfigTestReport = ValidationReport;
 
 /// Execution status of a static migration file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,7 +120,7 @@ pub struct ServiceReport {
 pub enum CliOutcome {
     /// Result of offline configuration and schema validation.
     #[serde(alias = "test")]
-    Validate(ConfigTestReport),
+    Validate(ValidationReport),
     /// Result of dry-run migration planning and DDL preview.
     DryRun(DryRunReport),
     /// Result of live database migration execution.
@@ -173,9 +176,9 @@ impl fmt::Display for StaticMigrationStatus {
     }
 }
 
-impl fmt::Display for ConfigTestReport {
+impl fmt::Display for ValidationReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "=== Configuration & Schema Test Report ===")?;
+        writeln!(f, "=== Configuration & Schema Validation Report ===")?;
         writeln!(f, "Schema Directory:        {}", self.schema_dir)?;
         writeln!(
             f,
@@ -271,8 +274,8 @@ impl fmt::Display for CliOutcome {
 mod tests {
     use super::*;
 
-    fn sample_test_report() -> ConfigTestReport {
-        ConfigTestReport {
+    fn sample_validate_report() -> ValidationReport {
+        ValidationReport {
             schema_dir: "./config/schemas".to_string(),
             default_locale: "en".to_string(),
             available_locales: vec!["en".to_string(), "fr".to_string()],
@@ -318,11 +321,11 @@ mod tests {
     }
 
     #[test]
-    fn test_render_config_test_outcome_text_and_json() {
-        let outcome = CliOutcome::Validate(sample_test_report());
+    fn test_render_validate_outcome_text_and_json() {
+        let outcome = CliOutcome::Validate(sample_validate_report());
 
         let text = outcome.render(OutputFormat::Text).unwrap();
-        assert!(text.contains("=== Configuration & Schema Test Report ==="));
+        assert!(text.contains("=== Configuration & Schema Validation Report ==="));
         assert!(text.contains("article"));
         assert!(text.contains("Status: OK"));
 
@@ -363,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_write_report_to_file() {
-        let outcome = CliOutcome::Validate(sample_test_report());
+        let outcome = CliOutcome::Validate(sample_validate_report());
         let temp_dir = std::env::temp_dir();
         let target_file = temp_dir.join("test_write_report.txt");
 

@@ -1,29 +1,29 @@
-//! Execution mode worker for configuration and schema validation (`test` mode).
+//! Execution mode worker for configuration and schema validation (`validate` mode).
 
 use domain::schema::{DocumentKind, DocumentType};
 use domain::system::SystemContext;
 
 use super::config::CliConfig;
-use super::report::{ConfigTestReport, DocumentTypeSummary};
+use super::report::{DocumentTypeSummary, ValidationReport};
 use crate::persistence::naming::table_name_for_document_type;
 
 // ---------------------------------------------------------------------------
 // Public Mode Execution Entry Point
 // ---------------------------------------------------------------------------
 
-/// Executes the offline schema validation and configuration test mode.
+/// Executes the offline schema validation and configuration validate mode.
 ///
 /// Inspects loaded document types, available locales, and system configuration,
-/// returning a deterministic [`ConfigTestReport`].
+/// returning a deterministic [`ValidationReport`].
 #[must_use]
-pub(super) fn execute_test_mode(
+pub(super) fn execute_validate_mode(
     config: &CliConfig,
     context: &'static SystemContext,
-) -> ConfigTestReport {
+) -> ValidationReport {
     let document_types = extract_document_summaries(context);
     let available_locales = extract_available_locales(context);
 
-    ConfigTestReport {
+    ValidationReport {
         schema_dir: config.schema_dir.display().to_string(),
         default_locale: context.default_locale().as_ref().to_string(),
         available_locales,
@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_test_mode_success() {
+    fn test_execute_validate_mode_success() {
         let context = sample_system_context();
         let config = CliConfig {
             schema_dir: PathBuf::from("./test/schemas"),
@@ -148,7 +148,7 @@ mod tests {
             ..CliConfig::default()
         };
 
-        let report = execute_test_mode(&config, context);
+        let report = execute_validate_mode(&config, context);
 
         assert_eq!(report.schema_dir, "./test/schemas");
         assert_eq!(report.default_locale, "en");
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_test_mode_database_url_unconfigured() {
+    fn test_execute_validate_mode_database_url_unconfigured() {
         let context = sample_system_context();
         let config = CliConfig {
             schema_dir: PathBuf::from("./config/schemas"),
@@ -178,7 +178,7 @@ mod tests {
             ..CliConfig::default()
         };
 
-        let report = execute_test_mode(&config, context);
+        let report = execute_validate_mode(&config, context);
         assert!(!report.database_url_configured);
     }
 }

@@ -8,7 +8,7 @@ use super::error::CliError;
 use super::migrate::execute_migrate_mode;
 use super::report::CliOutcome;
 use super::service::execute_service_mode;
-use super::test_config::execute_test_mode;
+use super::validate::execute_validate_mode;
 use crate::schema_loader::load_system_context_from_dir;
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ async fn dispatch_mode(
     context: &'static SystemContext,
 ) -> Result<CliOutcome, CliError> {
     match config.mode {
-        RunMode::Validate => Ok(CliOutcome::Validate(execute_test_mode(config, context))),
+        RunMode::Validate => Ok(CliOutcome::Validate(execute_validate_mode(config, context))),
         RunMode::DryRun => Ok(CliOutcome::DryRun(
             execute_dry_run_mode(config, context).await?,
         )),
@@ -103,7 +103,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_test_mode_success() {
+    async fn test_run_validate_mode_success() {
         let schema_dir = write_test_schemas_dir();
         let config = CliConfig {
             mode: RunMode::Validate,

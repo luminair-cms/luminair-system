@@ -128,8 +128,8 @@ infrastructure/
         ├── config.rs                         # CliConfig, RunMode, OutputFormat & layered resolution
         ├── error.rs                          # CliError enum
         ├── report.rs                         # CliOutcome & text/JSON report formatters
-        ├── runner.rs                         # Main runner dispatcher (Test, DryRun, Migrate; Service planned)
-        ├── test_config.rs                    # Offline validation of config & schemas
+        ├── runner.rs                         # Main runner dispatcher (Validate, DryRun, Migrate, Serve)
+        ├── validate.rs                       # Offline validation of config & schemas
         ├── dry_run.rs                        # Live/offline migration preview & DDL output
         ├── migrate.rs                        # Standalone static + dynamic migration execution
         └── service.rs                        # Long-running HTTP service startup (Phase 4B.3 / Phase 7)
@@ -210,7 +210,7 @@ use super::dry_run::execute_dry_run_mode;
 use super::error::CliError;
 use super::migrate::execute_migrate_mode;
 use super::report::CliOutcome;
-use super::test_config::execute_test_mode;
+use super::validate::execute_validate_mode;
 use crate::schema_loader::load_system_context_from_dir;
 
 pub async fn run(config: &CliConfig) -> Result<CliOutcome, CliError> {
@@ -224,7 +224,7 @@ async fn dispatch_mode(
     context: &'static SystemContext,
 ) -> Result<CliOutcome, CliError> {
     match config.mode {
-        RunMode::Validate => Ok(CliOutcome::Validate(execute_test_mode(config, context))),
+        RunMode::Validate => Ok(CliOutcome::Validate(execute_validate_mode(config, context))),
         RunMode::DryRun => Ok(CliOutcome::DryRun(
             execute_dry_run_mode(config, context).await?,
         )),

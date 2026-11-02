@@ -136,10 +136,10 @@ flowchart TD
 - [x] **Step 4A.1: CLI Configuration & Reports (`infrastructure/src/cli/config.rs`, `report.rs`, `error.rs`)**
   - `CliConfig`, `RunMode` (`Validate`, `DryRun`, `Migrate`, `Serve`), and `OutputFormat` (`Text`, `Json`).
   - Layered configuration resolution: `Defaults` $\rightarrow$ JSON config file (`--config` / `LUMINAIR_CONFIG_FILE`) $\rightarrow$ `LUMINAIR_*` env vars $\rightarrow$ CLI flags.
-  - `CliOutcome` (`Validate(ConfigTestReport)`, `DryRun(DryRunReport)`, `Migrate(MigrationReport)`, `Serve(ServiceReport)`) with text/JSON rendering and file output (`write_report`).
-- [x] **Step 4A.2: Mode Workers & Dispatcher (`infrastructure/src/cli/runner.rs`, `test_config.rs`, `dry_run.rs`, `migrate.rs`)**
+  - `CliOutcome` (`Validate(ValidationReport)`, `DryRun(DryRunReport)`, `Migrate(MigrationReport)`, `Serve(ServiceReport)`) with text/JSON rendering and file output (`write_report`).
+- [x] **Step 4A.2: Mode Workers & Dispatcher (`infrastructure/src/cli/runner.rs`, `validate.rs`, `dry_run.rs`, `migrate.rs`)**
   - `run(config: &CliConfig) -> Result<CliOutcome, CliError>` loading `&'static SystemContext` and dispatching to mode workers.
-  - `execute_test_mode`: Offline config and schema validation report.
+  - `execute_validate_mode`: Offline config and schema validation report.
   - `execute_dry_run_mode`: Live DB introspection or `--offline` baseline producing planned steps and DDL SQL without mutating the database.
   - `execute_migrate_mode`: Static SQLx migrations + dynamic schema synchronization returning `MigrationReport`.
 - [x] **Step 4A.3: Binary Entry Point & Docker Compose (`infrastructure/src/main.rs`, `docker-compose.yml`, `Dockerfile`, `config/cli-config.json`)**
