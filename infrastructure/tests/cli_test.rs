@@ -216,10 +216,7 @@ fn test_cli_service_mode_config_parsing_and_flags() {
         config.oidc_issuer.as_deref(),
         Some("http://localhost:5556/dex")
     );
-    assert_eq!(
-        config.oidc_audience.as_deref(),
-        Some("luminair-admin-spa")
-    );
+    assert_eq!(config.oidc_audience.as_deref(), Some("luminair-admin-spa"));
 }
 
 #[test]
@@ -231,7 +228,9 @@ fn test_cli_service_mode_validation_rejects_missing_database_url() {
         database_url: None,
         ..CliConfig::default()
     };
-    let err = config.validate().expect_err("should reject missing database_url");
+    let err = config
+        .validate()
+        .expect_err("should reject missing database_url");
     assert!(
         matches!(err, CliError::Config(msg) if msg.contains("database_url is required for 'serve' mode"))
     );
@@ -380,9 +379,9 @@ fn assert_dynamic_steps_contain_expected_tables(steps: &[PlannedMigrationStep]) 
         "articles_tags_links",
     ];
     for table in expected_tables {
-        let found = steps.iter().any(|step| {
-            step.operation.contains("CREATE TABLE") && step.operation.contains(table)
-        });
+        let found = steps
+            .iter()
+            .any(|step| step.operation.contains("CREATE TABLE") && step.operation.contains(table));
         assert!(found, "expected CREATE TABLE step for table '{table}'");
     }
 }
@@ -393,8 +392,25 @@ fn assert_outcome_rendering_and_file_writing(outcome: &CliOutcome) {
         .expect("text rendering must succeed");
     assert!(rendered_text.contains("=== Dry-Run Migration Plan Report ==="));
     assert!(rendered_text.contains("Database Connected: No"));
-    assert!(rendered_text.contains("-- Generated DDL SQL:"));
-    assert!(rendered_text.contains("CREATE TABLE IF NOT EXISTS"));
+    assert!(!rendered_text.contains("-- Generated DDL SQL:"));
+    assert!(rendered_text.contains("     CREATE TABLE IF NOT EXISTS"));
+    assert!(rendered_text.contains("\n       \"id\" uuid NOT NULL PRIMARY KEY,\n"));
+    assert!(rendered_text.contains("\n     );\n"));
+
+    let step1_pos = rendered_text
+        .find("  1. ")
+        .expect("step 1 header must be present");
+    let step1_sql_pos = rendered_text[step1_pos..]
+        .find("\n     CREATE TABLE IF NOT EXISTS")
+        .map(|rel| step1_pos + rel)
+        .expect("indented DDL SQL must follow step 1");
+    let step2_pos = rendered_text
+        .find("  2. ")
+        .expect("step 2 header must be present");
+    assert!(
+        step1_pos < step1_sql_pos && step1_sql_pos < step2_pos,
+        "step 1 SQL must be interleaved between step 1 header and step 2 header"
+    );
 
     let rendered_json = outcome
         .render(OutputFormat::Json)

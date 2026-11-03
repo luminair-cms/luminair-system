@@ -130,6 +130,14 @@ pub enum CliOutcome {
     Serve(ServiceReport),
 }
 
+/// Scanner state for splitting top-level comma-separated SQL clauses.
+#[derive(Default)]
+struct SqlScanState {
+    depth: usize,
+    in_single_quote: bool,
+    in_double_quote: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Inherent Implementations
 // ---------------------------------------------------------------------------
@@ -162,6 +170,26 @@ impl CliOutcome {
     }
 }
 
+impl SqlScanState {
+    /// Advances the quote/parenthesis scanner by one character and returns `true`
+    /// when `ch` is a top-level comma outside quotes and nested parentheses.
+    fn is_top_level_comma(&mut self, ch: char) -> bool {
+        match ch {
+            '\'' if !self.in_double_quote => self.in_single_quote = !self.in_single_quote,
+            '"' if !self.in_single_quote => self.in_double_quote = !self.in_double_quote,
+            '(' if !self.in_single_quote && !self.in_double_quote => self.depth += 1,
+            ')' if !self.in_single_quote && !self.in_double_quote => {
+                self.depth = self.depth.saturating_sub(1);
+            }
+            ',' if !self.in_single_quote && !self.in_double_quote && self.depth == 0 => {
+                return true;
+            }
+            _ => {}
+        }
+        false
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Trait Implementations
 // ---------------------------------------------------------------------------
@@ -183,7 +211,11 @@ impl fmt::Display for ValidationReport {
         writeln!(
             f,
             "Database URL Configured: {}",
-            if self.database_url_configured { "Yes" } else { "No" }
+            if self.database_url_configured {
+                "Yes"
+            } else {
+                "No"
+            }
         )?;
         writeln!(f, "Default Locale:          {}", self.default_locale)?;
         writeln!(
@@ -196,7 +228,12 @@ impl fmt::Display for ValidationReport {
             writeln!(
                 f,
                 "  - {} (kind: {}, table: '{}', draft/publish: {}, {} fields, {} relations)",
-                doc.id, doc.kind, doc.table_name, doc.draft_and_publish, doc.field_count, doc.relation_count
+                doc.id,
+                doc.kind,
+                doc.table_name,
+                doc.draft_and_publish,
+                doc.field_count,
+                doc.relation_count
             )?;
         }
         write!(f, "Status: OK (all schema definitions valid)")
@@ -209,7 +246,11 @@ impl fmt::Display for DryRunReport {
         writeln!(
             f,
             "Database Connected: {}",
-            if self.connected_to_database { "Yes" } else { "No (Offline)" }
+            if self.connected_to_database {
+                "Yes"
+            } else {
+                "No (Offline)"
+            }
         )?;
         writeln!(f, "Safety Policy:      {:?}", self.safety_policy)?;
         writeln!(f, "Static Migrations ({}):", self.static_migrations.len())?;
@@ -222,11 +263,7 @@ impl fmt::Display for DryRunReport {
         }
         writeln!(f, "Dynamic Steps ({}):", self.dynamic_steps.len())?;
         for step in &self.dynamic_steps {
-            writeln!(f, "  {}. {}", step.step_number, step.operation)?;
-        }
-        writeln!(f, "\n-- Generated DDL SQL:")?;
-        for step in &self.dynamic_steps {
-            writeln!(f, "{}", step.sql)?;
+            write_dynamic_step(f, step)?;
         }
         Ok(())
     }
@@ -235,11 +272,19 @@ impl fmt::Display for DryRunReport {
 impl fmt::Display for MigrationReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "=== Migration Execution Report ===")?;
-        writeln!(f, "Static Migrations Total: {}", self.static_migrations_total)?;
+        writeln!(
+            f,
+            "Static Migrations Total: {}",
+            self.static_migrations_total
+        )?;
         writeln!(f, "Tables Created:          {}", self.tables_created)?;
         writeln!(f, "Columns Added:           {}", self.columns_added)?;
         writeln!(f, "Indexes Created:         {}", self.indexes_created)?;
-        writeln!(f, "Executed Statements ({}):", self.executed_statements.len())?;
+        writeln!(
+            f,
+            "Executed Statements ({}):",
+            self.executed_statements.len()
+        )?;
         for (i, stmt) in self.executed_statements.iter().enumerate() {
             writeln!(f, "  {}. {}", i + 1, stmt)?;
         }
@@ -263,6 +308,83 @@ impl fmt::Display for CliOutcome {
             Self::Migrate(report) => write!(f, "{report}"),
             Self::Serve(report) => write!(f, "{report}"),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Private Helpers
+// ---------------------------------------------------------------------------
+
+/// Writes a single planned migration step header followed by its indented, formatted DDL SQL.
+fn write_dynamic_step(f: &mut fmt::Formatter<'_>, step: &PlannedMigrationStep) -> fmt::Result {
+    writeln!(f, "  {}. {}", step.step_number, step.operation)?;
+    let formatted_sql = format_ddl_sql(&step.sql);
+    for line in formatted_sql.lines() {
+        writeln!(f, "     {line}")?;
+    }
+    Ok(())
+}
+
+/// Formats a DDL SQL statement for human-readable multi-line text output.
+///
+/// Expands `CREATE TABLE` column and constraint definitions onto individual
+/// indented lines while preserving nested parentheses (e.g., `DECIMAL(10, 2)`,
+/// `PRIMARY KEY ("source_id", "target_id")`, `FOREIGN KEY (...)`). Non-table
+/// DDL statements (`CREATE INDEX`, `ALTER TABLE`, etc.) are returned as a
+/// single semicolon-terminated line.
+fn format_ddl_sql(sql: &str) -> String {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    try_format_create_table(trimmed).unwrap_or_else(|| format!("{trimmed};"))
+}
+
+/// Attempts to format a `CREATE TABLE ... (...)` statement across multiple indented lines.
+fn try_format_create_table(trimmed: &str) -> Option<String> {
+    let is_create_table = trimmed
+        .get(..12)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("CREATE TABLE"));
+    if !is_create_table || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let open_paren = trimmed.find('(')?;
+    let header = trimmed[..=open_paren].trim_end();
+    let inner = &trimmed[open_paren + 1..trimmed.len() - 1];
+    let items = split_top_level_sql_items(inner);
+    if items.is_empty() {
+        return None;
+    }
+
+    let body = items.join(",\n  ");
+    Some(format!("{header}\n  {body}\n);"))
+}
+
+/// Splits a comma-separated SQL clause body into top-level items, ignoring
+/// commas enclosed inside parentheses or single/double quotes.
+fn split_top_level_sql_items(inner: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut state = SqlScanState::default();
+    let mut segment_start = 0;
+
+    for (idx, ch) in inner.char_indices() {
+        if state.is_top_level_comma(ch) {
+            push_trimmed(&mut items, &inner[segment_start..idx]);
+            segment_start = idx + 1;
+        }
+    }
+
+    push_trimmed(&mut items, &inner[segment_start..]);
+    items
+}
+
+/// Pushes a trimmed SQL clause slice into `items` if non-empty.
+fn push_trimmed<'a>(items: &mut Vec<&'a str>, segment: &'a str) {
+    let piece = segment.trim();
+    if !piece.is_empty() {
+        items.push(piece);
     }
 }
 
@@ -300,11 +422,18 @@ mod tests {
                 description: "create_document_drafts".to_string(),
                 status: StaticMigrationStatus::Applied,
             }],
-            dynamic_steps: vec![PlannedMigrationStep {
-                step_number: 1,
-                operation: "CREATE TABLE \"articles\" (1 columns, 0 foreign keys)".to_string(),
-                sql: "CREATE TABLE IF NOT EXISTS articles (id UUID PRIMARY KEY);".to_string(),
-            }],
+            dynamic_steps: vec![
+                PlannedMigrationStep {
+                    step_number: 1,
+                    operation: "CREATE TABLE \"articles\" (2 columns, 0 foreign keys)".to_string(),
+                    sql: "CREATE TABLE IF NOT EXISTS \"articles\" (\"id\" uuid NOT NULL PRIMARY KEY, \"title\" varchar(255) NOT NULL);".to_string(),
+                },
+                PlannedMigrationStep {
+                    step_number: 2,
+                    operation: "CREATE INDEX \"idx_articles_title\" ON \"articles\"".to_string(),
+                    sql: "CREATE INDEX IF NOT EXISTS \"idx_articles_title\" ON \"articles\" (\"title\");".to_string(),
+                },
+            ],
         }
     }
 
@@ -339,15 +468,64 @@ mod tests {
     fn test_render_dry_run_outcome_text_and_json() {
         let outcome = CliOutcome::DryRun(sample_dry_run_report());
 
-        let text = outcome.render(OutputFormat::Text).unwrap();
+        let text = outcome
+            .render(OutputFormat::Text)
+            .expect("dry-run text rendering must succeed");
         assert!(text.contains("=== Dry-Run Migration Plan Report ==="));
         assert!(text.contains("Database Connected: Yes"));
-        assert!(text.contains("CREATE TABLE IF NOT EXISTS articles"));
-        assert!(text.contains("-- Generated DDL SQL:"));
+        assert!(!text.contains("-- Generated DDL SQL:"));
 
-        let json = outcome.render(OutputFormat::Json).unwrap();
+        let step1_header_pos = text
+            .find("  1. CREATE TABLE \"articles\" (2 columns, 0 foreign keys)")
+            .expect("step 1 header must exist");
+        let step1_sql_pos = text
+            .find("     CREATE TABLE IF NOT EXISTS \"articles\" (\n       \"id\" uuid NOT NULL PRIMARY KEY,\n       \"title\" varchar(255) NOT NULL\n     );")
+            .expect("step 1 formatted multi-line SQL must exist");
+        let step2_header_pos = text
+            .find("  2. CREATE INDEX \"idx_articles_title\" ON \"articles\"")
+            .expect("step 2 header must exist");
+        let step2_sql_pos = text
+            .find("     CREATE INDEX IF NOT EXISTS \"idx_articles_title\" ON \"articles\" (\"title\");")
+            .expect("step 2 SQL must exist");
+
+        assert!(step1_header_pos < step1_sql_pos);
+        assert!(step1_sql_pos < step2_header_pos);
+        assert!(step2_header_pos < step2_sql_pos);
+
+        let json = outcome
+            .render(OutputFormat::Json)
+            .expect("dry-run JSON rendering must succeed");
         assert!(json.contains("\"mode\": \"dryRun\""));
         assert!(json.contains("\"connectedToDatabase\": true"));
+    }
+
+    #[test]
+    fn test_format_ddl_sql_create_table_and_index() {
+        let create_table_sql = concat!(
+            "CREATE TABLE IF NOT EXISTS \"articles_tags_links\" (",
+            "\"source_id\" uuid NOT NULL, ",
+            "\"target_id\" uuid NOT NULL, ",
+            "\"weight\" DECIMAL(10, 2) NOT NULL DEFAULT 0.00, ",
+            "PRIMARY KEY (\"source_id\", \"target_id\"), ",
+            "FOREIGN KEY (\"source_id\") REFERENCES \"articles\" (\"id\") ON DELETE CASCADE",
+            ");"
+        );
+
+        let formatted = format_ddl_sql(create_table_sql);
+        let expected = concat!(
+            "CREATE TABLE IF NOT EXISTS \"articles_tags_links\" (\n",
+            "  \"source_id\" uuid NOT NULL,\n",
+            "  \"target_id\" uuid NOT NULL,\n",
+            "  \"weight\" DECIMAL(10, 2) NOT NULL DEFAULT 0.00,\n",
+            "  PRIMARY KEY (\"source_id\", \"target_id\"),\n",
+            "  FOREIGN KEY (\"source_id\") REFERENCES \"articles\" (\"id\") ON DELETE CASCADE\n",
+            ");"
+        );
+        assert_eq!(formatted, expected);
+
+        let create_index_sql =
+            "CREATE UNIQUE INDEX IF NOT EXISTS \"idx_articles_slug\" ON \"articles\" (\"slug\");";
+        assert_eq!(format_ddl_sql(create_index_sql), create_index_sql);
     }
 
     #[test]
