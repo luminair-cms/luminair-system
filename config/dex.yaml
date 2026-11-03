@@ -5,6 +5,8 @@ storage:
 web:
   http: 0.0.0.0:5556
 
+enablePasswordDB: true
+
 # Pre-seeded local users
 # Password for all accounts: "password"
 staticPasswords:

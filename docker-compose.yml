@@ -60,7 +60,7 @@ services:
       - "5556:5556"
     volumes:
       - ./config/dex.yaml:/etc/dex/config.yaml:ro
-    command: ["serve", "/etc/dex/config.yaml"]
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5556/dex/healthz"]
       interval: 5s
