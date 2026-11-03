@@ -1,14 +1,12 @@
 //! Execution mode worker for applying live database migrations (`migrate` mode).
 
-use sqlx::PgPool;
-
 use domain::system::SystemContext;
 
 use super::config::CliConfig;
 use super::error::CliError;
 use super::report::MigrationReport;
-use crate::persistence::create_connection_pool;
 use crate::persistence::PersistenceError;
+use crate::persistence::create_connection_pool;
 use crate::persistence::migration::{
     MIGRATOR, SchemaSyncResult, run_static_migrations, sync_dynamic_schemas,
 };
@@ -27,7 +25,7 @@ pub(super) async fn execute_migrate_mode(
     context: &'static SystemContext,
 ) -> Result<MigrationReport, CliError> {
     let db_url = extract_database_url(config)?;
-    let pool = connect_pool(db_url, config.max_db_connections).await?;
+    let pool = create_connection_pool(db_url, config.max_db_connections).await?;
 
     tracing::info!("Applying static system migrations...");
     run_static_migrations(&pool)
@@ -51,16 +49,13 @@ fn extract_database_url(config: &CliConfig) -> Result<&str, CliError> {
         .ok_or_else(|| CliError::Config("database_url is required for 'migrate' mode".to_string()))
 }
 
-async fn connect_pool(db_url: &str, max_connections: u32) -> Result<PgPool, PersistenceError> {
-    create_connection_pool(db_url, max_connections).await
-}
-
 fn build_migration_report(sync_result: SchemaSyncResult) -> MigrationReport {
     MigrationReport {
         static_migrations_total: MIGRATOR.migrations.len(),
         tables_created: sync_result.tables_created,
         columns_added: sync_result.columns_added,
         indexes_created: sync_result.indexes_created,
+        executed_steps: sync_result.executed_steps,
         executed_statements: sync_result.executed_statements,
     }
 }

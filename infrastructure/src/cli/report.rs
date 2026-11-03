@@ -100,6 +100,9 @@ pub struct MigrationReport {
     pub columns_added: usize,
     /// Count of secondary indexes created.
     pub indexes_created: usize,
+    /// Topologically ordered dynamic DDL migration steps executed against the database.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executed_steps: Vec<PlannedMigrationStep>,
     /// Exact SQL statements executed against the database.
     pub executed_statements: Vec<String>,
 }
@@ -280,14 +283,7 @@ impl fmt::Display for MigrationReport {
         writeln!(f, "Tables Created:          {}", self.tables_created)?;
         writeln!(f, "Columns Added:           {}", self.columns_added)?;
         writeln!(f, "Indexes Created:         {}", self.indexes_created)?;
-        writeln!(
-            f,
-            "Executed Statements ({}):",
-            self.executed_statements.len()
-        )?;
-        for (i, stmt) in self.executed_statements.iter().enumerate() {
-            writeln!(f, "  {}. {}", i + 1, stmt)?;
-        }
+        write_executed_migration_steps(f, &self.executed_steps, &self.executed_statements)?;
         write!(f, "Status: Completed successfully")
     }
 }
@@ -315,10 +311,53 @@ impl fmt::Display for CliOutcome {
 // Private Helpers
 // ---------------------------------------------------------------------------
 
-/// Writes a single planned migration step header followed by its indented, formatted DDL SQL.
+/// Writes a single planned or executed migration step header followed by its indented, formatted DDL SQL.
 fn write_dynamic_step(f: &mut fmt::Formatter<'_>, step: &PlannedMigrationStep) -> fmt::Result {
     writeln!(f, "  {}. {}", step.step_number, step.operation)?;
-    let formatted_sql = format_ddl_sql(&step.sql);
+    write_indented_formatted_sql(f, &step.sql)
+}
+
+/// Writes executed migration steps (or fallback raw statements) with formatted multi-line DDL SQL.
+fn write_executed_migration_steps(
+    f: &mut fmt::Formatter<'_>,
+    executed_steps: &[PlannedMigrationStep],
+    executed_statements: &[String],
+) -> fmt::Result {
+    if !executed_steps.is_empty() {
+        writeln!(f, "Executed Statements ({}):", executed_steps.len())?;
+        for step in executed_steps {
+            write_dynamic_step(f, step)?;
+        }
+        return Ok(());
+    }
+
+    writeln!(f, "Executed Statements ({}):", executed_statements.len())?;
+    for (idx, stmt) in executed_statements.iter().enumerate() {
+        write_numbered_sql_statement(f, idx + 1, stmt)?;
+    }
+    Ok(())
+}
+
+/// Writes a numbered SQL statement with multi-line DDL formatting when no step summary is present.
+fn write_numbered_sql_statement(
+    f: &mut fmt::Formatter<'_>,
+    step_number: usize,
+    sql: &str,
+) -> fmt::Result {
+    let formatted_sql = format_ddl_sql(sql);
+    let mut lines = formatted_sql.lines();
+    if let Some(first_line) = lines.next() {
+        writeln!(f, "  {step_number}. {first_line}")?;
+        for line in lines {
+            writeln!(f, "     {line}")?;
+        }
+    }
+    Ok(())
+}
+
+/// Formats `sql` and writes each line indented by 5 spaces under a step header.
+fn write_indented_formatted_sql(f: &mut fmt::Formatter<'_>, sql: &str) -> fmt::Result {
+    let formatted_sql = format_ddl_sql(sql);
     for line in formatted_sql.lines() {
         writeln!(f, "     {line}")?;
     }
@@ -438,14 +477,18 @@ mod tests {
     }
 
     fn sample_migrate_report() -> MigrationReport {
+        let sql = "CREATE TABLE IF NOT EXISTS \"articles\" (\"id\" uuid NOT NULL PRIMARY KEY, \"title\" varchar(255) NOT NULL);".to_string();
         MigrationReport {
             static_migrations_total: 1,
             tables_created: 1,
             columns_added: 0,
             indexes_created: 0,
-            executed_statements: vec![
-                "CREATE TABLE IF NOT EXISTS articles (id UUID PRIMARY KEY);".to_string(),
-            ],
+            executed_steps: vec![PlannedMigrationStep {
+                step_number: 1,
+                operation: "CREATE TABLE \"articles\" (2 columns, 0 foreign keys)".to_string(),
+                sql: sql.clone(),
+            }],
+            executed_statements: vec![sql],
         }
     }
 
@@ -532,12 +575,20 @@ mod tests {
     fn test_render_migrate_outcome_text_and_json() {
         let outcome = CliOutcome::Migrate(sample_migrate_report());
 
-        let text = outcome.render(OutputFormat::Text).unwrap();
+        let text = outcome
+            .render(OutputFormat::Text)
+            .expect("migrate text rendering must succeed");
         assert!(text.contains("=== Migration Execution Report ==="));
         assert!(text.contains("Tables Created:          1"));
+        assert!(text.contains("  1. CREATE TABLE \"articles\" (2 columns, 0 foreign keys)"));
+        assert!(text.contains(
+            "     CREATE TABLE IF NOT EXISTS \"articles\" (\n       \"id\" uuid NOT NULL PRIMARY KEY,\n       \"title\" varchar(255) NOT NULL\n     );"
+        ));
         assert!(text.contains("Status: Completed successfully"));
 
-        let json = outcome.render(OutputFormat::Json).unwrap();
+        let json = outcome
+            .render(OutputFormat::Json)
+            .expect("migrate JSON rendering must succeed");
         assert!(json.contains("\"mode\": \"migrate\""));
         assert!(json.contains("\"tablesCreated\": 1"));
     }

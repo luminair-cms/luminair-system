@@ -9,8 +9,8 @@ use domain::system::SystemContext;
 use super::config::CliConfig;
 use super::error::CliError;
 use super::report::{DryRunReport, StaticMigrationStatus, StaticMigrationStepSummary};
-use crate::persistence::create_connection_pool;
 use crate::persistence::PersistenceError;
+use crate::persistence::create_connection_pool;
 use crate::persistence::migration::{MIGRATOR, preview_dynamic_schemas};
 
 // ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ async fn execute_live_dry_run(
     context: &'static SystemContext,
     db_url: &str,
 ) -> Result<DryRunReport, CliError> {
-    let pool = connect_pool(db_url, config.max_db_connections).await?;
+    let pool = create_connection_pool(db_url, config.max_db_connections).await?;
     let static_migrations = inspect_live_static_migrations(&pool).await?;
     let dynamic_steps =
         preview_dynamic_schemas(Some(&pool), &context.schema, config.safety_policy).await?;
@@ -73,10 +73,6 @@ async fn execute_offline_dry_run(
     })
 }
 
-async fn connect_pool(db_url: &str, max_connections: u32) -> Result<PgPool, PersistenceError> {
-    create_connection_pool(db_url, max_connections).await
-}
-
 async fn inspect_live_static_migrations(
     pool: &PgPool,
 ) -> Result<Vec<StaticMigrationStepSummary>, PersistenceError> {
@@ -98,12 +94,11 @@ async fn query_applied_static_migration_versions(
         return Ok(HashSet::new());
     }
 
-    let versions: Vec<i64> = sqlx::query_scalar(
-        "SELECT version FROM _sqlx_migrations ORDER BY version ASC",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(PersistenceError::from)?;
+    let versions: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version ASC")
+            .fetch_all(pool)
+            .await
+            .map_err(PersistenceError::from)?;
 
     Ok(versions.into_iter().collect())
 }

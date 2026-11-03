@@ -44,7 +44,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U luminair -d luminair"]
       interval: 5s
@@ -69,6 +69,7 @@ services:
       start_period: 3s
 
   cli-validate:
+    image: luminair-cli:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -79,6 +80,7 @@ services:
     command: ["--config", "/app/config/cli-config.json", "--mode", "validate"]
 
   cli-dry-run-offline:
+    image: luminair-cli:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -89,6 +91,7 @@ services:
     command: ["--config", "/app/config/cli-config.json", "--mode", "dry-run", "--offline"]
 
   cli-dry-run:
+    image: luminair-cli:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -104,6 +107,7 @@ services:
     command: ["--config", "/app/config/cli-config.json", "--mode", "dry-run"]
 
   cli-migrate:
+    image: luminair-cli:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -119,6 +123,7 @@ services:
     command: ["--config", "/app/config/cli-config.json", "--mode", "migrate"]
 
   luminair-server:
+    image: luminair-cli:local
     build:
       context: .
       dockerfile: Dockerfile
