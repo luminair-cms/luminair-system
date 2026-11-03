@@ -315,7 +315,9 @@ where
     let mut normalized = Vec::new();
     for item in args {
         let s = item.as_ref();
-        if s.starts_with('-') && let Some((k, v)) = s.split_once('=') {
+        if s.starts_with('-')
+            && let Some((k, v)) = s.split_once('=')
+        {
             normalized.push(k.to_string());
             normalized.push(v.to_string());
         } else {
@@ -340,22 +342,54 @@ where
 }
 
 fn apply_file_dto(config: &mut CliConfig, dto: CliConfigFileDto) {
-    if let Some(v) = dto.mode { config.mode = v; }
-    if let Some(v) = dto.schema_dir { config.schema_dir = v; }
-    if dto.database_url.is_some() { config.database_url = dto.database_url; }
-    if let Some(v) = dto.max_db_connections { config.max_db_connections = v; }
-    if let Some(v) = dto.safety_policy { config.safety_policy = v; }
-    if let Some(v) = dto.offline { config.offline = v; }
-    if let Some(v) = dto.output_format { config.output_format = v; }
-    if dto.output_path.is_some() { config.output_path = dto.output_path; }
-    if let Some(v) = dto.http_host { config.http_host = v; }
-    if let Some(v) = dto.http_port { config.http_port = v; }
-    if let Some(v) = dto.auto_migrate { config.auto_migrate = v; }
-    if dto.oidc_jwt_secret.is_some() { config.oidc_jwt_secret = dto.oidc_jwt_secret; }
-    if dto.oidc_jwt_public_key_pem.is_some() { config.oidc_jwt_public_key_pem = dto.oidc_jwt_public_key_pem; }
-    if dto.oidc_issuer.is_some() { config.oidc_issuer = dto.oidc_issuer; }
-    if dto.oidc_audience.is_some() { config.oidc_audience = dto.oidc_audience; }
-    if let Some(v) = dto.service_tokens { config.service_tokens = v; }
+    if let Some(v) = dto.mode {
+        config.mode = v;
+    }
+    if let Some(v) = dto.schema_dir {
+        config.schema_dir = v;
+    }
+    if dto.database_url.is_some() {
+        config.database_url = dto.database_url;
+    }
+    if let Some(v) = dto.max_db_connections {
+        config.max_db_connections = v;
+    }
+    if let Some(v) = dto.safety_policy {
+        config.safety_policy = v;
+    }
+    if let Some(v) = dto.offline {
+        config.offline = v;
+    }
+    if let Some(v) = dto.output_format {
+        config.output_format = v;
+    }
+    if dto.output_path.is_some() {
+        config.output_path = dto.output_path;
+    }
+    if let Some(v) = dto.http_host {
+        config.http_host = v;
+    }
+    if let Some(v) = dto.http_port {
+        config.http_port = v;
+    }
+    if let Some(v) = dto.auto_migrate {
+        config.auto_migrate = v;
+    }
+    if dto.oidc_jwt_secret.is_some() {
+        config.oidc_jwt_secret = dto.oidc_jwt_secret;
+    }
+    if dto.oidc_jwt_public_key_pem.is_some() {
+        config.oidc_jwt_public_key_pem = dto.oidc_jwt_public_key_pem;
+    }
+    if dto.oidc_issuer.is_some() {
+        config.oidc_issuer = dto.oidc_issuer;
+    }
+    if dto.oidc_audience.is_some() {
+        config.oidc_audience = dto.oidc_audience;
+    }
+    if let Some(v) = dto.service_tokens {
+        config.service_tokens = v;
+    }
 }
 
 fn apply_env_overrides<F>(config: &mut CliConfig, env_lookup: &F) -> Result<(), CliError>
@@ -392,9 +426,9 @@ where
         config.http_host = val;
     }
     if let Some(val) = env_lookup("LUMINAIR_HTTP_PORT") {
-        config.http_port = val.parse::<u16>().map_err(|e| {
-            CliError::Config(format!("invalid LUMINAIR_HTTP_PORT '{val}': {e}"))
-        })?;
+        config.http_port = val
+            .parse::<u16>()
+            .map_err(|e| CliError::Config(format!("invalid LUMINAIR_HTTP_PORT '{val}': {e}")))?;
     }
     if let Some(val) = env_lookup("LUMINAIR_AUTO_MIGRATE") {
         config.auto_migrate = parse_bool(&val)?;
@@ -427,15 +461,25 @@ fn apply_cli_arg_overrides(config: &mut CliConfig, args: &[String]) -> Result<()
             continue;
         }
 
-        if !arg.starts_with('-') && let Ok(mode) = RunMode::from_str(arg) {
+        if !arg.starts_with('-')
+            && let Ok(mode) = RunMode::from_str(arg)
+        {
             config.mode = mode;
             i += 1;
             continue;
         }
 
         match arg.as_str() {
-            "--offline" => { config.offline = true; i += 1; continue; }
-            "--auto-migrate" => { config.auto_migrate = true; i += 1; continue; }
+            "--offline" => {
+                config.offline = true;
+                i += 1;
+                continue;
+            }
+            "--auto-migrate" => {
+                config.auto_migrate = true;
+                i += 1;
+                continue;
+            }
             "--config" | "-c" => {
                 if i + 1 >= args.len() {
                     return Err(CliError::Config(format!("flag '{arg}' requires a value")));
@@ -454,25 +498,32 @@ fn apply_cli_arg_overrides(config: &mut CliConfig, args: &[String]) -> Result<()
             "--mode" | "-m" => config.mode = RunMode::from_str(val)?,
             "--schema-dir" | "-s" => config.schema_dir = PathBuf::from(val),
             "--database-url" | "-d" => config.database_url = Some(val.clone()),
-            "--max-connections" => {
-                config.max_db_connections = val.parse::<u32>().map_err(|e| {
-                    CliError::Config(format!("invalid --max-connections '{val}': {e}"))
-                })?;
+            "--max-connections" | "--max-db-connections" => {
+                config.max_db_connections = val
+                    .parse::<u32>()
+                    .map_err(|e| CliError::Config(format!("invalid {arg} '{val}': {e}")))?;
             }
-            "--policy" => config.safety_policy = parse_safety_policy(val)?,
+            "--policy" | "--safety-policy" => config.safety_policy = parse_safety_policy(val)?,
             "--format" | "-f" => config.output_format = OutputFormat::from_str(val)?,
-            "--output" | "-o" => config.output_path = Some(PathBuf::from(val)),
-            "--host" => config.http_host = val.clone(),
-            "--port" | "-p" => {
-                config.http_port = val.parse::<u16>().map_err(|e| {
-                    CliError::Config(format!("invalid --port '{val}': {e}"))
-                })?;
+            "--output" | "--output-path" | "-o" => config.output_path = Some(PathBuf::from(val)),
+            "--host" | "--http-host" => config.http_host = val.clone(),
+            "--port" | "--http-port" | "-p" => {
+                config.http_port = val
+                    .parse::<u16>()
+                    .map_err(|e| CliError::Config(format!("invalid {arg} '{val}': {e}")))?;
             }
             "--oidc-jwt-secret" => config.oidc_jwt_secret = Some(val.clone()),
-            "--oidc-jwt-public-key" => config.oidc_jwt_public_key_pem = Some(val.clone()),
+            "--oidc-jwt-public-key" | "--oidc-jwt-public-key-pem" => {
+                config.oidc_jwt_public_key_pem = Some(val.clone());
+            }
             "--oidc-issuer" => config.oidc_issuer = Some(val.clone()),
             "--oidc-audience" => config.oidc_audience = Some(val.clone()),
-            unknown => return Err(CliError::Config(format!("unknown CLI argument '{unknown}'"))),
+            "--service-tokens" => config.service_tokens = parse_service_tokens(val)?,
+            unknown => {
+                return Err(CliError::Config(format!(
+                    "unknown CLI argument '{unknown}'"
+                )));
+            }
         }
         i += 2;
     }
@@ -488,7 +539,9 @@ fn parse_service_tokens(val: &str) -> Result<Vec<ServiceTokenConfig>, CliError> 
         .map(|item| {
             let parts: Vec<&str> = item.split(':').collect();
             if parts.len() < 3 {
-                return Err(CliError::Config(format!("invalid service token format in '{item}'")));
+                return Err(CliError::Config(format!(
+                    "invalid service token format in '{item}'"
+                )));
             }
             Ok(ServiceTokenConfig {
                 token: parts[0].trim().to_string(),
@@ -515,7 +568,9 @@ fn parse_safety_policy(val: &str) -> Result<SafetyPolicy, CliError> {
 
 fn parse_bool(val: &str) -> Result<bool, CliError> {
     val.trim().parse::<bool>().map_err(|_| {
-        CliError::Config(format!("invalid boolean value '{val}', expected 'true' or 'false'"))
+        CliError::Config(format!(
+            "invalid boolean value '{val}', expected 'true' or 'false'"
+        ))
     })
 }
 
@@ -625,6 +680,8 @@ mod tests {
             "json",
             "--output",
             "/tmp/out.json",
+            "--service-tokens",
+            "local-dev-admin-token:ci-agent:admin",
         ];
         let config = CliConfig::parse_from_iter(args).unwrap();
         assert_eq!(config.mode, RunMode::DryRun);
@@ -637,6 +694,14 @@ mod tests {
         assert_eq!(config.safety_policy, SafetyPolicy::AllowDestructive);
         assert_eq!(config.output_format, OutputFormat::Json);
         assert_eq!(config.output_path, Some(PathBuf::from("/tmp/out.json")));
+        assert_eq!(
+            config.service_tokens,
+            vec![ServiceTokenConfig {
+                token: "local-dev-admin-token".to_string(),
+                service_id: "ci-agent".to_string(),
+                roles: vec!["admin".to_string()],
+            }]
+        );
     }
 
     #[test]
@@ -730,12 +795,7 @@ mod tests {
         }"#;
         std::fs::write(&file_path, json_content).unwrap();
 
-        let args = [
-            "--config",
-            file_path.to_str().unwrap(),
-            "--mode",
-            "dry-run",
-        ];
+        let args = ["--config", file_path.to_str().unwrap(), "--mode", "dry-run"];
         let config = CliConfig::parse_from_iter(args).unwrap();
         // --mode flag overrides the mode in the config file
         assert_eq!(config.mode, RunMode::DryRun);
