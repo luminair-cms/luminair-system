@@ -5,6 +5,10 @@ storage:
 web:
   http: 0.0.0.0:5556
 
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local
+
 enablePasswordDB: true
 
 # Pre-seeded local users

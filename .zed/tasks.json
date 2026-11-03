@@ -1,0 +1,23 @@
+[
+  {
+    "label": "httpYac: Send Request at Cursor",
+    "command": "httpyac",
+    "args": ["send", "$ZED_FILE", "--line", "$ZED_ROW", "--output", "body"],
+    "reveal": "always",
+    "use_new_terminal": false
+  },
+  {
+    "label": "httpYac: Send Request (Full Headers + Body)",
+    "command": "httpyac",
+    "args": ["send", "$ZED_FILE", "--line", "$ZED_ROW", "--output", "exchange"],
+    "reveal": "always",
+    "use_new_terminal": false
+  },
+  {
+    "label": "httpYac: Run All Requests in File",
+    "command": "httpyac",
+    "args": ["send", "$ZED_FILE", "--all"],
+    "reveal": "always",
+    "use_new_terminal": false
+  }
+]
