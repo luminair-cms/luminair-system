@@ -54,8 +54,13 @@ where
     St: HasHealthChecker,
 {
     Router::new()
-        .route("/healthz", get(health::healthz::<St>))
-        .route("/ready", get(health::ready::<St>))
+        .route(
+            "/healthz",
+            get(health::healthz::<St>)
+        )
+        .route(
+            "/ready",
+            get(health::ready::<St>))
 }
 
 /// Builds system configuration and locale routes (`/api/v1/system/*`).
@@ -64,7 +69,10 @@ where
     St: HasSystemConfigService + HasAuthResolver,
 {
     Router::new()
-        .route("/api/v1/system/config", get(system::get_system_config::<St>))
+        .route(
+            "/api/v1/system/config",
+            get(system::get_system_config::<St>)
+        )
         .route(
             "/api/v1/system/locales",
             get(system::get_system_locales::<St>),
@@ -85,7 +93,10 @@ where
             "/api/v1/schema/document-types/{id}",
             get(schema::get_document_type::<St>),
         )
-        .route("/api/v1/schemas", get(schema::list_document_types::<St>))
+        .route(
+            "/api/v1/schemas", 
+            get(schema::list_document_types::<St>)
+        )
         .route(
             "/api/v1/schemas/{id}",
             get(schema::get_document_type::<St>),
@@ -123,8 +134,14 @@ where
     St: HasUserDirectoryService + HasAuthResolver,
 {
     Router::new()
-        .route("/api/v1/auth/users", get(users::list_users::<St>))
-        .route("/api/v1/auth/profile/sync", post(users::sync_profile::<St>))
+        .route(
+            "/api/v1/auth/users", 
+            get(users::list_users::<St>)
+        )
+        .route(
+            "/api/v1/auth/profile/sync", 
+            post(users::sync_profile::<St>)
+        )
 }
 
 /// Builds document instance lifecycle and snapshot routes (`/api/v1/content/*`).
