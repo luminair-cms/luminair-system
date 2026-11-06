@@ -22,7 +22,7 @@ use crate::auth::{Caller, OnboardingUser};
 /// Optional request payload for profile synchronization (`POST /api/v1/auth/profile/sync`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct SyncProfilePayload {
+pub(crate) struct SyncProfilePayload {
     /// Overriding or complementary email address.
     pub email: Option<String>,
     /// Overriding or complementary display name.
@@ -34,7 +34,7 @@ pub struct SyncProfilePayload {
 // ---------------------------------------------------------------------------
 
 /// Lists user profiles matching an optional search string (`GET /api/v1/auth/users`).
-pub async fn list_users<St>(
+pub(crate) async fn list_users<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Query(query): Query<ListUsersQuery>,
@@ -44,13 +44,16 @@ where
 {
     let pagination = query.pagination();
     let cmd = ListUsersCommand::new(query.q, pagination);
-    let page = state.user_directory_service().list_users(&caller, cmd).await?;
+    let page = state
+        .user_directory_service()
+        .list_users(&caller, cmd)
+        .await?;
     let dtos: Vec<UserProfileDto> = page.items.into_iter().map(UserProfileDto::from).collect();
     Ok(PagedJson::new(dtos, pagination, page.total))
 }
 
 /// Synchronizes authenticated IdP claims into local user profile storage (`POST /api/v1/auth/profile/sync`).
-pub async fn sync_profile<St>(
+pub(crate) async fn sync_profile<St>(
     State(state): State<St>,
     OnboardingUser(user): OnboardingUser,
     payload: Option<Json<SyncProfilePayload>>,

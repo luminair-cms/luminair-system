@@ -91,10 +91,12 @@ mod tests {
     #[test]
     fn test_health_status_is_healthy() {
         assert!(HealthStatus::Healthy.is_healthy());
-        assert!(!HealthStatus::Unhealthy {
-            reason: "connection failed".to_string()
-        }
-        .is_healthy());
+        assert!(
+            !HealthStatus::Unhealthy {
+                reason: "connection failed".to_string()
+            }
+            .is_healthy()
+        );
     }
 
     #[test]

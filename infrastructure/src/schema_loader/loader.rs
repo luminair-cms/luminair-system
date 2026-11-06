@@ -94,7 +94,7 @@ fn load_system_config_file(schema_dir: &Path) -> Result<SystemConfig, SchemaLoad
 ///
 /// # Errors
 /// Returns [`SchemaLoaderError`] if JSON is malformed or locale configuration is invalid.
-pub fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
+fn parse_system_config(content: &str) -> Result<SystemConfig, SchemaLoaderError> {
     let record: SystemConfigRecord =
         serde_json::from_str(content).map_err(|source| SchemaLoaderError::JsonInline { source })?;
 
@@ -184,10 +184,7 @@ fn load_document_type_file(path: &Path) -> Result<DocumentType, SchemaLoaderErro
 /// # Errors
 /// Returns [`SchemaLoaderError`] if JSON parsing, keyword check, or schema mapping fails.
 #[allow(clippy::mutable_key_type)]
-pub fn parse_document_type(
-    content: &str,
-    file_stem: &str,
-) -> Result<DocumentType, SchemaLoaderError> {
+fn parse_document_type(content: &str, file_stem: &str) -> Result<DocumentType, SchemaLoaderError> {
     validate_file_stem(file_stem)?;
 
     let record: DocumentRecord =
@@ -381,7 +378,7 @@ fn parse_relation_attribute(
 ///
 /// # Errors
 /// Returns [`SchemaLoaderError::Validation`] if the field type is unrecognized or bounds are invalid.
-pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoaderError> {
+fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoaderError> {
     match dto {
         FieldTypeDto::Simple(s) => {
             let lower = s.to_ascii_lowercase();
@@ -434,7 +431,7 @@ pub fn parse_field_type(dto: &FieldTypeDto<'_>) -> Result<FieldType, SchemaLoade
 ///
 /// # Errors
 /// Returns [`SchemaLoaderError::Validation`] if the size string is unrecognized.
-pub fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
+fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
     match s.to_ascii_lowercase().as_str() {
         "int16" | "short" => Ok(IntegerSize::I16),
         "int32" | "integer" => Ok(IntegerSize::I32),
@@ -450,7 +447,7 @@ pub fn parse_integer_size(s: &str) -> Result<IntegerSize, SchemaLoaderError> {
 /// # Errors
 /// Returns [`SchemaLoaderError`] if regex compilation or numeric parsing fails.
 #[allow(clippy::mutable_key_type)]
-pub fn parse_constraints(
+fn parse_constraints(
     records: &[ConstraintRecord<'_>],
     field_type: FieldType,
 ) -> Result<HashSet<FieldConstraint>, SchemaLoaderError> {

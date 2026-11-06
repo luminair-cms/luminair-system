@@ -17,8 +17,8 @@ use domain::content::ports::{FieldFilter, Pagination};
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::DocumentTypeNaming;
 use crate::persistence::query::common::{
-    apply_pagination, apply_wide_table_filters, content_value_to_sea_value,
-    COL_HAS_PENDING_DRAFT_IDEN, COL_ID_IDEN, COL_PUBLISHED_AT_IDEN,
+    COL_HAS_PENDING_DRAFT_IDEN, COL_ID_IDEN, COL_PUBLISHED_AT_IDEN, apply_pagination,
+    apply_wide_table_filters, content_value_to_sea_value,
 };
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ pub fn select_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> SelectS
 
 /// Builds a `SELECT * FROM [table] WHERE has_pending_draft = false` query statement.
 #[must_use]
-pub fn select_clean_published_query(type_naming: &DocumentTypeNaming) -> SelectStatement {
+pub(crate) fn select_clean_published_query(type_naming: &DocumentTypeNaming) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(type_naming.table_iden)
         .column(Asterisk)
@@ -69,7 +69,7 @@ pub fn find_published_query(
 }
 
 /// Builds a `COUNT(id)` query for published rows matching the given filters.
-pub fn count_published_query(
+pub(crate) fn count_published_query(
     type_naming: &DocumentTypeNaming,
     filters: &[FieldFilter],
 ) -> Result<SelectStatement, PersistenceError> {
@@ -83,7 +83,7 @@ pub fn count_published_query(
 }
 
 /// Builds an upsert statement for publishing a document instance into its wide table.
-pub fn upsert_wide_table_query(
+pub(crate) fn upsert_wide_table_query(
     type_naming: &DocumentTypeNaming,
     instance: &DocumentInstance,
     revision: u32,
@@ -131,7 +131,7 @@ pub fn upsert_wide_table_query(
 
 /// Builds an `UPDATE [table] SET has_pending_draft = $1 WHERE id = $2` query statement.
 #[must_use]
-pub fn update_has_pending_draft_query(
+pub(crate) fn update_has_pending_draft_query(
     type_naming: &DocumentTypeNaming,
     id: Uuid,
     has_pending_draft: bool,
@@ -145,7 +145,7 @@ pub fn update_has_pending_draft_query(
 
 /// Builds a `DELETE FROM [table] WHERE id = $1` query statement.
 #[must_use]
-pub fn delete_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> DeleteStatement {
+pub(crate) fn delete_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(type_naming.table_iden)
         .and_where(Expr::col(COL_ID_IDEN).eq(id));
@@ -154,7 +154,7 @@ pub fn delete_by_id_query(type_naming: &DocumentTypeNaming, id: Uuid) -> DeleteS
 
 /// Builds a `SELECT 1 FROM [table] LIMIT 1` query statement to check table existence/emptiness.
 #[must_use]
-pub fn exists_in_wide_table_query(type_naming: &DocumentTypeNaming) -> SelectStatement {
+pub(crate) fn exists_in_wide_table_query(type_naming: &DocumentTypeNaming) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(type_naming.table_iden)
         .expr(Expr::val(1))
@@ -178,9 +178,10 @@ fn extract_published_audit(instance: &DocumentInstance) -> (DateTime<Utc>, Strin
             published_by,
             ..
         } => (*published_at, published_by.to_urn()),
-        PublicationState::Draft | PublicationState::Unpublished { .. } => {
-            (instance.audit.updated_at, instance.audit.updated_by.to_urn())
-        }
+        PublicationState::Draft | PublicationState::Unpublished { .. } => (
+            instance.audit.updated_at,
+            instance.audit.updated_by.to_urn(),
+        ),
     }
 }
 
@@ -191,7 +192,6 @@ fn extract_published_audit(instance: &DocumentInstance) -> (DateTime<Utc>, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{HashMap, HashSet};
     use chrono::TimeZone;
     use domain::auth::ActorId;
     use domain::common::DisplayName;
@@ -205,6 +205,7 @@ mod tests {
         SchemaRegistry,
     };
     use sea_query::PostgresQueryBuilder;
+    use std::collections::{HashMap, HashSet};
 
     fn make_test_type_naming() -> DocumentTypeNaming {
         let title_field = FieldDefinition {
@@ -350,7 +351,9 @@ mod tests {
         let id = Uuid::nil();
         let stmt = update_has_pending_draft_query(&type_naming, id, true);
         let sql = stmt.to_string(PostgresQueryBuilder);
-        assert!(sql.contains("UPDATE \"articles\" SET \"has_pending_draft\" = TRUE WHERE \"id\" ="));
+        assert!(
+            sql.contains("UPDATE \"articles\" SET \"has_pending_draft\" = TRUE WHERE \"id\" =")
+        );
     }
 
     #[test]

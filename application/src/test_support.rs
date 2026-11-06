@@ -197,7 +197,9 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
                 let mut filtered: Vec<DocumentInstance> = if !pub_store.is_empty() {
                     pub_store
                         .values()
-                        .filter(|inst| inst.document_type_id == *type_id && matches_filters(inst, &filters))
+                        .filter(|inst| {
+                            inst.document_type_id == *type_id && matches_filters(inst, &filters)
+                        })
                         .cloned()
                         .collect()
                 } else {
@@ -207,7 +209,8 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
                             inst.document_type_id == *type_id
                                 && matches!(
                                     inst.content.publication_state,
-                                    PublicationState::Published { .. } | PublicationState::Modified { .. }
+                                    PublicationState::Published { .. }
+                                        | PublicationState::Modified { .. }
                                 )
                                 && matches_filters(inst, &filters)
                         })
@@ -217,8 +220,8 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
                 filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
 
                 let total = filtered.len() as u64;
-                let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
-                    as usize;
+                let start = (u64::from(pagination.page.saturating_sub(1))
+                    * u64::from(pagination.page_size)) as usize;
                 let items: Vec<DocumentInstance> = filtered
                     .into_iter()
                     .skip(start)
@@ -237,14 +240,16 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
 
                 let mut filtered: Vec<DocumentInstance> = store
                     .values()
-                    .filter(|inst| inst.document_type_id == *type_id && matches_filters(inst, &filters))
+                    .filter(|inst| {
+                        inst.document_type_id == *type_id && matches_filters(inst, &filters)
+                    })
                     .cloned()
                     .collect();
                 filtered.sort_by_key(|inst| (inst.audit.created_at, *inst.id.as_ref()));
 
                 let total = filtered.len() as u64;
-                let start = (u64::from(pagination.page.saturating_sub(1)) * u64::from(pagination.page_size))
-                    as usize;
+                let start = (u64::from(pagination.page.saturating_sub(1))
+                    * u64::from(pagination.page_size)) as usize;
                 let items: Vec<DocumentInstance> = filtered
                     .into_iter()
                     .skip(start)
@@ -687,7 +692,10 @@ impl UserProfileRepository for FakeUserProfileRepository {
 
     async fn find_by_ids(&self, user_ids: &[UserId]) -> Result<Vec<UserProfile>, DomainError> {
         let store = self.profiles.read().map_err(lock_error)?;
-        Ok(user_ids.iter().filter_map(|id| store.get(id).cloned()).collect())
+        Ok(user_ids
+            .iter()
+            .filter_map(|id| store.get(id).cloned())
+            .collect())
     }
 
     async fn list_users(
@@ -851,7 +859,10 @@ mod tests {
             .await
             .unwrap();
 
-        let page = repo.find_by_type(t, VersionView::Working, all(), vec![]).await.unwrap();
+        let page = repo
+            .find_by_type(t, VersionView::Working, all(), vec![])
+            .await
+            .unwrap();
         assert_eq!(page.total, 4);
         assert_eq!(repo.count(t, vec![]).await.unwrap(), 4);
     }
@@ -862,7 +873,10 @@ mod tests {
         let f = vec![filter("title", text("a"))];
 
         assert_eq!(repo.count(t, f.clone()).await.unwrap(), 2);
-        let page = repo.find_by_type(t, VersionView::Working, all(), f).await.unwrap();
+        let page = repo
+            .find_by_type(t, VersionView::Working, all(), f)
+            .await
+            .unwrap();
         assert_eq!(page.total, 2);
         assert_eq!(page.items.len(), 2);
     }

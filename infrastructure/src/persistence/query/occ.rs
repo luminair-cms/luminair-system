@@ -12,9 +12,9 @@ use crate::persistence::error::PersistenceError;
 // Constants
 // ---------------------------------------------------------------------------
 
-pub const DEFAULT_MAX_RETRIES: usize = 3;
-pub const DEFAULT_BASE_DELAY_MS: u64 = 25;
-pub const DEFAULT_MAX_DELAY_MS: u64 = 500;
+const DEFAULT_MAX_RETRIES: usize = 3;
+const DEFAULT_BASE_DELAY_MS: u64 = 25;
+const DEFAULT_MAX_DELAY_MS: u64 = 500;
 
 // ---------------------------------------------------------------------------
 // Public Retry Functions
@@ -25,7 +25,7 @@ pub const DEFAULT_MAX_DELAY_MS: u64 = 500;
 /// # Errors
 /// Returns [`PersistenceError::OccConflictExhausted`] if retry budget is depleted,
 /// or bubbles up non-retryable errors immediately.
-pub async fn with_occ_retry<F, Fut, T>(op: F) -> Result<T, PersistenceError>
+pub(crate) async fn with_occ_retry<F, Fut, T>(op: F) -> Result<T, PersistenceError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, PersistenceError>>,
@@ -44,7 +44,7 @@ where
 /// # Errors
 /// Returns [`PersistenceError::OccConflictExhausted`] if retry budget is depleted,
 /// or bubbles up non-retryable errors immediately.
-pub async fn with_occ_retry_opts<F, Fut, T>(
+async fn with_occ_retry_opts<F, Fut, T>(
     max_retries: usize,
     base_delay_ms: u64,
     max_delay_ms: u64,

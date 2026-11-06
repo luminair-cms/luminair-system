@@ -13,7 +13,7 @@ use domain::errors::DomainError;
 use domain::schema::{DocumentType, RelationDefinition, RelationType, SchemaRegistry};
 use domain::system::SystemContext;
 use domain::test_support::{
-    DocumentTypeBuilder, fixture_system_config, create_attr_id, create_user_id, text_field,
+    DocumentTypeBuilder, create_attr_id, create_user_id, fixture_system_config, text_field,
 };
 
 fn setup_service_fixture(

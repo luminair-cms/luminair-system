@@ -3,12 +3,12 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use application::context::CallerContext;
+use application::errors::ApplicationError;
 use domain::auth::access_request::AccessRequestStatus;
 use domain::auth::ports::{AccessRequestRepository, RoleRepository, UserRoleAssignmentRepository};
 use domain::auth::role::{RoleId, UserRoleAssignment};
 use domain::auth::user::{ActorId, UserId};
-use application::context::CallerContext;
-use application::errors::ApplicationError;
 
 use crate::auth::claims::AuthenticatedUser;
 use crate::auth::error::{AuthError, AuthResolutionError};
@@ -47,7 +47,7 @@ pub struct DefaultAuthResolver<A, U, R> {
 }
 
 /// Production database-backed authentication resolver.
-pub type SqlxAuthResolver = DefaultAuthResolver<
+pub(crate) type SqlxAuthResolver = DefaultAuthResolver<
     SqlxAccessRequestRepository,
     SqlxUserRoleAssignmentRepository,
     SqlxRoleRepository,
@@ -175,9 +175,7 @@ where
             AccessRequestStatus::Rejected { reason } => {
                 ApplicationError::access_rejected(user_id, reason).into()
             }
-            AccessRequestStatus::Approved => {
-                ApplicationError::access_not_requested(user_id).into()
-            }
+            AccessRequestStatus::Approved => ApplicationError::access_not_requested(user_id).into(),
         }
     }
 
@@ -205,7 +203,7 @@ where
 /// # Errors
 /// Returns [`AuthError::MissingToken`] if the header is missing or blank,
 /// or [`AuthError::MalformedHeader`] if the scheme is not `Bearer <token>`.
-pub fn extract_bearer_token(auth_header: Option<&str>) -> Result<&str, AuthError> {
+fn extract_bearer_token(auth_header: Option<&str>) -> Result<&str, AuthError> {
     let header = auth_header.ok_or(AuthError::MissingToken)?;
     let trimmed = header.trim();
     if trimmed.is_empty() {
@@ -405,14 +403,9 @@ mod tests {
     async fn test_resolve_caller_onboarding_not_requested() {
         let secret = b"my-secret-key-that-is-long-enough-123";
         let validator = Arc::new(OidcTokenValidator::new_hs256(secret, None, None));
-        let token = OidcTokenValidator::encode_hs256_token(
-            secret,
-            "usr_newbie",
-            None,
-            None,
-            usize::MAX,
-        )
-        .expect("token");
+        let token =
+            OidcTokenValidator::encode_hs256_token(secret, "usr_newbie", None, None, usize::MAX)
+                .expect("token");
 
         let resolver = DefaultAuthResolver::new(
             validator,
@@ -441,14 +434,9 @@ mod tests {
     async fn test_resolve_caller_with_roles() {
         let secret = b"my-secret-key-that-is-long-enough-123";
         let validator = Arc::new(OidcTokenValidator::new_hs256(secret, None, None));
-        let token = OidcTokenValidator::encode_hs256_token(
-            secret,
-            "usr_alice",
-            None,
-            None,
-            usize::MAX,
-        )
-        .expect("token");
+        let token =
+            OidcTokenValidator::encode_hs256_token(secret, "usr_alice", None, None, usize::MAX)
+                .expect("token");
 
         let user_id = UserId::try_new("usr_alice").expect("valid user");
         let role_id = RoleId::new(Uuid::now_v7());

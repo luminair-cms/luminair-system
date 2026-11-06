@@ -1,7 +1,7 @@
 //! Sanitization and validation utilities for database identifiers.
 
 /// List of reserved SQL and PostgreSQL keywords that cannot be used as unquoted table or column identifiers.
-pub const RESERVED_SQL_KEYWORDS: &[&str] = &[
+const RESERVED_SQL_KEYWORDS: &[&str] = &[
     "all",
     "alter",
     "and",
@@ -80,7 +80,7 @@ pub const RESERVED_SQL_KEYWORDS: &[&str] = &[
 
 /// Checks if an identifier is a reserved SQL/PostgreSQL keyword (case-insensitive).
 #[must_use]
-pub fn is_reserved_sql_keyword(name: &str) -> bool {
+pub(crate) fn is_reserved_sql_keyword(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     RESERVED_SQL_KEYWORDS.contains(&lower.as_str())
 }
@@ -90,12 +90,12 @@ pub fn is_reserved_sql_keyword(name: &str) -> bool {
 /// Any hyphens (`'-'`) within segments are replaced with underscores (`'_'`), and segments
 /// are separated by underscores.
 #[must_use]
-pub fn join_snake_segments(segments: &[&str]) -> String {
+pub(crate) fn join_snake_segments(segments: &[&str]) -> String {
     if segments.is_empty() {
         return String::new();
     }
-    let total_len = segments.iter().map(|s| s.len()).sum::<usize>()
-        + segments.len().saturating_sub(1);
+    let total_len =
+        segments.iter().map(|s| s.len()).sum::<usize>() + segments.len().saturating_sub(1);
     let mut result = String::with_capacity(total_len);
     for (i, segment) in segments.iter().enumerate() {
         if i > 0 {
@@ -109,7 +109,7 @@ pub fn join_snake_segments(segments: &[&str]) -> String {
 /// Converts a kebab-case identifier to `snake_case`.
 /// E.g. `blog-post` -> `blog_post`, `hero-image-url` -> `hero_image_url`.
 #[must_use]
-pub fn kebab_to_snake(s: &str) -> String {
+pub(crate) fn kebab_to_snake(s: &str) -> String {
     join_snake_segments(&[s])
 }
 

@@ -16,7 +16,7 @@ use domain::errors::DomainError;
 
 /// RFC 9457 compliant Problem Details representation for HTTP API error responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ApiProblemDetails {
+struct ApiProblemDetails {
     /// URI reference identifying the problem type.
     #[serde(rename = "type")]
     pub problem_type: String,
@@ -41,7 +41,7 @@ pub struct ApiProblemDetails {
 
 /// Unified API error type wrapping application domain errors and HTTP transport rejections.
 #[derive(Debug)]
-pub struct ApiError {
+pub(crate) struct ApiError {
     /// Inner classification of the error condition.
     pub kind: ApiErrorKind,
     /// Optional URI path where the error occurred (RFC 9457 `instance`).
@@ -50,7 +50,7 @@ pub struct ApiError {
 
 /// Underlying kind of an [`ApiError`].
 #[derive(Debug)]
-pub enum ApiErrorKind {
+pub(crate) enum ApiErrorKind {
     /// Application-level domain, authorization, validation, or conflict error.
     Application(ApplicationError),
     /// Unauthenticated request (e.g. missing, expired, or invalid token).
@@ -76,7 +76,7 @@ pub enum ApiErrorKind {
 impl ApiError {
     /// Creates a 401 Unauthorized API error.
     #[must_use]
-    pub fn unauthenticated(code: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn unauthenticated(code: &'static str, detail: impl Into<String>) -> Self {
         Self {
             kind: ApiErrorKind::Unauthenticated {
                 code,
@@ -88,7 +88,7 @@ impl ApiError {
 
     /// Creates a 400 Bad Request API error.
     #[must_use]
-    pub fn bad_request(code: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(code: &'static str, detail: impl Into<String>) -> Self {
         Self {
             kind: ApiErrorKind::BadRequest {
                 code,
@@ -98,19 +98,21 @@ impl ApiError {
         }
     }
 
+    #[cfg(test)]
     /// Attaches an RFC 9457 request URI instance path to this error.
     #[must_use]
-    pub fn with_instance(mut self, instance: impl Into<String>) -> Self {
+    fn with_instance(mut self, instance: impl Into<String>) -> Self {
         self.instance = Some(instance.into());
         self
     }
 
     /// Returns the HTTP status code corresponding to this error.
     #[must_use]
-    pub fn status_code(&self) -> StatusCode {
+    pub(crate) fn status_code(&self) -> StatusCode {
         match &self.kind {
-            ApiErrorKind::Application(err) => StatusCode::from_u16(err.status_code())
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            ApiErrorKind::Application(err) => {
+                StatusCode::from_u16(err.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            }
             ApiErrorKind::Unauthenticated { .. } => StatusCode::UNAUTHORIZED,
             ApiErrorKind::BadRequest { .. } => StatusCode::BAD_REQUEST,
         }
@@ -118,7 +120,7 @@ impl ApiError {
 
     /// Converts this error into an RFC 9457 [`ApiProblemDetails`] payload.
     #[must_use]
-    pub fn to_problem_details(&self) -> ApiProblemDetails {
+    fn to_problem_details(&self) -> ApiProblemDetails {
         match &self.kind {
             ApiErrorKind::Application(err) => {
                 let prob = err.to_problem_details();

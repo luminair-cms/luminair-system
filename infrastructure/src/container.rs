@@ -25,8 +25,7 @@ use crate::persistence::repositories::{
 
 /// Sub-container aggregating SQLx repository adapters and database persistence machinery.
 #[derive(Debug, Clone)]
-pub struct PersistenceContainer {
-    pub naming: &'static SchemaNaming,
+pub(crate) struct PersistenceContainer {
     pub document_instance_repo: SqlxDocumentInstanceRepository,
     pub document_snapshot_repo: SqlxDocumentSnapshotRepository,
     pub role_repo: SqlxRoleRepository,
@@ -37,13 +36,11 @@ pub struct PersistenceContainer {
 
 /// Central composition root container holding initialized services and adapters.
 #[derive(Clone)]
-pub struct AppContainer {
+pub(crate) struct AppContainer {
     pub context: &'static SystemContext,
-    pub persistence: PersistenceContainer,
     pub auth_resolver: Arc<SqlxAuthResolver>,
-    pub documents_service: Arc<
-        DocumentsServiceImpl<SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository>,
-    >,
+    pub documents_service:
+        Arc<DocumentsServiceImpl<SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository>>,
     pub access_requests_service: Arc<
         AccessRequestsServiceImpl<
             SqlxAccessRequestRepository,
@@ -64,7 +61,7 @@ pub struct AppContainer {
 impl PersistenceContainer {
     /// Creates a new persistence container bound to the provided connection pool.
     #[must_use]
-    pub fn new(pool: PgPool, context: &'static SystemContext) -> Self {
+    pub(crate) fn new(pool: PgPool, context: &'static SystemContext) -> Self {
         let naming = SchemaNaming::from_registry(&context.schema);
         let document_instance_repo =
             SqlxDocumentInstanceRepository::new(pool.clone(), context, naming);
@@ -76,7 +73,6 @@ impl PersistenceContainer {
         let user_profile_repo = SqlxUserProfileRepository::new(pool);
 
         Self {
-            naming,
             document_instance_repo,
             document_snapshot_repo,
             role_repo,
@@ -90,7 +86,7 @@ impl PersistenceContainer {
 impl AppContainer {
     /// Constructs the central composition root from a database pool and startup context.
     #[must_use]
-    pub fn from_pool_and_context(
+    pub(crate) fn from_pool_and_context(
         pool: PgPool,
         context: &'static SystemContext,
         oidc_validator: Arc<OidcTokenValidator>,
@@ -128,7 +124,6 @@ impl AppContainer {
 
         Self {
             context,
-            persistence,
             auth_resolver,
             documents_service,
             access_requests_service,
@@ -141,7 +136,7 @@ impl AppContainer {
 
     /// Projects the service layer into repository-free [`ProductionHttpState`].
     #[must_use]
-    pub fn http_state(&self) -> ProductionHttpState {
+    pub(crate) fn http_state(&self) -> ProductionHttpState {
         HttpState::new(
             self.context,
             Arc::clone(&self.auth_resolver),
@@ -190,12 +185,8 @@ mod tests {
         ));
         let service_tokens = Arc::new(ServiceTokenRegistry::new());
 
-        let container = AppContainer::from_pool_and_context(
-            pool,
-            context,
-            oidc_validator,
-            service_tokens,
-        );
+        let container =
+            AppContainer::from_pool_and_context(pool, context, oidc_validator, service_tokens);
 
         let state = container.http_state();
         assert_eq!(state.context.config.available_locales.len(), 1);

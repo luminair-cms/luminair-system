@@ -11,8 +11,8 @@ use domain::schema::DocumentTypeId;
 
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{
-    COL_CONTENT, COL_CREATED_AT, COL_CREATED_BY, COL_DOCUMENT_ID, COL_DOCUMENT_TYPE_ID,
-    COL_ID, COL_REASON, COL_RELATIONS, COL_REVISION, DocumentTypeNaming,
+    COL_CONTENT, COL_CREATED_AT, COL_CREATED_BY, COL_DOCUMENT_ID, COL_DOCUMENT_TYPE_ID, COL_ID,
+    COL_REASON, COL_RELATIONS, COL_REVISION, DocumentTypeNaming,
 };
 use crate::persistence::repositories::codec::{
     deserialize_fields_json, deserialize_relations_json, parse_actor_urn,
@@ -24,7 +24,7 @@ use crate::persistence::repositories::codec::{
 // ---------------------------------------------------------------------------
 
 /// Maps a row from `document_snapshots` into a lightweight [`SnapshotHeader`].
-pub fn map_snapshot_header_row(row: &PgRow) -> Result<SnapshotHeader, PersistenceError> {
+pub(crate) fn map_snapshot_header_row(row: &PgRow) -> Result<SnapshotHeader, PersistenceError> {
     let id: Uuid = row.try_get(COL_ID)?;
     let type_id_str: String = row.try_get(COL_DOCUMENT_TYPE_ID)?;
     let document_type_id = DocumentTypeId::try_new(type_id_str)
@@ -52,7 +52,7 @@ pub fn map_snapshot_header_row(row: &PgRow) -> Result<SnapshotHeader, Persistenc
 }
 
 /// Maps a row from `document_snapshots` into a fully deserialized [`DocumentSnapshot`].
-pub fn map_snapshot_row(
+pub(crate) fn map_snapshot_row(
     row: &PgRow,
     type_naming: &DocumentTypeNaming,
 ) -> Result<DocumentSnapshot, PersistenceError> {

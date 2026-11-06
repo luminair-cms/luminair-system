@@ -7,9 +7,13 @@ mod oidc;
 mod resolver;
 mod service_token;
 
-pub use claims::*;
-pub use error::*;
-pub use extractor::*;
-pub use oidc::*;
-pub use resolver::*;
-pub use service_token::*;
+pub use oidc::OidcTokenValidator;
+pub use resolver::DefaultAuthResolver;
+pub use service_token::ServiceTokenRegistry;
+
+#[cfg(test)]
+pub(crate) use claims::*;
+#[cfg(test)]
+pub(crate) use error::*;
+pub(crate) use extractor::*;
+pub(crate) use resolver::*;

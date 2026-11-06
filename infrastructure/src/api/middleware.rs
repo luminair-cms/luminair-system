@@ -18,7 +18,7 @@ const PROBLEM_CONTENT_TYPE_PREFIX: &str = "application/problem+json";
 // ---------------------------------------------------------------------------
 
 /// Middleware that extracts or generates a unique `x-request-id` and propagates it into response headers.
-pub async fn propagate_request_id(req: Request, next: Next) -> Response {
+pub(crate) async fn propagate_request_id(req: Request, next: Next) -> Response {
     let request_id = extract_or_generate_request_id(req.headers().get(&X_REQUEST_ID));
     let mut res = next.run(req).await;
     if let Ok(header_val) = HeaderValue::try_from(&request_id) {
@@ -28,7 +28,7 @@ pub async fn propagate_request_id(req: Request, next: Next) -> Response {
 }
 
 /// Middleware that injects the request URI path as the RFC 9457 `instance` field if missing.
-pub async fn inject_problem_instance(req: Request, next: Next) -> Response {
+pub(crate) async fn inject_problem_instance(req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
     let res = next.run(req).await;
     maybe_inject_instance(res, &path).await

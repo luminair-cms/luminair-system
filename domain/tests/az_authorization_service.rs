@@ -3,7 +3,7 @@
 use domain::auth::{ActorId, AuthorizationService, Permission, PermissionCheck, Role, RoleId};
 use domain::content::DocumentInstance;
 use domain::test_support::{
-    admin_role, fixture_document_instance, create_doc_type_id, create_service_id, create_user_id,
+    admin_role, create_doc_type_id, create_service_id, create_user_id, fixture_document_instance,
 };
 use uuid::Uuid;
 

@@ -7,10 +7,10 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use domain::content::{
-    extract_display_identity, validate_draft_content, validate_publish_content, DocumentHeader,
-    DocumentInstance, DocumentInstanceId, DocumentInstanceRepository, DocumentSnapshot,
-    DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader, SnapshotId,
-    SnapshotReason, UnpublishDraftResolution, VersionView,
+    DocumentHeader, DocumentInstance, DocumentInstanceId, DocumentInstanceRepository,
+    DocumentSnapshot, DocumentSnapshotRepository, PublicationState, RelationMap, SnapshotHeader,
+    SnapshotId, SnapshotReason, UnpublishDraftResolution, VersionView, extract_display_identity,
+    validate_draft_content, validate_publish_content,
 };
 use domain::errors::DomainError;
 use domain::schema::{
@@ -360,11 +360,8 @@ where
             ));
         }
 
-        let prev_published_snapshot = capture_superseded_single_lifecycle_snapshot(
-            doc_type,
-            &instance,
-            &caller.actor,
-        );
+        let prev_published_snapshot =
+            capture_superseded_single_lifecycle_snapshot(doc_type, &instance, &caller.actor);
         apply_field_updates(&mut instance, cmd.fields);
         self.validate_content_for_type(doc_type, &instance)?;
         self.validate_and_apply_relations(doc_type, &mut instance, cmd.relations)?;
@@ -428,11 +425,8 @@ where
             )
             .await?;
 
-        let archived_snapshot = capture_superseded_live_snapshot(
-            prev_published.as_ref(),
-            caller.actor.clone(),
-            now,
-        );
+        let archived_snapshot =
+            capture_superseded_live_snapshot(prev_published.as_ref(), caller.actor.clone(), now);
 
         let rev = instance.publish(caller.actor.clone(), now)?;
         let (display_values, display_title) = extract_display_identity(
@@ -770,11 +764,8 @@ where
                 .instance_repo
                 .find_by_id(&doc_type.id, instance.id, VersionView::Published)
                 .await?;
-            let prev_snapshot = capture_superseded_live_snapshot(
-                prev_published.as_ref(),
-                actor.clone(),
-                now,
-            );
+            let prev_snapshot =
+                capture_superseded_live_snapshot(prev_published.as_ref(), actor.clone(), now);
             let rev = instance.publish(actor.clone(), now)?;
             self.instance_repo
                 .publish(
@@ -1038,8 +1029,7 @@ fn validate_unpublish_eligibility(
     ) {
         return Err(ApplicationError::Domain(
             DomainError::InvalidStateTransition {
-                reason: "cannot unpublish a document that is not currently published"
-                    .to_string(),
+                reason: "cannot unpublish a document that is not currently published".to_string(),
             },
         ));
     }

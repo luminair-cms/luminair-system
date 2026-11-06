@@ -13,13 +13,13 @@ use crate::health::{HealthCheckService, HealthStatus};
 // ---------------------------------------------------------------------------
 
 /// Health probe handler verifying basic application liveness (`GET /healthz`).
-pub async fn healthz<St: HasHealthChecker>(State(state): State<St>) -> Response {
+pub(crate) async fn healthz<St: HasHealthChecker>(State(state): State<St>) -> Response {
     let status = state.health_checker().liveness().await;
     health_to_response(status)
 }
 
 /// Readiness probe handler verifying system dependencies are reachable (`GET /ready`).
-pub async fn ready<St: HasHealthChecker>(State(state): State<St>) -> Response {
+pub(crate) async fn ready<St: HasHealthChecker>(State(state): State<St>) -> Response {
     let status = state.health_checker().readiness().await;
     health_to_response(status)
 }

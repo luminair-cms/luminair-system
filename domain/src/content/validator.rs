@@ -404,8 +404,8 @@ mod tests {
                 Decimal::new(500, 2),
             ))), // 5.00
         );
-        let errors =
-            validate_publish_content(&doc_type, &draft_content(invalid_fields), &config).unwrap_err();
+        let errors = validate_publish_content(&doc_type, &draft_content(invalid_fields), &config)
+            .unwrap_err();
         assert_eq!(errors.len(), 2);
     }
 
@@ -468,7 +468,8 @@ mod tests {
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(100))),
         );
 
-        let errors = validate_publish_content(&doc_type, &draft_content(fields), &config).unwrap_err();
+        let errors =
+            validate_publish_content(&doc_type, &draft_content(fields), &config).unwrap_err();
         assert_eq!(errors.len(), 1);
         assert!(matches!(
             &errors[0],

@@ -21,7 +21,7 @@ use domain::system::LocaleId;
 // ---------------------------------------------------------------------------
 
 /// Decoded document payload containing field values and relation actions.
-pub type DecodedPayload = (
+type DecodedPayload = (
     HashMap<AttributeId, ContentValue>,
     HashMap<AttributeId, RelationAction>,
 );
@@ -33,7 +33,7 @@ pub type DecodedPayload = (
 /// Decodes an owned JSON object map into domain [`ContentValue`]s driven by schema definitions.
 ///
 /// Accumulates all field errors without truncating at the first failure.
-pub fn decode_fields_map(
+fn decode_fields_map(
     doc_type: &DocumentType,
     raw: serde_json::Map<String, serde_json::Value>,
 ) -> Result<HashMap<AttributeId, ContentValue>, Vec<InvalidParam>> {
@@ -55,7 +55,7 @@ pub fn decode_fields_map(
 ///
 /// Supports both shorthand arrays (`{"tags": ["uuid1", "uuid2"]}`) and explicit action objects
 /// (`{"tags": {"connect": ["uuid1"]}}`, `{"tags": {"unset": true}}`).
-pub fn decode_relations_map(
+fn decode_relations_map(
     doc_type: &DocumentType,
     raw: serde_json::Map<String, serde_json::Value>,
 ) -> Result<HashMap<AttributeId, RelationAction>, Vec<InvalidParam>> {
@@ -76,7 +76,7 @@ pub fn decode_relations_map(
 /// Decodes both fields and optional relations maps from a request payload into domain mutations.
 ///
 /// Gathers all field and relational validation errors into an [`ApplicationError::Validation`].
-pub fn decode_document_payload(
+pub(crate) fn decode_document_payload(
     doc_type: &DocumentType,
     fields_raw: serde_json::Map<String, serde_json::Value>,
     relations_raw: Option<serde_json::Map<String, serde_json::Value>>,
@@ -748,11 +748,7 @@ fn parse_uuid_array(
         }
     }
 
-    if had_error {
-        None
-    } else {
-        Some(uuids)
-    }
+    if had_error { None } else { Some(uuids) }
 }
 
 // ---------------------------------------------------------------------------
@@ -765,7 +761,7 @@ mod tests {
     use domain::common::DisplayName;
     use domain::schema::attributes::{FieldDefinition, RelationDefinition, RelationType};
     use domain::schema::documents::{
-        DocumentKind, DocumentTypeInfo, DocumentTypeOptions, DocumentTypeId,
+        DocumentKind, DocumentTypeId, DocumentTypeInfo, DocumentTypeOptions,
     };
     use indexmap::IndexSet;
 
@@ -1019,9 +1015,7 @@ mod tests {
             decode_relations_map(&doc_type, raw_connect).expect("decode explicit connect");
         assert_eq!(
             rels_connect.get(&AttributeId::try_new("tags").unwrap()),
-            Some(&RelationAction::Connect(vec![DocumentInstanceId::new(
-                u1
-            )]))
+            Some(&RelationAction::Connect(vec![DocumentInstanceId::new(u1)]))
         );
 
         // Explicit disconnect

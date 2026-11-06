@@ -8,6 +8,8 @@ use domain::auth::ports::RoleRepository;
 use domain::auth::role::{Permission, Role, RoleId};
 use domain::errors::DomainError;
 
+use super::codec::permission_to_db_tuple;
+use super::mappers::{assemble_roles, map_permission_row, map_role_base_row};
 use crate::persistence::error::PersistenceError;
 use crate::persistence::query::auth::{
     delete_permissions_by_role_query, insert_permissions_batch_query, select_all_roles_query,
@@ -16,8 +18,6 @@ use crate::persistence::query::auth::{
 };
 use crate::persistence::query::common::{compile_delete, compile_insert, compile_select};
 use crate::persistence::query::occ::with_occ_retry;
-use super::codec::permission_to_db_tuple;
-use super::mappers::{assemble_roles, map_permission_row, map_role_base_row};
 
 // ---------------------------------------------------------------------------
 // Public Repository Struct & Constructors
@@ -154,10 +154,7 @@ async fn save_role_in_tx(pool: &PgPool, role: &Role) -> Result<(), PersistenceEr
     Ok(())
 }
 
-async fn execute_upsert_role(
-    conn: &mut PgConnection,
-    role: &Role,
-) -> Result<(), PersistenceError> {
+async fn execute_upsert_role(conn: &mut PgConnection, role: &Role) -> Result<(), PersistenceError> {
     let (sql, values) = compile_insert(&upsert_role_query(role));
     sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
         .execute(conn)
@@ -197,9 +194,7 @@ async fn execute_insert_role_permissions(
     Ok(())
 }
 
-fn build_permission_tuples(
-    permissions: &[Permission],
-) -> Vec<(&'static str, Option<&str>)> {
+fn build_permission_tuples(permissions: &[Permission]) -> Vec<(&'static str, Option<&str>)> {
     permissions.iter().map(permission_to_db_tuple).collect()
 }
 
@@ -225,7 +220,11 @@ mod tests {
         let u2 = Uuid::now_v7();
         let base_rows = vec![
             (RoleId::new(u1), "admin".to_string(), None),
-            (RoleId::new(u2), "editor".to_string(), Some("desc".to_string())),
+            (
+                RoleId::new(u2),
+                "editor".to_string(),
+                Some("desc".to_string()),
+            ),
         ];
         let uuids = extract_role_uuids(&base_rows);
         assert_eq!(uuids, vec![u1, u2]);
@@ -233,10 +232,7 @@ mod tests {
 
     #[test]
     fn test_build_permission_tuples() {
-        let permissions = vec![
-            Permission::ManageSchema,
-            Permission::CreateDocument(None),
-        ];
+        let permissions = vec![Permission::ManageSchema, Permission::CreateDocument(None)];
         let tuples = build_permission_tuples(&permissions);
         assert_eq!(tuples.len(), 2);
         assert_eq!(tuples[0].0, "ManageSchema");

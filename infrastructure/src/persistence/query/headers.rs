@@ -1,22 +1,20 @@
 //! Sea-Query dynamic query builders for Admin Studio document headers and display title batch enrichment.
 
-use sea_query::{
-    Asterisk, Expr, ExprTrait, Func, Order, Query, SelectStatement, UnionType,
-};
+use sea_query::{Asterisk, Expr, ExprTrait, Func, Order, Query, SelectStatement, UnionType};
 use uuid::Uuid;
 
 use domain::content::header::DocumentStatus;
 use domain::content::ports::Pagination;
 
-use crate::persistence::naming::DocumentTypeNaming;
 use super::common::{
-    apply_pagination, ALIAS_COMBINED_IDEN, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN,
-    COL_DISPLAY_TITLE_IDEN, COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN,
-    COL_DRAFT_VERSION_IDEN, COL_HAS_PENDING_DRAFT_IDEN, COL_ID_IDEN,
-    COL_LAST_PUBLISHED_REVISION_IDEN, COL_PUBLISHED_AT_IDEN, COL_PUBLISHED_BY_IDEN,
-    COL_REVISION_IDEN, COL_SLUG_IDEN, COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN,
-    COL_VERSION_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
+    ALIAS_COMBINED_IDEN, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN, COL_DISPLAY_TITLE_IDEN,
+    COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_DRAFT_VERSION_IDEN,
+    COL_HAS_PENDING_DRAFT_IDEN, COL_ID_IDEN, COL_LAST_PUBLISHED_REVISION_IDEN,
+    COL_PUBLISHED_AT_IDEN, COL_PUBLISHED_BY_IDEN, COL_REVISION_IDEN, COL_SLUG_IDEN,
+    COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN, COL_VERSION_IDEN,
+    TABLE_DOCUMENT_DRAFTS_IDEN, apply_pagination,
 };
+use crate::persistence::naming::DocumentTypeNaming;
 
 // ---------------------------------------------------------------------------
 // Public Functions
@@ -24,7 +22,7 @@ use super::common::{
 
 /// Builds a paginated `list_admin_headers` query for single-lifecycle (`draft_and_publish: false`) types.
 #[must_use]
-pub fn list_single_lifecycle_headers_query(
+pub(crate) fn list_single_lifecycle_headers_query(
     type_naming: &DocumentTypeNaming,
     pagination: Pagination,
     status_filter: Option<DocumentStatus>,
@@ -45,7 +43,7 @@ pub fn list_single_lifecycle_headers_query(
 
 /// Builds a `COUNT(*)` query for single-lifecycle (`draft_and_publish: false`) types.
 #[must_use]
-pub fn count_single_lifecycle_headers_query(
+pub(crate) fn count_single_lifecycle_headers_query(
     type_naming: &DocumentTypeNaming,
     status_filter: Option<DocumentStatus>,
 ) -> SelectStatement {
@@ -87,7 +85,7 @@ pub fn list_draft_enabled_headers_query(
 
 /// Builds a `COUNT(*)` query over the combined draft-enabled `UNION ALL` subquery.
 #[must_use]
-pub fn count_draft_enabled_headers_query(
+pub(crate) fn count_draft_enabled_headers_query(
     type_naming: &DocumentTypeNaming,
     status_filter: Option<DocumentStatus>,
 ) -> SelectStatement {
@@ -138,7 +136,7 @@ pub fn find_display_titles_by_ids_query(
 
 /// Returns the wire status string matching a `DocumentStatus` variant.
 #[must_use]
-pub fn document_status_str(status: DocumentStatus) -> &'static str {
+pub(crate) fn document_status_str(status: DocumentStatus) -> &'static str {
     match status {
         DocumentStatus::Draft => "draft",
         DocumentStatus::Published => "published",
@@ -197,7 +195,10 @@ fn select_draft_header_projection(stmt: &mut SelectStatement) {
         .column(COL_DISPLAY_TITLE_IDEN)
         .column(COL_STATUS_IDEN)
         .expr_as(Expr::cust("NULL::text"), COL_SLUG_IDEN)
-        .expr_as(Expr::col(COL_LAST_PUBLISHED_REVISION_IDEN), COL_REVISION_IDEN)
+        .expr_as(
+            Expr::col(COL_LAST_PUBLISHED_REVISION_IDEN),
+            COL_REVISION_IDEN,
+        )
         .expr_as(Expr::col(COL_VERSION_IDEN), COL_DRAFT_VERSION_IDEN)
         .column(COL_CREATED_AT_IDEN)
         .column(COL_CREATED_BY_IDEN)
@@ -221,13 +222,13 @@ fn has_slug_column(type_naming: &DocumentTypeNaming) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use domain::common::DisplayName;
     use domain::schema::{
         AttributeId, DocumentKind, DocumentType, DocumentTypeId, DocumentTypeInfo,
         DocumentTypeOptions, FieldDefinition, FieldType, PrimitiveType, SchemaRegistry,
     };
     use sea_query::PostgresQueryBuilder;
+    use std::collections::HashSet;
 
     use crate::persistence::naming::SchemaNaming;
     use crate::persistence::query::common::compile_select;
@@ -278,7 +279,10 @@ mod tests {
     #[test]
     fn test_list_single_lifecycle_headers_query_with_slug() {
         let naming = build_test_naming(true);
-        let pagination = Pagination { page: 1, page_size: 20 };
+        let pagination = Pagination {
+            page: 1,
+            page_size: 20,
+        };
         let stmt = list_single_lifecycle_headers_query(&naming, pagination, None);
 
         let unparam = stmt.to_string(PostgresQueryBuilder);
@@ -297,7 +301,10 @@ mod tests {
     #[test]
     fn test_list_single_lifecycle_headers_query_without_slug() {
         let naming = build_test_naming(false);
-        let pagination = Pagination { page: 2, page_size: 10 };
+        let pagination = Pagination {
+            page: 2,
+            page_size: 10,
+        };
         let stmt = list_single_lifecycle_headers_query(
             &naming,
             pagination,
@@ -309,11 +316,8 @@ mod tests {
         assert!(!unparam.contains("TRUE = FALSE"));
 
         // If filtering by non-published on single-lifecycle, impossible condition added
-        let stmt_draft = list_single_lifecycle_headers_query(
-            &naming,
-            pagination,
-            Some(DocumentStatus::Draft),
-        );
+        let stmt_draft =
+            list_single_lifecycle_headers_query(&naming, pagination, Some(DocumentStatus::Draft));
         let unparam_draft = stmt_draft.to_string(PostgresQueryBuilder);
         assert!(unparam_draft.contains("TRUE = FALSE"));
     }
@@ -325,7 +329,8 @@ mod tests {
         let unparam = stmt.to_string(PostgresQueryBuilder);
         assert!(unparam.contains("COUNT(\"id\") FROM \"articles\""));
 
-        let stmt_unpub = count_single_lifecycle_headers_query(&naming, Some(DocumentStatus::Unpublished));
+        let stmt_unpub =
+            count_single_lifecycle_headers_query(&naming, Some(DocumentStatus::Unpublished));
         let unparam_unpub = stmt_unpub.to_string(PostgresQueryBuilder);
         assert!(unparam_unpub.contains("TRUE = FALSE"));
     }
@@ -333,12 +338,12 @@ mod tests {
     #[test]
     fn test_list_draft_enabled_headers_query() {
         let naming = build_test_naming(true);
-        let pagination = Pagination { page: 1, page_size: 25 };
-        let stmt = list_draft_enabled_headers_query(
-            &naming,
-            pagination,
-            Some(DocumentStatus::Modified),
-        );
+        let pagination = Pagination {
+            page: 1,
+            page_size: 25,
+        };
+        let stmt =
+            list_draft_enabled_headers_query(&naming, pagination, Some(DocumentStatus::Modified));
 
         let unparam = stmt.to_string(PostgresQueryBuilder);
         assert!(unparam.contains("FROM \"document_drafts\""));

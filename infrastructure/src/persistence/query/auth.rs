@@ -12,16 +12,16 @@ use domain::auth::role::{Role, UserRoleAssignment};
 use domain::auth::user::UserId;
 use domain::common::Pagination;
 
-use crate::persistence::naming::StaticIden;
 use super::common::{
-    apply_pagination, COL_ACTION_IDEN, COL_ASSIGNED_ROLES_IDEN, COL_CREATED_AT_IDEN,
-    COL_DESCRIPTION_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_EMAIL_IDEN, COL_FIRST_SEEN_AT_IDEN,
-    COL_GRANTED_AT_IDEN, COL_GRANTED_BY_IDEN, COL_ID_IDEN, COL_LAST_SEEN_AT_IDEN,
-    COL_NAME_IDEN, COL_REJECTION_REASON_IDEN, COL_REQUESTED_AT_IDEN, COL_REVIEWED_AT_IDEN,
-    COL_REVIEWED_BY_IDEN, COL_ROLE_ID_IDEN, COL_STATUS_IDEN, COL_UPDATED_AT_IDEN,
-    COL_USER_ID_IDEN, TABLE_ACCESS_REQUESTS_IDEN, TABLE_ROLE_PERMISSIONS_IDEN, TABLE_ROLES_IDEN,
-    TABLE_USER_PROFILES_IDEN, TABLE_USER_ROLE_ASSIGNMENTS_IDEN,
+    COL_ACTION_IDEN, COL_ASSIGNED_ROLES_IDEN, COL_CREATED_AT_IDEN, COL_DESCRIPTION_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN, COL_EMAIL_IDEN, COL_FIRST_SEEN_AT_IDEN, COL_GRANTED_AT_IDEN,
+    COL_GRANTED_BY_IDEN, COL_ID_IDEN, COL_LAST_SEEN_AT_IDEN, COL_NAME_IDEN,
+    COL_REJECTION_REASON_IDEN, COL_REQUESTED_AT_IDEN, COL_REVIEWED_AT_IDEN, COL_REVIEWED_BY_IDEN,
+    COL_ROLE_ID_IDEN, COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_USER_ID_IDEN,
+    TABLE_ACCESS_REQUESTS_IDEN, TABLE_ROLE_PERMISSIONS_IDEN, TABLE_ROLES_IDEN,
+    TABLE_USER_PROFILES_IDEN, TABLE_USER_ROLE_ASSIGNMENTS_IDEN, apply_pagination,
 };
+use crate::persistence::naming::StaticIden;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -29,11 +29,8 @@ use super::common::{
 
 const ROLE_COLUMNS: [StaticIden; 3] = [COL_ID_IDEN, COL_NAME_IDEN, COL_DESCRIPTION_IDEN];
 
-const PERMISSION_COLUMNS: [StaticIden; 3] = [
-    COL_ROLE_ID_IDEN,
-    COL_ACTION_IDEN,
-    COL_DOCUMENT_TYPE_ID_IDEN,
-];
+const PERMISSION_COLUMNS: [StaticIden; 3] =
+    [COL_ROLE_ID_IDEN, COL_ACTION_IDEN, COL_DOCUMENT_TYPE_ID_IDEN];
 
 const PERMISSION_INSERT_COLUMNS: [StaticIden; 4] = [
     COL_ID_IDEN,
@@ -77,7 +74,7 @@ const USER_PROFILE_COLUMNS: [StaticIden; 5] = [
 
 /// Builds a `SELECT id, name, description FROM roles WHERE id = $1` query.
 #[must_use]
-pub fn select_role_by_id_query(id: Uuid) -> SelectStatement {
+pub(crate) fn select_role_by_id_query(id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
@@ -87,7 +84,7 @@ pub fn select_role_by_id_query(id: Uuid) -> SelectStatement {
 
 /// Builds a `SELECT id, name, description FROM roles WHERE id IN (...) ORDER BY name ASC` query.
 #[must_use]
-pub fn select_roles_by_ids_query(ids: &[Uuid]) -> SelectStatement {
+pub(crate) fn select_roles_by_ids_query(ids: &[Uuid]) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
@@ -98,7 +95,7 @@ pub fn select_roles_by_ids_query(ids: &[Uuid]) -> SelectStatement {
 
 /// Builds a `SELECT id, name, description FROM roles WHERE name = $1` query.
 #[must_use]
-pub fn select_role_by_name_query(name: &str) -> SelectStatement {
+pub(crate) fn select_role_by_name_query(name: &str) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
@@ -108,7 +105,7 @@ pub fn select_role_by_name_query(name: &str) -> SelectStatement {
 
 /// Builds a `SELECT id, name, description FROM roles ORDER BY name ASC` query.
 #[must_use]
-pub fn select_all_roles_query() -> SelectStatement {
+pub(crate) fn select_all_roles_query() -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
@@ -118,7 +115,7 @@ pub fn select_all_roles_query() -> SelectStatement {
 
 /// Builds a query to fetch all permissions for a set of role IDs ordered by creation time.
 #[must_use]
-pub fn select_permissions_by_role_ids_query(role_ids: &[Uuid]) -> SelectStatement {
+pub(crate) fn select_permissions_by_role_ids_query(role_ids: &[Uuid]) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ROLE_PERMISSIONS_IDEN)
         .columns(PERMISSION_COLUMNS)
@@ -130,7 +127,7 @@ pub fn select_permissions_by_role_ids_query(role_ids: &[Uuid]) -> SelectStatemen
 
 /// Builds an upsert statement for a `Role` with `ON CONFLICT (id) DO UPDATE`.
 #[must_use]
-pub fn upsert_role_query(role: &Role) -> InsertStatement {
+pub(crate) fn upsert_role_query(role: &Role) -> InsertStatement {
     let mut stmt = Query::insert();
     stmt.into_table(TABLE_ROLES_IDEN)
         .columns(ROLE_COLUMNS)
@@ -150,7 +147,7 @@ pub fn upsert_role_query(role: &Role) -> InsertStatement {
 
 /// Builds a `DELETE FROM role_permissions WHERE role_id = $1` statement.
 #[must_use]
-pub fn delete_permissions_by_role_query(role_id: Uuid) -> DeleteStatement {
+pub(crate) fn delete_permissions_by_role_query(role_id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(TABLE_ROLE_PERMISSIONS_IDEN)
         .and_where(Expr::col(COL_ROLE_ID_IDEN).eq(role_id));
@@ -159,7 +156,7 @@ pub fn delete_permissions_by_role_query(role_id: Uuid) -> DeleteStatement {
 
 /// Builds a batch `INSERT INTO role_permissions` statement, or `None` if `permissions` is empty.
 #[must_use]
-pub fn insert_permissions_batch_query(
+pub(crate) fn insert_permissions_batch_query(
     role_id: Uuid,
     permissions: &[(&str, Option<&str>)],
 ) -> Option<InsertStatement> {
@@ -189,7 +186,7 @@ pub fn insert_permissions_batch_query(
 
 /// Builds a query to fetch all role assignments for a given user.
 #[must_use]
-pub fn select_assignments_by_user_query(user_id: &UserId) -> SelectStatement {
+pub(crate) fn select_assignments_by_user_query(user_id: &UserId) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_USER_ROLE_ASSIGNMENTS_IDEN)
         .columns(USER_ROLE_ASSIGNMENT_COLUMNS)
@@ -201,7 +198,7 @@ pub fn select_assignments_by_user_query(user_id: &UserId) -> SelectStatement {
 
 /// Builds an existence check for any user assignment with the given admin role ID.
 #[must_use]
-pub fn exists_admin_assignment_query(admin_role_id: Uuid) -> SelectStatement {
+pub(crate) fn exists_admin_assignment_query(admin_role_id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_USER_ROLE_ASSIGNMENTS_IDEN)
         .expr(Expr::val(1))
@@ -212,7 +209,7 @@ pub fn exists_admin_assignment_query(admin_role_id: Uuid) -> SelectStatement {
 
 /// Builds an upsert statement for a `UserRoleAssignment` with `ON CONFLICT (user_id, role_id) DO UPDATE`.
 #[must_use]
-pub fn upsert_assignment_query(assignment: &UserRoleAssignment) -> InsertStatement {
+pub(crate) fn upsert_assignment_query(assignment: &UserRoleAssignment) -> InsertStatement {
     let granted_by_urn = assignment.granted_by.as_ref().map(ToString::to_string);
     let mut stmt = Query::insert();
     stmt.into_table(TABLE_USER_ROLE_ASSIGNMENTS_IDEN)
@@ -234,7 +231,7 @@ pub fn upsert_assignment_query(assignment: &UserRoleAssignment) -> InsertStateme
 
 /// Builds a `DELETE FROM user_role_assignments WHERE id = $1` statement.
 #[must_use]
-pub fn delete_assignment_query(id: Uuid) -> DeleteStatement {
+pub(crate) fn delete_assignment_query(id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(TABLE_USER_ROLE_ASSIGNMENTS_IDEN)
         .and_where(Expr::col(COL_ID_IDEN).eq(id));
@@ -247,7 +244,7 @@ pub fn delete_assignment_query(id: Uuid) -> DeleteStatement {
 
 /// Builds a query to fetch an access request by primary key.
 #[must_use]
-pub fn select_access_request_by_id_query(id: Uuid) -> SelectStatement {
+pub(crate) fn select_access_request_by_id_query(id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
@@ -257,7 +254,7 @@ pub fn select_access_request_by_id_query(id: Uuid) -> SelectStatement {
 
 /// Builds a query to fetch the latest access request submitted by a user.
 #[must_use]
-pub fn select_latest_access_request_by_user_query(user_id: &UserId) -> SelectStatement {
+pub(crate) fn select_latest_access_request_by_user_query(user_id: &UserId) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
@@ -269,7 +266,7 @@ pub fn select_latest_access_request_by_user_query(user_id: &UserId) -> SelectSta
 
 /// Builds a query to fetch an active (`pending` or `approved`) access request for a user.
 #[must_use]
-pub fn select_active_access_request_by_user_query(user_id: &UserId) -> SelectStatement {
+pub(crate) fn select_active_access_request_by_user_query(user_id: &UserId) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
@@ -282,7 +279,7 @@ pub fn select_active_access_request_by_user_query(user_id: &UserId) -> SelectSta
 
 /// Builds a query to fetch all pending access requests ordered by request time ascending.
 #[must_use]
-pub fn select_pending_access_requests_query() -> SelectStatement {
+pub(crate) fn select_pending_access_requests_query() -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_ACCESS_REQUESTS_IDEN)
         .columns(ACCESS_REQUEST_COLUMNS)
@@ -293,7 +290,7 @@ pub fn select_pending_access_requests_query() -> SelectStatement {
 
 /// Builds an upsert statement for an `AccessRequest` with `ON CONFLICT (id) DO UPDATE`.
 #[must_use]
-pub fn upsert_access_request_query(
+pub(crate) fn upsert_access_request_query(
     request: &AccessRequest,
     status_str: &'static str,
     rejection_reason: Option<&str>,
@@ -336,7 +333,7 @@ pub fn upsert_access_request_query(
 
 /// Builds a query to fetch a single `UserProfile` by `user_id`.
 #[must_use]
-pub fn select_user_profile_by_id_query(user_id: &UserId) -> SelectStatement {
+pub(crate) fn select_user_profile_by_id_query(user_id: &UserId) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_USER_PROFILES_IDEN)
         .columns(USER_PROFILE_COLUMNS)
@@ -346,7 +343,7 @@ pub fn select_user_profile_by_id_query(user_id: &UserId) -> SelectStatement {
 
 /// Builds a query to fetch multiple `UserProfile` records by a list of `user_ids`.
 #[must_use]
-pub fn select_user_profiles_by_ids_query(user_ids: &[UserId]) -> SelectStatement {
+pub(crate) fn select_user_profiles_by_ids_query(user_ids: &[UserId]) -> SelectStatement {
     let ids: Vec<&str> = user_ids.iter().map(AsRef::as_ref).collect();
     let mut stmt = Query::select();
     stmt.from(TABLE_USER_PROFILES_IDEN)
@@ -357,7 +354,7 @@ pub fn select_user_profiles_by_ids_query(user_ids: &[UserId]) -> SelectStatement
 
 /// Builds a paginated query to list `UserProfile` records matching an optional search string.
 #[must_use]
-pub fn select_user_profiles_paginated_query(
+pub(crate) fn select_user_profiles_paginated_query(
     query: Option<&str>,
     pagination: Pagination,
 ) -> SelectStatement {
@@ -374,7 +371,7 @@ pub fn select_user_profiles_paginated_query(
 
 /// Builds a count query for `UserProfile` records matching an optional search string.
 #[must_use]
-pub fn count_user_profiles_query(query: Option<&str>) -> SelectStatement {
+pub(crate) fn count_user_profiles_query(query: Option<&str>) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_USER_PROFILES_IDEN)
         .expr(Func::count(Expr::col(COL_USER_ID_IDEN)));
@@ -404,7 +401,7 @@ fn apply_user_profile_search_filter(stmt: &mut SelectStatement, query: Option<&s
 ///
 /// On conflict on `user_id`, updates `email`, `name`, and `last_seen_at` while preserving `first_seen_at`.
 #[must_use]
-pub fn upsert_user_profile_query(profile: &UserProfile) -> InsertStatement {
+pub(crate) fn upsert_user_profile_query(profile: &UserProfile) -> InsertStatement {
     let mut stmt = Query::insert();
     stmt.into_table(TABLE_USER_PROFILES_IDEN)
         .columns(USER_PROFILE_COLUMNS)
@@ -434,11 +431,11 @@ mod tests {
     use sea_query::PostgresQueryBuilder;
     use serde_json::json;
 
+    use crate::persistence::query::common::{compile_delete, compile_insert, compile_select};
     use domain::auth::access_request::{AccessRequestId, AccessRequestStatus};
     use domain::auth::role::{RoleId, UserRoleAssignmentId};
     use domain::auth::user::ActorId;
     use domain::common::{DisplayName, Email};
-    use crate::persistence::query::common::{compile_delete, compile_insert, compile_select};
 
     #[test]
     fn test_role_queries() {
@@ -494,10 +491,7 @@ mod tests {
 
         assert!(insert_permissions_batch_query(role_id, &[]).is_none());
 
-        let perms = [
-            ("ManageSchema", None),
-            ("CreateDocument", Some("article")),
-        ];
+        let perms = [("ManageSchema", None), ("CreateDocument", Some("article"))];
         let stmt_batch = insert_permissions_batch_query(role_id, &perms).unwrap();
         let unparam_batch = stmt_batch.to_string(PostgresQueryBuilder);
         assert!(unparam_batch.contains("INSERT INTO \"role_permissions\""));
@@ -599,10 +593,7 @@ mod tests {
         assert!(sql_by_ids.contains("FROM \"user_profiles\" WHERE \"user_id\" IN ($1)"));
 
         // 3. Paginated list with search
-        let stmt_list = select_user_profiles_paginated_query(
-            Some("alice"),
-            Pagination::new(1, 10),
-        );
+        let stmt_list = select_user_profiles_paginated_query(Some("alice"), Pagination::new(1, 10));
         let unparam_list = stmt_list.to_string(PostgresQueryBuilder);
         assert!(unparam_list.contains("FROM \"user_profiles\""));
         assert!(unparam_list.contains("ILIKE '%alice%'"));

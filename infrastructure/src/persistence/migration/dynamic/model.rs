@@ -513,15 +513,21 @@ mod tests {
             SqlColumnType::Text
         );
         assert_eq!(
-            SqlColumnType::from(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I16))),
+            SqlColumnType::from(FieldType::Primitive(PrimitiveType::Integer(
+                IntegerSize::I16
+            ))),
             SqlColumnType::SmallInt
         );
         assert_eq!(
-            SqlColumnType::from(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I32))),
+            SqlColumnType::from(FieldType::Primitive(PrimitiveType::Integer(
+                IntegerSize::I32
+            ))),
             SqlColumnType::Integer
         );
         assert_eq!(
-            SqlColumnType::from(FieldType::Primitive(PrimitiveType::Integer(IntegerSize::I64))),
+            SqlColumnType::from(FieldType::Primitive(PrimitiveType::Integer(
+                IntegerSize::I64
+            ))),
             SqlColumnType::BigInt
         );
         assert_eq!(

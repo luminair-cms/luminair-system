@@ -25,12 +25,14 @@ use crate::persistence::naming::DocumentTypeNaming;
 // ---------------------------------------------------------------------------
 
 /// Parses an [`ActorId`] from its URN string representation.
-pub fn parse_actor_urn(urn: &str) -> Result<ActorId, PersistenceError> {
+pub(crate) fn parse_actor_urn(urn: &str) -> Result<ActorId, PersistenceError> {
     ActorId::from_urn(urn).map_err(PersistenceError::Domain)
 }
 
 /// Parses an optional database URN string into an `Option<ActorId>`.
-pub fn parse_optional_actor_urn(urn: Option<&str>) -> Result<Option<ActorId>, PersistenceError> {
+pub(crate) fn parse_optional_actor_urn(
+    urn: Option<&str>,
+) -> Result<Option<ActorId>, PersistenceError> {
     urn.map(parse_actor_urn).transpose()
 }
 
@@ -38,9 +40,10 @@ pub fn parse_optional_actor_urn(urn: Option<&str>) -> Result<Option<ActorId>, Pe
 // Public Functions - DocumentStatus & PublicationState Wire
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 /// Converts a [`DocumentStatus`] into its database string representation.
 #[must_use]
-pub fn status_to_db_str(status: DocumentStatus) -> &'static str {
+pub(crate) fn status_to_db_str(status: DocumentStatus) -> &'static str {
     match status {
         DocumentStatus::Draft => "draft",
         DocumentStatus::Published => "published",
@@ -50,7 +53,7 @@ pub fn status_to_db_str(status: DocumentStatus) -> &'static str {
 }
 
 /// Parses a [`DocumentStatus`] from its database string representation.
-pub fn status_from_db_str(s: &str) -> Result<DocumentStatus, PersistenceError> {
+pub(crate) fn status_from_db_str(s: &str) -> Result<DocumentStatus, PersistenceError> {
     match s {
         "draft" => Ok(DocumentStatus::Draft),
         "published" => Ok(DocumentStatus::Published),
@@ -63,7 +66,7 @@ pub fn status_from_db_str(s: &str) -> Result<DocumentStatus, PersistenceError> {
 }
 
 /// Maps a working [`PublicationState`] to its `document_drafts` status string and live revision.
-pub fn publication_state_to_draft_status_str(
+pub(crate) fn publication_state_to_draft_status_str(
     state: &PublicationState,
 ) -> Result<(&'static str, Option<i32>), PersistenceError> {
     match state {
@@ -91,7 +94,7 @@ pub fn publication_state_to_draft_status_str(
 
 /// Converts a [`SnapshotReason`] into its database string representation.
 #[must_use]
-pub fn snapshot_reason_to_db_str(reason: SnapshotReason) -> &'static str {
+pub(crate) fn snapshot_reason_to_db_str(reason: SnapshotReason) -> &'static str {
     match reason {
         SnapshotReason::Publish => "publish",
         SnapshotReason::Unpublish => "unpublish",
@@ -99,7 +102,7 @@ pub fn snapshot_reason_to_db_str(reason: SnapshotReason) -> &'static str {
 }
 
 /// Parses a [`SnapshotReason`] from its database string representation.
-pub fn snapshot_reason_from_db_str(s: &str) -> Result<SnapshotReason, PersistenceError> {
+pub(crate) fn snapshot_reason_from_db_str(s: &str) -> Result<SnapshotReason, PersistenceError> {
     match s {
         "publish" => Ok(SnapshotReason::Publish),
         "unpublish" => Ok(SnapshotReason::Unpublish),
@@ -115,7 +118,7 @@ pub fn snapshot_reason_from_db_str(s: &str) -> Result<SnapshotReason, Persistenc
 
 /// Decomposes a [`Permission`] into an action string and an optional target document type identifier.
 #[must_use]
-pub fn permission_to_db_tuple(perm: &Permission) -> (&'static str, Option<&str>) {
+pub(crate) fn permission_to_db_tuple(perm: &Permission) -> (&'static str, Option<&str>) {
     match perm {
         Permission::ManageSchema => ("ManageSchema", None),
         Permission::CreateDocument(opt) => ("CreateDocument", opt.as_ref().map(AsRef::as_ref)),
@@ -129,13 +132,15 @@ pub fn permission_to_db_tuple(perm: &Permission) -> (&'static str, Option<&str>)
 }
 
 /// Reconstitutes a [`Permission`] from database action and document type strings.
-pub fn permission_from_db_row(
+pub(crate) fn permission_from_db_row(
     action: &str,
     doc_type_id: Option<String>,
 ) -> Result<Permission, PersistenceError> {
     let parse_type_id = |s: Option<String>| -> Result<Option<DocumentTypeId>, PersistenceError> {
-        s.map(|v| DocumentTypeId::try_new(v).map_err(|e| PersistenceError::Validation(e.to_string())))
-            .transpose()
+        s.map(|v| {
+            DocumentTypeId::try_new(v).map_err(|e| PersistenceError::Validation(e.to_string()))
+        })
+        .transpose()
     };
 
     match action {
@@ -155,7 +160,9 @@ pub fn permission_from_db_row(
 
 /// Maps an [`AccessRequestStatus`] to its database wire representation.
 #[must_use]
-pub fn access_request_status_to_db(status: &AccessRequestStatus) -> (&'static str, Option<&str>) {
+pub(crate) fn access_request_status_to_db(
+    status: &AccessRequestStatus,
+) -> (&'static str, Option<&str>) {
     match status {
         AccessRequestStatus::Pending => ("pending", None),
         AccessRequestStatus::Approved => ("approved", None),
@@ -164,7 +171,7 @@ pub fn access_request_status_to_db(status: &AccessRequestStatus) -> (&'static st
 }
 
 /// Parses an [`AccessRequestStatus`] from database status and rejection reason.
-pub fn access_request_status_from_db(
+pub(crate) fn access_request_status_from_db(
     status: &str,
     rejection_reason: Option<String>,
 ) -> Result<AccessRequestStatus, PersistenceError> {
@@ -181,14 +188,14 @@ pub fn access_request_status_from_db(
 }
 
 /// Serializes assigned role IDs to a JSONB array.
-pub fn serialize_assigned_roles_json(
+pub(crate) fn serialize_assigned_roles_json(
     roles: &[RoleId],
 ) -> Result<serde_json::Value, PersistenceError> {
     serde_json::to_value(roles).map_err(PersistenceError::Json)
 }
 
 /// Deserializes assigned role IDs from a JSONB array.
-pub fn deserialize_assigned_roles_json(
+pub(crate) fn deserialize_assigned_roles_json(
     val: serde_json::Value,
 ) -> Result<Vec<RoleId>, PersistenceError> {
     if val.is_null() {
@@ -202,14 +209,14 @@ pub fn deserialize_assigned_roles_json(
 // ---------------------------------------------------------------------------
 
 /// Serializes display values to JSONB.
-pub fn serialize_display_values_json(
+pub(crate) fn serialize_display_values_json(
     display_values: &IndexMap<AttributeId, String>,
 ) -> Result<serde_json::Value, PersistenceError> {
     serde_json::to_value(display_values).map_err(PersistenceError::Json)
 }
 
 /// Deserializes display values from JSONB.
-pub fn deserialize_display_values_json(
+pub(crate) fn deserialize_display_values_json(
     val: serde_json::Value,
 ) -> Result<IndexMap<AttributeId, String>, PersistenceError> {
     if val.is_null() {
@@ -449,8 +456,8 @@ pub(crate) fn deserialize_localized_text(
 
     let mut map = HashMap::with_capacity(obj.len());
     for (loc_str, text_val) in obj {
-        let loc = LocaleId::try_new(loc_str)
-            .map_err(|e| PersistenceError::Validation(e.to_string()))?;
+        let loc =
+            LocaleId::try_new(loc_str).map_err(|e| PersistenceError::Validation(e.to_string()))?;
         let text = match text_val {
             serde_json::Value::String(s) => s,
             _ => {
@@ -469,8 +476,7 @@ fn deserialize_email(
     attr_id: &AttributeId,
 ) -> Result<ContentValue, PersistenceError> {
     let s = parse_string_value(val, attr_id)?;
-    let email = Email::try_new(s)
-        .map_err(|e| PersistenceError::Validation(e.to_string()))?;
+    let email = Email::try_new(s).map_err(|e| PersistenceError::Validation(e.to_string()))?;
     Ok(ContentValue::Scalar(DomainValue::Email(email)))
 }
 
@@ -479,8 +485,7 @@ fn deserialize_url(
     attr_id: &AttributeId,
 ) -> Result<ContentValue, PersistenceError> {
     let s = parse_string_value(val, attr_id)?;
-    let url = Url::try_new(s)
-        .map_err(|e| PersistenceError::Validation(e.to_string()))?;
+    let url = Url::try_new(s).map_err(|e| PersistenceError::Validation(e.to_string()))?;
     Ok(ContentValue::Scalar(DomainValue::Url(url)))
 }
 
@@ -591,9 +596,11 @@ fn parse_decimal_value(
     attr_id: &AttributeId,
 ) -> Result<PrimitiveValue, PersistenceError> {
     if let Some(s) = val.as_str() {
-        return Decimal::from_str_exact(s).map(PrimitiveValue::Decimal).map_err(|e| {
-            PersistenceError::Validation(format!("invalid decimal in '{attr_id}': {e}"))
-        });
+        return Decimal::from_str_exact(s)
+            .map(PrimitiveValue::Decimal)
+            .map_err(|e| {
+                PersistenceError::Validation(format!("invalid decimal in '{attr_id}': {e}"))
+            });
     }
     if let Some(n) = val.as_number() {
         return Decimal::from_str_exact(&n.to_string())
@@ -648,7 +655,9 @@ fn parse_boolean_value(
 mod tests {
     use super::*;
     use domain::common::DisplayName;
-    use domain::schema::{DocumentKind, DocumentType, DocumentTypeInfo, DocumentTypeOptions, IntegerSize};
+    use domain::schema::{
+        DocumentKind, DocumentType, DocumentTypeInfo, DocumentTypeOptions, IntegerSize,
+    };
     use indexmap::IndexSet;
 
     fn make_test_type_naming() -> DocumentTypeNaming {
@@ -734,14 +743,20 @@ mod tests {
         assert_eq!(status_to_db_str(DocumentStatus::Unpublished), "unpublished");
 
         assert_eq!(status_from_db_str("draft").unwrap(), DocumentStatus::Draft);
-        assert_eq!(status_from_db_str("modified").unwrap(), DocumentStatus::Modified);
+        assert_eq!(
+            status_from_db_str("modified").unwrap(),
+            DocumentStatus::Modified
+        );
         assert!(status_from_db_str("invalid").is_err());
     }
 
     #[test]
     fn test_publication_state_to_draft_status() {
         let draft = PublicationState::Draft;
-        assert_eq!(publication_state_to_draft_status_str(&draft).unwrap(), ("draft", None));
+        assert_eq!(
+            publication_state_to_draft_status_str(&draft).unwrap(),
+            ("draft", None)
+        );
 
         let mod_state = PublicationState::Modified {
             live_revision: 5,
@@ -764,10 +779,22 @@ mod tests {
 
     #[test]
     fn test_snapshot_reason_roundtrip() {
-        assert_eq!(snapshot_reason_to_db_str(SnapshotReason::Publish), "publish");
-        assert_eq!(snapshot_reason_to_db_str(SnapshotReason::Unpublish), "unpublish");
-        assert_eq!(snapshot_reason_from_db_str("publish").unwrap(), SnapshotReason::Publish);
-        assert_eq!(snapshot_reason_from_db_str("unpublish").unwrap(), SnapshotReason::Unpublish);
+        assert_eq!(
+            snapshot_reason_to_db_str(SnapshotReason::Publish),
+            "publish"
+        );
+        assert_eq!(
+            snapshot_reason_to_db_str(SnapshotReason::Unpublish),
+            "unpublish"
+        );
+        assert_eq!(
+            snapshot_reason_from_db_str("publish").unwrap(),
+            SnapshotReason::Publish
+        );
+        assert_eq!(
+            snapshot_reason_from_db_str("unpublish").unwrap(),
+            SnapshotReason::Unpublish
+        );
         assert!(snapshot_reason_from_db_str("bogus").is_err());
     }
 

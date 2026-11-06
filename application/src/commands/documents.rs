@@ -488,8 +488,8 @@ mod tests {
             page: 1,
             page_size: 25,
         };
-        let list_admin =
-            ListAdminHeadersCommand::new(type_id, pagination).with_status_filter(DocumentStatus::Draft);
+        let list_admin = ListAdminHeadersCommand::new(type_id, pagination)
+            .with_status_filter(DocumentStatus::Draft);
         assert_eq!(list_admin.status_filter, Some(DocumentStatus::Draft));
 
         let list_snaps = ListSnapshotsCommand::new(type_id, id);

@@ -47,9 +47,6 @@ pub struct ValidationReport {
     pub database_url_configured: bool,
 }
 
-/// Backwards-compatible type alias for [`ValidationReport`].
-pub type ConfigTestReport = ValidationReport;
-
 /// Execution status of a static migration file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -11,7 +11,7 @@ use serde::Deserialize;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(bound = "'de: 'a")]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentRecord<'a> {
+pub(crate) struct DocumentRecord<'a> {
     #[serde(alias = "type")]
     pub kind: DocumentKind,
     pub info: DocumentInfoRecord<'a>,
@@ -24,7 +24,7 @@ pub struct DocumentRecord<'a> {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(bound = "'de: 'a")]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentInfoRecord<'a> {
+pub(crate) struct DocumentInfoRecord<'a> {
     #[serde(alias = "title")]
     pub display_name: &'a str,
     pub singular_name: &'a str,
@@ -38,7 +38,7 @@ pub struct DocumentInfoRecord<'a> {
 /// Lifecycle options for the document type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentOptionsRecord {
+pub(crate) struct DocumentOptionsRecord {
     #[serde(default)]
     pub draft_and_publish: bool,
 }
@@ -47,7 +47,7 @@ pub struct DocumentOptionsRecord {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(bound = "'de: 'a")]
 #[serde(rename_all = "camelCase", untagged)]
-pub enum AttributeRecord<'a> {
+pub(crate) enum AttributeRecord<'a> {
     /// Relational association targeting another document type.
     Relation {
         #[serde(alias = "relation")]
@@ -71,7 +71,7 @@ pub enum AttributeRecord<'a> {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(bound = "'de: 'a")]
 #[serde(untagged)]
-pub enum FieldTypeDto<'a> {
+pub(crate) enum FieldTypeDto<'a> {
     /// String shorthand (e.g. "text", "localizedText", "boolean", "date", "dateTime", "email", "url", "json", "uid", "uuid", "int32", "integer").
     Simple(&'a str),
     /// Structured integer (e.g. {"integer": "int16" | "int32" | "int64" | "short" | "integer" | "long"}).
@@ -82,7 +82,7 @@ pub enum FieldTypeDto<'a> {
 
 /// Decimal precision and scale bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-pub struct DecimalBoundsDto {
+pub(crate) struct DecimalBoundsDto {
     pub precision: u8,
     pub scale: u8,
 }
@@ -91,7 +91,7 @@ pub struct DecimalBoundsDto {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(bound = "'de: 'a")]
 #[serde(rename_all = "camelCase")]
-pub struct ConstraintRecord<'a> {
+pub(crate) struct ConstraintRecord<'a> {
     pub min_length: Option<usize>,
     pub max_length: Option<usize>,
     #[serde(alias = "minimum", alias = "minInteger", alias = "minDecimal")]
@@ -106,9 +106,10 @@ pub struct ConstraintRecord<'a> {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(bound = "'de: 'a")]
 #[serde(rename_all = "camelCase")]
-pub struct SystemConfigRecord<'a> {
+pub(crate) struct SystemConfigRecord<'a> {
     pub default_locale: &'a str,
     pub available_locales: Vec<&'a str>,
+    #[cfg(test)]
     #[serde(default)]
     pub instance_name: Option<&'a str>,
 }

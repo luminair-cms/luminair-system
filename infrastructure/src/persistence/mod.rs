@@ -1,18 +1,14 @@
 //! Database persistence adapters, schema migrations, and query generation.
 
-pub mod connection;
-pub mod error;
+pub(crate) mod connection;
+pub(crate) mod error;
 pub mod migration;
 pub mod naming;
 pub mod query;
 pub mod repositories;
 
-pub use connection::{
-    ConnectionTarget, DsqlTokenProvider, EnvironmentDsqlTokenProvider, StaticDsqlTokenProvider,
-    create_connection_pool, create_connection_pool_with_provider, detect_connection_target,
-};
-pub use error::PersistenceError;
-pub use migration::run_static_migrations;
+pub(crate) use connection::create_connection_pool;
+pub(crate) use error::PersistenceError;
 pub use repositories::{
     SqlxAccessRequestRepository, SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository,
     SqlxRoleRepository, SqlxUserProfileRepository, SqlxUserRoleAssignmentRepository,

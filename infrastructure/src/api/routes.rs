@@ -49,29 +49,24 @@ where
 }
 
 /// Builds health and readiness probe routes (`/healthz`, `/ready`).
-pub fn health_routes<St>() -> Router<St>
+pub(crate) fn health_routes<St>() -> Router<St>
 where
     St: HasHealthChecker,
 {
     Router::new()
-        .route(
-            "/healthz",
-            get(health::healthz::<St>)
-        )
-        .route(
-            "/ready",
-            get(health::ready::<St>))
+        .route("/healthz", get(health::healthz::<St>))
+        .route("/ready", get(health::ready::<St>))
 }
 
 /// Builds system configuration and locale routes (`/api/v1/system/*`).
-pub fn system_routes<St>() -> Router<St>
+pub(crate) fn system_routes<St>() -> Router<St>
 where
     St: HasSystemConfigService + HasAuthResolver,
 {
     Router::new()
         .route(
             "/api/v1/system/config",
-            get(system::get_system_config::<St>)
+            get(system::get_system_config::<St>),
         )
         .route(
             "/api/v1/system/locales",
@@ -80,7 +75,7 @@ where
 }
 
 /// Builds schema definition routes (`/api/v1/schema/*` and `/api/v1/schemas/*`).
-pub fn schema_routes<St>() -> Router<St>
+pub(crate) fn schema_routes<St>() -> Router<St>
 where
     St: HasSchemaService + HasAuthResolver,
 {
@@ -93,18 +88,12 @@ where
             "/api/v1/schema/document-types/{id}",
             get(schema::get_document_type::<St>),
         )
-        .route(
-            "/api/v1/schemas", 
-            get(schema::list_document_types::<St>)
-        )
-        .route(
-            "/api/v1/schemas/{id}",
-            get(schema::get_document_type::<St>),
-        )
+        .route("/api/v1/schemas", get(schema::list_document_types::<St>))
+        .route("/api/v1/schemas/{id}", get(schema::get_document_type::<St>))
 }
 
 /// Builds access request and onboarding routes (`/api/v1/auth/access-requests/*`).
-pub fn access_request_routes<St>() -> Router<St>
+pub(crate) fn access_request_routes<St>() -> Router<St>
 where
     St: HasAccessRequestsService + HasAuthResolver,
 {
@@ -129,23 +118,17 @@ where
 }
 
 /// Builds user directory and profile synchronization routes (`/api/v1/auth/users` and `/api/v1/auth/profile/sync`).
-pub fn user_directory_routes<St>() -> Router<St>
+pub(crate) fn user_directory_routes<St>() -> Router<St>
 where
     St: HasUserDirectoryService + HasAuthResolver,
 {
     Router::new()
-        .route(
-            "/api/v1/auth/users", 
-            get(users::list_users::<St>)
-        )
-        .route(
-            "/api/v1/auth/profile/sync", 
-            post(users::sync_profile::<St>)
-        )
+        .route("/api/v1/auth/users", get(users::list_users::<St>))
+        .route("/api/v1/auth/profile/sync", post(users::sync_profile::<St>))
 }
 
 /// Builds document instance lifecycle and snapshot routes (`/api/v1/content/*`).
-pub fn content_routes<St>() -> Router<St>
+pub(crate) fn content_routes<St>() -> Router<St>
 where
     St: HasDocumentsService + HasAuthResolver,
 {

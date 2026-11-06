@@ -53,10 +53,7 @@ mod tests {
         assert_eq!(default_cmd.query, None);
         assert_eq!(default_cmd.pagination, Pagination::default());
 
-        let custom_cmd = ListUsersCommand::new(
-            Some("alice".into()),
-            Pagination::new(2, 50),
-        );
+        let custom_cmd = ListUsersCommand::new(Some("alice".into()), Pagination::new(2, 50));
         assert_eq!(custom_cmd.query.as_deref(), Some("alice"));
         assert_eq!(custom_cmd.pagination.page, 2);
         assert_eq!(custom_cmd.pagination.page_size, 50);

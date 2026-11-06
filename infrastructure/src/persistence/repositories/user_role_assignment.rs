@@ -9,6 +9,7 @@ use domain::auth::role::{RoleId, UserRoleAssignment, UserRoleAssignmentId};
 use domain::auth::user::UserId;
 use domain::errors::DomainError;
 
+use super::mappers::map_user_role_assignment_row;
 use crate::persistence::error::PersistenceError;
 use crate::persistence::query::auth::{
     delete_assignment_query, exists_admin_assignment_query, select_assignments_by_user_query,
@@ -16,7 +17,6 @@ use crate::persistence::query::auth::{
 };
 use crate::persistence::query::common::{compile_delete, compile_insert, compile_select};
 use crate::persistence::query::occ::with_occ_retry;
-use super::mappers::map_user_role_assignment_row;
 
 // ---------------------------------------------------------------------------
 // Public Repository Struct & Constructors
@@ -40,10 +40,7 @@ impl SqlxUserRoleAssignmentRepository {
 // ---------------------------------------------------------------------------
 
 impl UserRoleAssignmentRepository for SqlxUserRoleAssignmentRepository {
-    async fn find_by_user(
-        &self,
-        user_id: &UserId,
-    ) -> Result<Vec<UserRoleAssignment>, DomainError> {
+    async fn find_by_user(&self, user_id: &UserId) -> Result<Vec<UserRoleAssignment>, DomainError> {
         let (sql, values) = compile_select(&select_assignments_by_user_query(user_id));
         let rows = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
             .fetch_all(&self.pool)
@@ -133,10 +130,7 @@ async fn execute_upsert_assignment_in_tx(
     Ok(())
 }
 
-async fn execute_delete_assignment(
-    pool: &PgPool,
-    id: Uuid,
-) -> Result<(), PersistenceError> {
+async fn execute_delete_assignment(pool: &PgPool, id: Uuid) -> Result<(), PersistenceError> {
     let (sql, values) = compile_delete(&delete_assignment_query(id));
     sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
         .execute(pool)

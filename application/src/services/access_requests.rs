@@ -5,8 +5,8 @@ use std::future::Future;
 
 use chrono::Utc;
 use domain::auth::{
-    AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository,
-    RoleRepository, UserRoleAssignment, UserRoleAssignmentRepository,
+    AccessRequest, AccessRequestId, AccessRequestPolicy, AccessRequestRepository, RoleRepository,
+    UserRoleAssignment, UserRoleAssignmentRepository,
 };
 use domain::errors::DomainError;
 
@@ -221,7 +221,8 @@ mod tests {
     use super::*;
 
     use domain::auth::{
-        AccessRequestStatus, Permission, Role, RoleId, UserId, UserRoleAssignment, UserRoleAssignmentId,
+        AccessRequestStatus, Permission, Role, RoleId, UserId, UserRoleAssignment,
+        UserRoleAssignmentId,
     };
     use domain::common::{DisplayName, Email};
     use uuid::Uuid;

@@ -20,7 +20,11 @@ pub enum SafetyPolicy {
     #[serde(alias = "AdditiveOnly", alias = "additive", alias = "additive_only")]
     AdditiveOnly,
     /// Allows dropping unmanaged tables, columns, or indexes (for test tear-down or local resets).
-    #[serde(alias = "AllowDestructive", alias = "destructive", alias = "allow_destructive")]
+    #[serde(
+        alias = "AllowDestructive",
+        alias = "destructive",
+        alias = "allow_destructive"
+    )]
     AllowDestructive,
 }
 
@@ -30,26 +34,18 @@ pub(super) enum MigrationStep {
     /// Create a new relational table with its columns, primary keys, and foreign keys.
     CreateTable(TableDefinition),
     /// Drop an existing table.
-    DropTable {
-        name: String,
-        kind: TableKind,
-    },
+    DropTable { name: String, kind: TableKind },
     /// Add a column to an existing table.
     AddColumn {
         table: String,
         column: ColumnDefinition,
     },
     /// Drop a column from an existing table.
-    DropColumn {
-        table: String,
-        column: String,
-    },
+    DropColumn { table: String, column: String },
     /// Create a secondary index on a table.
     CreateIndex(IndexDefinition),
     /// Drop an index.
-    DropIndex {
-        name: String,
-    },
+    DropIndex { name: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -98,17 +94,20 @@ impl MigrationStep {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::model::{
         ColumnDefinition, IndexDefinition, SqlColumnType, TableDefinition, TableKind,
     };
+    use super::*;
 
     #[test]
     fn test_describe_all_variants() {
         let mut table = TableDefinition::new("articles", TableKind::Entity);
-        table
-            .columns
-            .insert(ColumnDefinition::new("id", SqlColumnType::Uuid, false, true));
+        table.columns.insert(ColumnDefinition::new(
+            "id",
+            SqlColumnType::Uuid,
+            false,
+            true,
+        ));
         let step_create_table = MigrationStep::CreateTable(table);
         assert_eq!(
             step_create_table.describe(),
