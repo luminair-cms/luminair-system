@@ -220,6 +220,33 @@ fn test_cli_service_mode_config_parsing_and_flags() {
 }
 
 #[test]
+fn test_cli_service_mode_config_oidc_jwks_url() {
+    let args = [
+        "luminair",
+        "--mode",
+        "serve",
+        "--oidc-jwks-url",
+        "http://dex:5556/dex/keys",
+        "--oidc-issuer",
+        "http://localhost:5556/dex",
+        "--oidc-audience",
+        "luminair-admin-spa",
+    ];
+
+    let config = CliConfig::parse_from_iter(args).expect("CLI arg parsing should succeed");
+    assert_eq!(config.mode, RunMode::Serve);
+    assert_eq!(
+        config.oidc_jwks_url.as_deref(),
+        Some("http://dex:5556/dex/keys")
+    );
+    assert_eq!(
+        config.oidc_issuer.as_deref(),
+        Some("http://localhost:5556/dex")
+    );
+    assert_eq!(config.oidc_audience.as_deref(), Some("luminair-admin-spa"));
+}
+
+#[test]
 fn test_cli_service_mode_validation_rejects_missing_database_url() {
     let root = workspace_root();
     let config = CliConfig {

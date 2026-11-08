@@ -56,6 +56,7 @@ Configuration settings are resolved in the following priority order (highest to 
 | `LUMINAIR_AUTO_MIGRATE` | `--auto-migrate` | `false` | Automatically apply static migrations and sync dynamic schema on startup in `serve` mode. |
 | `LUMINAIR_OIDC_ISSUER` | `--oidc-issuer <URL>` | None | Expected OpenID Connect issuer (`iss` claim), e.g. `http://localhost:5556/dex` or `https://cognito-idp.<region>.amazonaws.com/<user-pool-id>`. |
 | `LUMINAIR_OIDC_AUDIENCE` | `--oidc-audience <AUD>` | None | Expected OpenID Connect audience (`aud` claim), e.g. `luminair-admin-spa` or AWS Cognito App Client ID. |
+| `LUMINAIR_OIDC_JWKS_URL` | `--oidc-jwks-url <URL>` | None | HTTP endpoint serving the OIDC JSON Web Key Set (JWKS), e.g. `http://dex:5556/dex/keys` or AWS Cognito `.well-known/jwks.json`. |
 | `LUMINAIR_OIDC_JWT_PUBLIC_KEY_PEM` | `--oidc-jwt-public-key-pem <PEM>` | None | RS256 RSA public key in PEM format used to verify OIDC JWT signatures (e.g. from AWS Cognito). |
 | `LUMINAIR_OIDC_JWT_SECRET` | `--oidc-jwt-secret <SECRET>` | None | HMAC-SHA256 (HS256) shared secret for symmetric JWT verification (local development and testing). |
 | `LUMINAIR_SERVICE_TOKENS` | `--service-tokens <TOKENS>` | None | Pre-shared machine-to-machine tokens with assigned service ID and roles. Format: `<token>:<service_id>:<roles>;...` or JSON array string. |

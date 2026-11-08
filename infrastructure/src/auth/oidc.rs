@@ -1,6 +1,11 @@
 //! OIDC JWT verification and token decoding.
 
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use std::collections::HashMap;
+
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::{
+    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
+};
 use serde::{Deserialize, Serialize};
 
 use domain::auth::user::UserId;
@@ -13,15 +18,16 @@ use crate::auth::error::AuthError;
 // Types
 // ---------------------------------------------------------------------------
 
-#[cfg(test)]
 /// Configuration parameters for OpenID Connect token validation.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct OidcConfig {
-    pub issuer: Option<String>,
-    pub audience: Option<String>,
-    pub hmac_secret: Option<String>,
-    pub rsa_public_key_pem: Option<String>,
-    pub disabled: bool,
+    issuer: Option<String>,
+    audience: Option<String>,
+    hmac_secret: Option<String>,
+    rsa_public_key_pem: Option<String>,
+    jwks_json: Option<String>,
+    disabled: bool,
 }
 
 /// Standard JWT payload claims parsed during OIDC token validation.
@@ -47,6 +53,11 @@ enum ValidatorInner {
         key: DecodingKey,
         validation: Box<Validation>,
     },
+    Jwks {
+        keys_by_kid: HashMap<String, DecodingKey>,
+        fallback_key: Option<DecodingKey>,
+        validation: Box<Validation>,
+    },
     Disabled,
 }
 
@@ -58,12 +69,13 @@ enum ValidatorInner {
 impl OidcConfig {
     /// Creates a default OIDC configuration with optional issuer and audience.
     #[must_use]
-    pub(crate) const fn new(issuer: Option<String>, audience: Option<String>) -> Self {
+    const fn new(issuer: Option<String>, audience: Option<String>) -> Self {
         Self {
             issuer,
             audience,
             hmac_secret: None,
             rsa_public_key_pem: None,
+            jwks_json: None,
             disabled: false,
         }
     }
@@ -71,10 +83,18 @@ impl OidcConfig {
     /// Builds an [`OidcTokenValidator`] according to configured keys and parameters.
     ///
     /// # Errors
-    /// Returns [`AuthError::InvalidToken`] if RSA PEM decoding fails or if configuration lacks keys.
+    /// Returns [`AuthError::InvalidToken`] if decoding fails or if configuration lacks keys.
     fn build_validator(&self) -> Result<OidcTokenValidator, AuthError> {
         if self.disabled {
             return Ok(OidcTokenValidator::disabled());
+        }
+
+        if let Some(ref jwks) = self.jwks_json {
+            return OidcTokenValidator::from_jwks_json(
+                jwks,
+                self.issuer.clone(),
+                self.audience.clone(),
+            );
         }
 
         if let Some(ref pem) = self.rsa_public_key_pem {
@@ -94,7 +114,7 @@ impl OidcConfig {
         }
 
         Err(AuthError::InvalidToken(
-            "missing OIDC key: provide hmac_secret, rsa_public_key_pem, or enable disabled mode"
+            "missing OIDC key: provide hmac_secret, rsa_public_key_pem, jwks_json, or enable disabled mode"
                 .to_string(),
         ))
     }
@@ -126,6 +146,57 @@ impl OidcTokenValidator {
         Ok(Self {
             inner: ValidatorInner::Active {
                 key,
+                validation: Box::new(build_validation(Algorithm::RS256, issuer, audience)),
+            },
+        })
+    }
+
+    /// Creates a validator from a JWKS JSON string.
+    ///
+    /// # Errors
+    /// Returns [`AuthError::InvalidToken`] if the JSON is malformed or contains no valid decoding keys.
+    pub fn from_jwks_json(
+        jwks_json: &str,
+        issuer: Option<String>,
+        audience: Option<String>,
+    ) -> Result<Self, AuthError> {
+        let jwk_set: JwkSet = serde_json::from_str(jwks_json)
+            .map_err(|err| AuthError::InvalidToken(err.to_string()))?;
+        Self::from_jwk_set(&jwk_set, issuer, audience)
+    }
+
+    /// Creates a validator from a parsed JWK set.
+    ///
+    /// # Errors
+    /// Returns [`AuthError::InvalidToken`] if the JWKS contains no valid decoding keys.
+    pub fn from_jwk_set(
+        jwk_set: &JwkSet,
+        issuer: Option<String>,
+        audience: Option<String>,
+    ) -> Result<Self, AuthError> {
+        let mut keys_by_kid = HashMap::new();
+        let mut fallback_key = None;
+
+        for jwk in &jwk_set.keys {
+            let Ok(key) = DecodingKey::from_jwk(jwk) else {
+                continue;
+            };
+            if fallback_key.is_none() {
+                fallback_key = Some(key.clone());
+            }
+            if let Some(ref kid) = jwk.common.key_id {
+                keys_by_kid.insert(kid.clone(), key);
+            }
+        }
+
+        let fallback_key = fallback_key.ok_or_else(|| {
+            AuthError::InvalidToken("JWKS contains no valid decoding keys".to_string())
+        })?;
+
+        Ok(Self {
+            inner: ValidatorInner::Jwks {
+                keys_by_kid,
+                fallback_key: Some(fallback_key),
                 validation: Box::new(build_validation(Algorithm::RS256, issuer, audience)),
             },
         })
@@ -197,6 +268,11 @@ impl OidcTokenValidator {
                     .map_err(|err| AuthError::InvalidToken(err.to_string()))?;
                 Ok(token_data.claims)
             }
+            ValidatorInner::Jwks {
+                keys_by_kid,
+                fallback_key,
+                validation,
+            } => decode_jwks_claims(keys_by_kid, fallback_key.as_ref(), validation, token),
             ValidatorInner::Disabled => {
                 jsonwebtoken::dangerous::insecure_decode_claims::<JwtClaims>(token)
                     .map_err(|err| AuthError::InvalidToken(err.to_string()))
@@ -226,6 +302,28 @@ fn build_validation(
     validation
 }
 
+fn decode_jwks_claims(
+    keys_by_kid: &HashMap<String, DecodingKey>,
+    fallback_key: Option<&DecodingKey>,
+    validation: &Validation,
+    token: &str,
+) -> Result<JwtClaims, AuthError> {
+    let header = decode_header(token).map_err(|err| AuthError::InvalidToken(err.to_string()))?;
+
+    let key = match header.kid {
+        Some(ref kid) => keys_by_kid.get(kid).ok_or_else(|| {
+            AuthError::InvalidToken(format!("no matching JWK found for kid '{kid}'"))
+        })?,
+        None => fallback_key.ok_or_else(|| {
+            AuthError::InvalidToken("token has no kid and no fallback key is available".to_string())
+        })?,
+    };
+
+    let token_data = decode::<JwtClaims>(token, key, validation)
+        .map_err(|err| AuthError::InvalidToken(err.to_string()))?;
+    Ok(token_data.claims)
+}
+
 // ---------------------------------------------------------------------------
 // Unit Tests
 // ---------------------------------------------------------------------------
@@ -233,13 +331,53 @@ fn build_validation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonwebtoken::jwk::Jwk;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const TEST_RSA_PRIVATE_KEY_PEM: &str = r#"-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA0d5pQ2ovxI4JvNjZV5rWvJkn8MvlYub506299K79okYmRCqJ
+boKJ72jk8MFamwMKnwSZ1wK0xCKJc1gwEiraMxeEIV0rl5hNVqk9QkurYrOgpMgC
+M9EcXVAvTF1RXVeX4u2gx/nRZeQo7WoWIv8oq4jS5TtIjTjsWCzu5yvsjA5c4TZS
+ITjBdS2TLod8xjRzXzORkydj3O4o/JDXQUo0HV28teV//9oIxHajw9EaqzephU9T
+MZlCY0yB7zkUw51KBhuh+P0FHWAZNhf6n5b1pbzGcE7e0XyYllYHT/rvCjOptEy+
+5KN4/FpSlF+BogQm+mb12NH1Np7ZQsvA8o852QIDAQABAoIBAHk/nOMU6yoMwbV4
+NwE09NEbTwcAVbNxLG7OVwuROfnRu3Pwe1v8UQKfQH2Tx+v8stsyRksBRjx2k6Cv
+F363gT65XF4GPRQlKrFhr4GoxAiPLMVmxFb5fgCvPdRJqaNa4uZ5UUWXoBHU4oxf
+mRB5CB8qOmWzfXQRqgI7W371UoGLEsh6ZoUMuV9UEpW0b0LonZxUtKM1vsRPnVSg
+tlnD6SKv631dVx6waDDIFPJ9X7g7qI05z991YIaUi2efoXh+tMXPBus6KpTQlowz
+R56G6FmOOkqQmR5nZU3BbHOWv/jbJQSPZka7ZmaNNykrNQkDh/ZEgABxj124HyVM
+xhieO/0CgYEA71RgT3FhS8orxxubvwwDHt5OXwSHiM0kSultknXvpXNAkb0NFsrY
+0MOte0oolbynbwKXAWSfrMaSK6uLxf+BMPtTqy5FFZqr6gAAFlnKpQU49GFzM8GL
+pXu+OIEm6JGB2DY9hjzt6er6dRY0PPTOfhqGVlEpvJT8nd2we7OeTRsCgYEA4Hyz
+1SItz6Hliukp19f01zmp6lPd6sY8yJe9DYLrRmq2r9dyMsdvh2KgIgOvtjeRhzXu
+LcE6oKBkWQ/3idhADxYL8XLjw1ppoEKi9Sgem0f/+lKPFEs6Ev0faNCa5V1MH6rp
+Gkhnv/cfjfAQ5exjrTroSCQ8gnET/0cyCGfgyBsCgYArp2ZR10p5+ox1qvGDrXs8
+PCxrZHYcW97M0zsrRdvKf/U9IBCtIZ7epXKVVHeGqHyZ4Q0OMf52E1pCIO5D1VEJ
+UC54wN3VDPtimVFqwkIWS5eR69yJijogmyudPuGL9k6K04nxXFfBHR1GEiDBJZ4s
+nkX2pKNKRJq3aOJyDddIFQKBgGGfWUUSfAGTUhM6mmu3Ck6eUPoKRrNWShChjCFY
+EaCpv5BwjMTwXdvuU9z25W7Ec5DtLwrOwQQhPAJPI0Lau+DToZX6dHn703tR/zPF
+oqm8geEGDhqxLCwdz47xSKr+C6Cp3n0Dh7q/aQV8pJyYVDB9MY5N09KWAjA9cdCd
+++6JAoGBAOL7XeZzHX/DtuMWtqxS5fV7FcBLMYgSMVGKdB3ocDj+urNQeD7ozBIO
+u4pJk9GhZwdujC2SR8ePWQLFR0JmI+5FKYBaYP/k+OHPaxmP535vrdaZdHCF0KhK
+Fo8QLEnNhQuL+d9f/Yvwk/gdljds/Z9W3tzVcqs6KDoWwwQAs74w
+-----END RSA PRIVATE KEY-----"#;
 
     fn current_timestamp_secs() -> usize {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
             .as_secs() as usize
+    }
+
+    fn generate_test_jwks(kid: Option<&str>) -> (String, EncodingKey) {
+        let encoding_key = EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY_PEM.as_bytes())
+            .expect("valid test RSA private key");
+        let mut jwk = Jwk::from_encoding_key(&encoding_key, Algorithm::RS256)
+            .expect("valid JWK from encoding key");
+        jwk.common.key_id = kid.map(ToString::to_string);
+        let jwk_set = JwkSet { keys: vec![jwk] };
+        let jwks_json = serde_json::to_string(&jwk_set).expect("serialize JWKS");
+        (jwks_json, encoding_key)
     }
 
     #[test]
@@ -327,5 +465,74 @@ mod tests {
         config.disabled = false;
         config.hmac_secret = Some("secret".into());
         assert!(config.build_validator().is_ok());
+
+        config.hmac_secret = None;
+        let (jwks_json, _) = generate_test_jwks(Some("test-kid"));
+        config.jwks_json = Some(jwks_json);
+        assert!(config.build_validator().is_ok());
+    }
+
+    #[test]
+    fn test_jwks_from_json_empty_or_malformed_rejected() {
+        let empty_result = OidcTokenValidator::from_jwks_json(r#"{"keys":[]}"#, None, None);
+        assert!(
+            matches!(empty_result, Err(AuthError::InvalidToken(msg)) if msg.contains("no valid decoding keys"))
+        );
+
+        let malformed_result = OidcTokenValidator::from_jwks_json("{invalid", None, None);
+        assert!(matches!(malformed_result, Err(AuthError::InvalidToken(_))));
+    }
+
+    #[test]
+    fn test_jwks_valid_signature_and_kid_resolution() {
+        let (jwks_json, encoding_key) = generate_test_jwks(Some("dex-key-1"));
+        let validator = OidcTokenValidator::from_jwks_json(
+            &jwks_json,
+            Some("http://localhost:5556/dex".into()),
+            Some("luminair-admin-spa".into()),
+        )
+        .expect("build validator from JWKS");
+
+        let exp = current_timestamp_secs() + 3600;
+        let claims = JwtClaims {
+            sub: "usr_dex_user".to_string(),
+            email: Some("dex@luminair.dev".to_string()),
+            name: Some("Dex Admin".to_string()),
+            exp,
+            iss: Some("http://localhost:5556/dex".to_string()),
+            aud: Some("luminair-admin-spa".to_string()),
+        };
+
+        // 1. Verify token with matching kid
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some("dex-key-1".to_string());
+        let token = encode(&header, &claims, &encoding_key).expect("encode RS256 token");
+        let user = validator.verify_token(&token).expect("valid RS256 JWKS token");
+        assert_eq!(user.user_id.as_ref(), "usr_dex_user");
+        assert_eq!(
+            user.email.as_ref().map(AsRef::as_ref),
+            Some("dex@luminair.dev")
+        );
+
+        // 2. Token without kid falls back to primary key
+        let header_no_kid = Header::new(Algorithm::RS256);
+        let token_no_kid =
+            encode(&header_no_kid, &claims, &encoding_key).expect("encode no-kid RS256 token");
+        let user_fallback = validator
+            .verify_token(&token_no_kid)
+            .expect("fallback key verifies");
+        assert_eq!(user_fallback.user_id.as_ref(), "usr_dex_user");
+
+        // 3. Token with unknown kid is rejected
+        let mut header_unknown_kid = Header::new(Algorithm::RS256);
+        header_unknown_kid.kid = Some("non-existent-kid".to_string());
+        let token_unknown = encode(&header_unknown_kid, &claims, &encoding_key)
+            .expect("encode token with unknown kid");
+        let err = validator
+            .verify_token(&token_unknown)
+            .expect_err("unknown kid rejected");
+        assert!(
+            matches!(err, AuthError::InvalidToken(msg) if msg.contains("no matching JWK found for kid 'non-existent-kid'"))
+        );
     }
 }

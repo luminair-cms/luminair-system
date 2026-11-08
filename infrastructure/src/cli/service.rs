@@ -36,7 +36,7 @@ pub(crate) async fn execute_service_mode(
     context: &'static SystemContext,
 ) -> Result<CliOutcome, CliError> {
     let pool = setup_database(config, context).await?;
-    let (oidc_validator, service_tokens) = build_auth_machinery(config)?;
+    let (oidc_validator, service_tokens) = build_auth_machinery(config).await?;
     let container =
         AppContainer::from_pool_and_context(pool, context, oidc_validator, service_tokens);
     let router = build_router(container.http_state());
@@ -88,15 +88,25 @@ async fn setup_database(
     Ok(pool)
 }
 
-fn build_auth_machinery(
+async fn build_auth_machinery(
     config: &CliConfig,
 ) -> Result<(Arc<OidcTokenValidator>, Arc<ServiceTokenRegistry>), CliError> {
-    let oidc_validator = build_oidc_validator(config)?;
+    let oidc_validator = build_oidc_validator(config).await?;
     let service_token_registry = build_service_token_registry(config)?;
     Ok((oidc_validator, Arc::new(service_token_registry)))
 }
 
-fn build_oidc_validator(config: &CliConfig) -> Result<Arc<OidcTokenValidator>, CliError> {
+async fn build_oidc_validator(config: &CliConfig) -> Result<Arc<OidcTokenValidator>, CliError> {
+    if let Some(ref jwks_url) = config.oidc_jwks_url {
+        let jwks_json = fetch_jwks_with_retry(jwks_url).await?;
+        let validator = OidcTokenValidator::from_jwks_json(
+            &jwks_json,
+            config.oidc_issuer.clone(),
+            config.oidc_audience.clone(),
+        )
+        .map_err(|e| CliError::Config(format!("invalid OIDC JWKS from '{jwks_url}': {e}")))?;
+        return Ok(Arc::new(validator));
+    }
     if let Some(ref secret) = config.oidc_jwt_secret {
         Ok(Arc::new(OidcTokenValidator::new_hs256(
             secret.as_bytes(),
@@ -115,6 +125,49 @@ fn build_oidc_validator(config: &CliConfig) -> Result<Arc<OidcTokenValidator>, C
         tracing::warn!("No OIDC credentials configured; running in insecure disabled auth mode");
         Ok(Arc::new(OidcTokenValidator::disabled()))
     }
+}
+
+async fn fetch_jwks_with_retry(url: &str) -> Result<String, CliError> {
+    const MAX_ATTEMPTS: u32 = 10;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| CliError::Config(format!("failed to initialize HTTP client: {e}")))?;
+
+    let mut last_error = String::new();
+    for attempt in 1..=MAX_ATTEMPTS {
+        match fetch_jwks_once(&client, url).await {
+            Ok(body) => return Ok(body),
+            Err(err) => last_error = err,
+        }
+
+        if attempt < MAX_ATTEMPTS {
+            tracing::warn!(
+                attempt,
+                max_attempts = MAX_ATTEMPTS,
+                url,
+                error = %last_error,
+                "Failed to fetch OIDC JWKS; retrying in 500ms..."
+            );
+            tokio::time::sleep(RETRY_DELAY).await;
+        }
+    }
+
+    Err(CliError::Config(format!(
+        "failed to fetch OIDC JWKS from '{url}' after {MAX_ATTEMPTS} attempts: {last_error}"
+    )))
+}
+
+async fn fetch_jwks_once(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("failed to read JWKS body: {e}"))
 }
 
 fn build_service_token_registry(config: &CliConfig) -> Result<ServiceTokenRegistry, CliError> {

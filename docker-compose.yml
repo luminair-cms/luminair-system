@@ -143,6 +143,7 @@ services:
       LUMINAIR_AUTO_MIGRATE: "true"
       LUMINAIR_OIDC_ISSUER: "http://localhost:5556/dex"
       LUMINAIR_OIDC_AUDIENCE: "luminair-admin-spa"
+      LUMINAIR_OIDC_JWKS_URL: "http://dex:5556/dex/keys"
     volumes:
       - ./config:/app/config:ro
     command: ["--config", "/app/config/cli-config.json", "--mode", "serve"]

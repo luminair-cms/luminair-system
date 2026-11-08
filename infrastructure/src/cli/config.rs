@@ -89,6 +89,8 @@ pub struct CliConfig {
     pub oidc_issuer: Option<String>,
     /// Optional expected OIDC audience claim.
     pub oidc_audience: Option<String>,
+    /// Optional OIDC JWKS URL to fetch public keys.
+    pub oidc_jwks_url: Option<String>,
     /// Pre-configured service bearer tokens.
     pub service_tokens: Vec<ServiceTokenConfig>,
 }
@@ -112,6 +114,7 @@ struct CliConfigFileDto {
     pub oidc_jwt_public_key_pem: Option<String>,
     pub oidc_issuer: Option<String>,
     pub oidc_audience: Option<String>,
+    pub oidc_jwks_url: Option<String>,
     pub service_tokens: Option<Vec<ServiceTokenConfig>>,
 }
 
@@ -297,6 +300,7 @@ impl Default for CliConfig {
             oidc_jwt_public_key_pem: None,
             oidc_issuer: None,
             oidc_audience: None,
+            oidc_jwks_url: None,
             service_tokens: Vec::new(),
         }
     }
@@ -387,6 +391,9 @@ fn apply_file_dto(config: &mut CliConfig, dto: CliConfigFileDto) {
     if dto.oidc_audience.is_some() {
         config.oidc_audience = dto.oidc_audience;
     }
+    if dto.oidc_jwks_url.is_some() {
+        config.oidc_jwks_url = dto.oidc_jwks_url;
+    }
     if let Some(v) = dto.service_tokens {
         config.service_tokens = v;
     }
@@ -444,6 +451,9 @@ where
     }
     if let Some(val) = env_lookup("LUMINAIR_OIDC_AUDIENCE") {
         config.oidc_audience = Some(val);
+    }
+    if let Some(val) = env_lookup("LUMINAIR_OIDC_JWKS_URL") {
+        config.oidc_jwks_url = Some(val);
     }
     if let Some(val) = env_lookup("LUMINAIR_SERVICE_TOKENS") {
         config.service_tokens = parse_service_tokens(&val)?;
@@ -518,6 +528,7 @@ fn apply_cli_arg_overrides(config: &mut CliConfig, args: &[String]) -> Result<()
             }
             "--oidc-issuer" => config.oidc_issuer = Some(val.clone()),
             "--oidc-audience" => config.oidc_audience = Some(val.clone()),
+            "--oidc-jwks-url" => config.oidc_jwks_url = Some(val.clone()),
             "--service-tokens" => config.service_tokens = parse_service_tokens(val)?,
             unknown => {
                 return Err(CliError::Config(format!(
@@ -817,6 +828,42 @@ mod tests {
 
         config.database_url = Some("postgres://localhost/test".to_string());
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_parse_oidc_jwks_url_from_flag_and_env() {
+        let args = [
+            "--mode=serve",
+            "--oidc-jwks-url=http://dex:5556/dex/keys",
+        ];
+        let config = CliConfig::parse_from_iter(args).unwrap();
+        assert_eq!(
+            config.oidc_jwks_url.as_deref(),
+            Some("http://dex:5556/dex/keys")
+        );
+
+        let args_flag = [
+            "--mode",
+            "serve",
+            "--oidc-jwks-url",
+            "http://dex:5556/dex/keys",
+        ];
+        let config_flag = CliConfig::parse_from_iter(args_flag).unwrap();
+        assert_eq!(
+            config_flag.oidc_jwks_url.as_deref(),
+            Some("http://dex:5556/dex/keys")
+        );
+
+        let env_map = |k: &str| match k {
+            "LUMINAIR_OIDC_JWKS_URL" => Some("http://localhost:5556/dex/keys".to_string()),
+            _ => None,
+        };
+        let config_env =
+            CliConfig::parse_from_args_and_env(Vec::<String>::new(), env_map).unwrap();
+        assert_eq!(
+            config_env.oidc_jwks_url.as_deref(),
+            Some("http://localhost:5556/dex/keys")
+        );
     }
 
     #[test]
