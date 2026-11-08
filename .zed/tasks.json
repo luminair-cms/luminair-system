@@ -19,5 +19,31 @@
     "args": ["send", "$ZED_FILE", "--all"],
     "reveal": "always",
     "use_new_terminal": false
+  },
+  {
+    "label": "httpYac: Run All Requests (luminair-dex.http)",
+    "command": "httpyac",
+    "args": ["send", ".ai/local/luminair-dex.http", "--all"],
+    "reveal": "always",
+    "use_new_terminal": false
+  },
+  {
+    "label": "Luminair: Run Service (serve + auto-migrate)",
+    "command": "cargo",
+    "args": [
+      "run",
+      "-p",
+      "infrastructure",
+      "--",
+      "--config",
+      "config/cli-config.json",
+      "--mode",
+      "serve",
+      "--auto-migrate",
+      "--service-tokens",
+      "local-dev-admin-token:ci-agent:admin"
+    ],
+    "reveal": "always",
+    "use_new_terminal": true
   }
 ]
