@@ -21,8 +21,8 @@ use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{
     COL_CONTENT, COL_CREATED_AT, COL_CREATED_BY, COL_DISPLAY_TITLE, COL_DISPLAY_VALUES,
     COL_DRAFT_VERSION, COL_ID, COL_LAST_PUBLISHED_REVISION, COL_PUBLISHED_AT, COL_PUBLISHED_BY,
-    COL_RELATIONS, COL_REVISION, COL_SLUG, COL_STATUS, COL_UPDATED_AT, COL_UPDATED_BY,
-    COL_VERSION, DocumentTypeNaming, FieldColumnNaming,
+    COL_RELATIONS, COL_REVISION, COL_SLUG, COL_STATUS, COL_UPDATED_AT, COL_UPDATED_BY, COL_VERSION,
+    DocumentTypeNaming, FieldColumnNaming,
 };
 use crate::persistence::repositories::codec::{
     deserialize_display_values_json, deserialize_fields_json, deserialize_json_map,
@@ -35,7 +35,7 @@ use crate::persistence::repositories::codec::{
 // ---------------------------------------------------------------------------
 
 /// Reconstitutes a published [`DocumentInstance`] from a wide-table [`PgRow`].
-pub fn map_wide_table_row(
+pub(crate) fn map_wide_table_row(
     row: &PgRow,
     type_naming: &DocumentTypeNaming,
     relations: HashMap<AttributeId, Vec<ResolvedRelation>>,
@@ -82,7 +82,7 @@ pub fn map_wide_table_row(
 }
 
 /// Reconstitutes a working [`DocumentInstance`] from a `document_drafts` [`PgRow`].
-pub fn map_draft_row(
+pub(crate) fn map_draft_row(
     row: &PgRow,
     type_naming: &DocumentTypeNaming,
     live_published_meta: Option<(u32, DateTime<Utc>, ActorId)>,
@@ -96,7 +96,9 @@ pub fn map_draft_row(
 
     let version_i32: i32 = row.try_get(COL_VERSION)?;
     let version = u32::try_from(version_i32).map_err(|e| {
-        PersistenceError::Validation(format!("invalid negative draft version '{version_i32}': {e}"))
+        PersistenceError::Validation(format!(
+            "invalid negative draft version '{version_i32}': {e}"
+        ))
     })?;
     let last_published_rev = row
         .try_get::<Option<i32>, _>(COL_LAST_PUBLISHED_REVISION)?
@@ -134,7 +136,7 @@ pub fn map_draft_row(
 }
 
 /// Extracts `(revision, published_at, published_by)` from a wide-table [`PgRow`].
-pub fn extract_wide_published_meta(
+pub(crate) fn extract_wide_published_meta(
     row: &PgRow,
 ) -> Result<(u32, DateTime<Utc>, ActorId), PersistenceError> {
     let rev_i32: i32 = row.try_get(COL_REVISION)?;
@@ -148,7 +150,7 @@ pub fn extract_wide_published_meta(
 }
 
 /// Maps a header query [`PgRow`] into a [`DocumentHeader`].
-pub fn map_header_row(
+pub(crate) fn map_header_row(
     row: &PgRow,
     type_id: &DocumentTypeId,
 ) -> Result<DocumentHeader, PersistenceError> {
@@ -172,8 +174,7 @@ pub fn map_header_row(
     let updated_at: DateTime<Utc> = row.try_get(COL_UPDATED_AT)?;
     let updated_by = parse_actor_urn(row.try_get::<&str, _>(COL_UPDATED_BY)?)?;
     let published_at: Option<DateTime<Utc>> = row.try_get(COL_PUBLISHED_AT)?;
-    let published_by =
-        parse_optional_actor_urn(row.try_get::<Option<&str>, _>(COL_PUBLISHED_BY)?)?;
+    let published_by = parse_optional_actor_urn(row.try_get::<Option<&str>, _>(COL_PUBLISHED_BY)?)?;
 
     Ok(DocumentHeader {
         id,
@@ -195,12 +196,15 @@ pub fn map_header_row(
 }
 
 /// Maps a row containing `id` and `display_title` into a `(DocumentInstanceId, String)` tuple.
-pub fn map_display_title_row(
+pub(crate) fn map_display_title_row(
     row: &PgRow,
 ) -> Result<(DocumentInstanceId, String), PersistenceError> {
     let id: Uuid = row.try_get(COL_ID)?;
     let display_title: Option<String> = row.try_get(COL_DISPLAY_TITLE)?;
-    Ok((DocumentInstanceId::new(id), display_title.unwrap_or_default()))
+    Ok((
+        DocumentInstanceId::new(id),
+        display_title.unwrap_or_default(),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +238,8 @@ fn extract_custom_field(
         }
         FieldType::Json => {
             let opt: Option<serde_json::Value> = row.try_get(col.column_name)?;
-            opt.map(|val| deserialize_json_map(val, attr_id)).transpose()
+            opt.map(|val| deserialize_json_map(val, attr_id))
+                .transpose()
         }
         FieldType::LocalizedText => {
             let opt: Option<serde_json::Value> = row.try_get(col.column_name)?;
@@ -265,22 +270,28 @@ fn extract_primitive_field(
         PrimitiveType::Integer(IntegerSize::I16) => {
             let opt: Option<i16> = row.try_get(col_name)?;
             Ok(opt.map(|i| {
-                ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(i64::from(i))))
+                ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(i64::from(
+                    i,
+                ))))
             }))
         }
         PrimitiveType::Integer(IntegerSize::I32) => {
             let opt: Option<i32> = row.try_get(col_name)?;
             Ok(opt.map(|i| {
-                ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(i64::from(i))))
+                ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(i64::from(
+                    i,
+                ))))
             }))
         }
         PrimitiveType::Integer(IntegerSize::I64) => {
             let opt: Option<i64> = row.try_get(col_name)?;
-            Ok(opt.map(|i| ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(i)))))
+            Ok(opt
+                .map(|i| ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Integer(i)))))
         }
         PrimitiveType::Decimal { .. } => {
             let opt: Option<rust_decimal::Decimal> = row.try_get(col_name)?;
-            Ok(opt.map(|d| ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Decimal(d)))))
+            Ok(opt
+                .map(|d| ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Decimal(d)))))
         }
         PrimitiveType::Date => {
             let opt: Option<chrono::NaiveDate> = row.try_get(col_name)?;
@@ -288,11 +299,14 @@ fn extract_primitive_field(
         }
         PrimitiveType::DateTime => {
             let opt: Option<DateTime<Utc>> = row.try_get(col_name)?;
-            Ok(opt.map(|dt| ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::DateTime(dt)))))
+            Ok(opt.map(|dt| {
+                ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::DateTime(dt)))
+            }))
         }
         PrimitiveType::Boolean => {
             let opt: Option<bool> = row.try_get(col_name)?;
-            Ok(opt.map(|b| ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Boolean(b)))))
+            Ok(opt
+                .map(|b| ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Boolean(b)))))
         }
     }
 }
@@ -356,7 +370,8 @@ mod tests {
         assert_eq!(st1, PublicationState::Draft);
 
         let live_meta = Some((3, now, user.clone()));
-        let st2 = resolve_draft_publication_state("modified", 4, Some(3), now, &user, live_meta).unwrap();
+        let st2 =
+            resolve_draft_publication_state("modified", 4, Some(3), now, &user, live_meta).unwrap();
         assert_eq!(
             st2,
             PublicationState::Modified {
@@ -367,7 +382,8 @@ mod tests {
             }
         );
 
-        let st3 = resolve_draft_publication_state("unpublished", 4, Some(3), now, &user, None).unwrap();
+        let st3 =
+            resolve_draft_publication_state("unpublished", 4, Some(3), now, &user, None).unwrap();
         assert_eq!(
             st3,
             PublicationState::Unpublished {

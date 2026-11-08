@@ -9,11 +9,7 @@ mod runner;
 mod service;
 mod validate;
 
-pub use config::{CliConfig, OutputFormat, RunMode, ServiceTokenConfig};
+pub use config::{CliConfig, OutputFormat, RunMode};
 pub use error::CliError;
-pub use report::{
-    CliOutcome, ConfigTestReport, DocumentTypeSummary, DryRunReport, MigrationReport,
-    ServiceReport, StaticMigrationStatus, StaticMigrationStepSummary, ValidationReport,
-};
+pub use report::{CliOutcome, DocumentTypeSummary, ServiceReport, StaticMigrationStatus};
 pub use runner::run;
-pub use service::execute_service_mode;

@@ -107,10 +107,7 @@ where
         Ok(profile)
     }
 
-    async fn sync_profile(
-        &self,
-        cmd: SyncProfileCommand,
-    ) -> Result<UserProfile, ApplicationError> {
+    async fn sync_profile(&self, cmd: SyncProfileCommand) -> Result<UserProfile, ApplicationError> {
         let now = Utc::now();
         let existing = self.repo.find_by_id(&cmd.user_id).await?;
         let profile = match existing {
@@ -158,7 +155,10 @@ mod tests {
 
         async fn find_by_ids(&self, user_ids: &[UserId]) -> Result<Vec<UserProfile>, DomainError> {
             let store = self.profiles.read().unwrap();
-            Ok(user_ids.iter().filter_map(|id| store.get(id).cloned()).collect())
+            Ok(user_ids
+                .iter()
+                .filter_map(|id| store.get(id).cloned())
+                .collect())
         }
 
         async fn list_users(
@@ -189,7 +189,12 @@ mod tests {
                 .collect();
             items.sort_by(|a, b| a.user_id.as_str().cmp(b.user_id.as_str()));
             let total = items.len() as u64;
-            Ok(Page::new(items, total, pagination.page, pagination.page_size))
+            Ok(Page::new(
+                items,
+                total,
+                pagination.page,
+                pagination.page_size,
+            ))
         }
 
         async fn save(&self, profile: &UserProfile) -> Result<(), DomainError> {
@@ -219,7 +224,9 @@ mod tests {
         let service = UserDirectoryServiceImpl::new(repo);
         let caller = user_caller("alice", vec![]);
 
-        let result = service.list_users(&caller, ListUsersCommand::default()).await;
+        let result = service
+            .list_users(&caller, ListUsersCommand::default())
+            .await;
         assert!(matches!(result, Err(ApplicationError::Unauthorized { .. })));
     }
 
@@ -229,7 +236,9 @@ mod tests {
         let service = UserDirectoryServiceImpl::new(repo);
         let caller = user_caller("admin_user", vec![admin_role()]);
 
-        let result = service.list_users(&caller, ListUsersCommand::default()).await;
+        let result = service
+            .list_users(&caller, ListUsersCommand::default())
+            .await;
         assert!(result.is_ok());
     }
 
@@ -282,7 +291,10 @@ mod tests {
             .expect("initial sync succeeds");
 
         assert_eq!(profile1.user_id, user_id);
-        assert_eq!(profile1.email.as_ref().map(|e| e.as_str()), Some("carol@example.com"));
+        assert_eq!(
+            profile1.email.as_ref().map(|e| e.as_str()),
+            Some("carol@example.com")
+        );
         assert_eq!(profile1.name.as_ref().map(|n| n.as_str()), Some("Carol A"));
 
         // 2. Subsequent sync updates profile claims
@@ -295,7 +307,10 @@ mod tests {
             .expect("second sync succeeds");
 
         assert_eq!(profile2.user_id, user_id);
-        assert_eq!(profile2.email.as_ref().map(|e| e.as_str()), Some("carol.updated@example.com"));
+        assert_eq!(
+            profile2.email.as_ref().map(|e| e.as_str()),
+            Some("carol.updated@example.com")
+        );
         assert_eq!(profile2.name.as_ref().map(|n| n.as_str()), Some("Carol B"));
         assert_eq!(profile2.first_seen_at, profile1.first_seen_at);
         assert!(profile2.last_seen_at >= profile1.last_seen_at);

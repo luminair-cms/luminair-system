@@ -60,7 +60,8 @@ mod tests {
     use super::*;
 
     fn write_test_schemas_dir() -> PathBuf {
-        let temp_dir = std::env::temp_dir().join(format!("luminair_runner_test_{}", uuid::Uuid::now_v7()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("luminair_runner_test_{}", uuid::Uuid::now_v7()));
         let doc_types_dir = temp_dir.join("document-types");
         std::fs::create_dir_all(&doc_types_dir).unwrap();
 
@@ -111,7 +112,9 @@ mod tests {
             ..CliConfig::default()
         };
 
-        let result = run(&config).await.expect("run should succeed in validate mode");
+        let result = run(&config)
+            .await
+            .expect("run should succeed in validate mode");
         match result {
             CliOutcome::Validate(report) => {
                 assert_eq!(report.default_locale, "en");
@@ -134,7 +137,9 @@ mod tests {
             ..CliConfig::default()
         };
 
-        let result = run(&config).await.expect("run should succeed in offline dry-run");
+        let result = run(&config)
+            .await
+            .expect("run should succeed in offline dry-run");
         match result {
             CliOutcome::DryRun(report) => {
                 assert!(!report.connected_to_database);

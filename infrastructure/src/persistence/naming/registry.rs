@@ -309,9 +309,10 @@ fn resolve_inverse_junction_table_name(
     target_table_name: &str,
 ) -> &'static str {
     if let Some(target_doc_type) = registry.get(&rel.target) {
-        let owning_rel = target_doc_type.relations.iter().find(|r| {
-            r.target == doc_type.id && r.relation_type.is_owning()
-        });
+        let owning_rel = target_doc_type
+            .relations
+            .iter()
+            .find(|r| r.target == doc_type.id && r.relation_type.is_owning());
         if let Some(owner) = owning_rel {
             return leak_str(junction_table_name(target_table_name, &owner.id));
         }

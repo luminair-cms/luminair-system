@@ -25,7 +25,7 @@ use crate::auth::{Caller, OnboardingUser};
 /// Payload for approving an access request and assigning roles (`POST .../approve`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApproveAccessRequestPayload {
+pub(crate) struct ApproveAccessRequestPayload {
     /// Role identifiers to grant the approved user.
     #[serde(alias = "role_ids")]
     pub role_ids: Vec<Uuid>,
@@ -34,7 +34,7 @@ pub struct ApproveAccessRequestPayload {
 /// Optional payload for rejecting an access request (`POST .../reject`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RejectAccessRequestPayload {
+pub(crate) struct RejectAccessRequestPayload {
     /// Optional administrative explanation for the rejection.
     pub reason: Option<String>,
 }
@@ -44,7 +44,7 @@ pub struct RejectAccessRequestPayload {
 // ---------------------------------------------------------------------------
 
 /// Submits an initial access request for an authenticated IdP identity (`POST /api/v1/auth/access-requests`).
-pub async fn submit_access_request<St>(
+pub(crate) async fn submit_access_request<St>(
     State(state): State<St>,
     OnboardingUser(user): OnboardingUser,
 ) -> Result<CreatedJson<AccessRequestDto>, ApiError>
@@ -57,20 +57,23 @@ where
 }
 
 /// Lists all pending access requests awaiting administrator review (`GET /api/v1/auth/access-requests`).
-pub async fn list_pending_access_requests<St>(
+pub(crate) async fn list_pending_access_requests<St>(
     State(state): State<St>,
     Caller(caller): Caller,
 ) -> Result<JsonData<Vec<AccessRequestDto>>, ApiError>
 where
     St: HasAccessRequestsService + HasAuthResolver,
 {
-    let reqs = state.access_requests_service().list_pending(&caller).await?;
+    let reqs = state
+        .access_requests_service()
+        .list_pending(&caller)
+        .await?;
     let dtos = reqs.into_iter().map(AccessRequestDto::from).collect();
     Ok(JsonData::new(dtos))
 }
 
 /// Fetches an access request by identifier (`GET /api/v1/auth/access-requests/{id}`).
-pub async fn get_access_request_by_id<St>(
+pub(crate) async fn get_access_request_by_id<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path(raw_id): Path<String>,
@@ -79,12 +82,15 @@ where
     St: HasAccessRequestsService + HasAuthResolver,
 {
     let id = parse_access_request_id(&raw_id)?;
-    let req = state.access_requests_service().get_by_id(&caller, id).await?;
+    let req = state
+        .access_requests_service()
+        .get_by_id(&caller, id)
+        .await?;
     Ok(JsonData::new(AccessRequestDto::from(req)))
 }
 
 /// Approves an access request and assigns requested roles (`POST /api/v1/auth/access-requests/{id}/approve`).
-pub async fn approve_access_request<St>(
+pub(crate) async fn approve_access_request<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path(raw_id): Path<String>,
@@ -96,13 +102,19 @@ where
     let id = parse_access_request_id(&raw_id)?;
     let role_ids = payload.role_ids.into_iter().map(RoleId::new).collect();
     let cmd = ApproveAccessRequestCommand::new(id, role_ids);
-    let assignments = state.access_requests_service().approve(&caller, cmd).await?;
-    let dtos = assignments.into_iter().map(RoleAssignmentDto::from).collect();
+    let assignments = state
+        .access_requests_service()
+        .approve(&caller, cmd)
+        .await?;
+    let dtos = assignments
+        .into_iter()
+        .map(RoleAssignmentDto::from)
+        .collect();
     Ok(JsonData::new(dtos))
 }
 
 /// Rejects a pending access request with an optional reason (`POST /api/v1/auth/access-requests/{id}/reject`).
-pub async fn reject_access_request<St>(
+pub(crate) async fn reject_access_request<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path(raw_id): Path<String>,
@@ -251,12 +263,8 @@ mod tests {
     fn test_system_context() -> &'static SystemContext {
         let registry = SchemaRegistry::new(vec![]);
         let en = LocaleId::try_new("en").expect("valid locale");
-        let config = SystemConfig::new(
-            SystemConfigId::new(Uuid::now_v7()),
-            vec![en.clone()],
-            en,
-        )
-        .expect("valid config");
+        let config = SystemConfig::new(SystemConfigId::new(Uuid::now_v7()), vec![en.clone()], en)
+            .expect("valid config");
         Box::leak(Box::new(SystemContext::new(registry, config)))
     }
 
@@ -280,7 +288,9 @@ mod tests {
         let state = MockAccessState {
             context: test_system_context(),
             resolver: Arc::new(MockAuthResolver),
-            service: Arc::new(MockAccessService { sample_request: req }),
+            service: Arc::new(MockAccessService {
+                sample_request: req,
+            }),
         };
         let user = OnboardingUser(AuthenticatedUser::new(
             UserId::try_new("usr_test").unwrap(),
@@ -301,7 +311,9 @@ mod tests {
         let state = MockAccessState {
             context: test_system_context(),
             resolver: Arc::new(MockAuthResolver),
-            service: Arc::new(MockAccessService { sample_request: req }),
+            service: Arc::new(MockAccessService {
+                sample_request: req,
+            }),
         };
         let caller = Caller(application::context::CallerContext::new(
             ActorId::User(UserId::try_new("usr_admin").unwrap()),

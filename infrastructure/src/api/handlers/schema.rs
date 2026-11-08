@@ -17,7 +17,7 @@ use crate::auth::Caller;
 // ---------------------------------------------------------------------------
 
 /// Lists all registered document types authorized for the caller (`GET /api/v1/schema/document-types`).
-pub async fn list_document_types<St>(
+pub(crate) async fn list_document_types<St>(
     State(state): State<St>,
     Caller(caller): Caller,
 ) -> Result<JsonData<Vec<DocumentTypeDto>>, ApiError>
@@ -30,7 +30,7 @@ where
 }
 
 /// Retrieves schema definition for a specific document type by ID (`GET /api/v1/schema/document-types/{id}`).
-pub async fn get_document_type<St>(
+pub(crate) async fn get_document_type<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path(raw_id): Path<String>,
@@ -45,7 +45,9 @@ where
         })
     })?;
 
-    let dt = state.schema_service().get_document_type(&caller, &type_id)?;
+    let dt = state
+        .schema_service()
+        .get_document_type(&caller, &type_id)?;
     Ok(JsonData::new(DocumentTypeDto::from(dt)))
 }
 
@@ -61,8 +63,10 @@ mod tests {
     use application::context::CallerContext;
     use domain::auth::user::{ActorId, UserId};
     use domain::common::DisplayName;
-    use domain::schema::documents::{DocumentKind, DocumentType, DocumentTypeInfo, DocumentTypeOptions};
     use domain::schema::SchemaRegistry;
+    use domain::schema::documents::{
+        DocumentKind, DocumentType, DocumentTypeInfo, DocumentTypeOptions,
+    };
     use domain::system::locale::LocaleId;
     use domain::system::{SystemConfig, SystemConfigId, SystemContext};
     use indexmap::IndexSet;

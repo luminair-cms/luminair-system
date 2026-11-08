@@ -27,10 +27,11 @@ const MAX_PAGE_SIZE: u32 = 100;
 // Query Structs
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 /// Standard pagination query parameters (`?page=1&pageSize=20`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PaginationQuery {
+struct PaginationQuery {
     pub page: Option<u32>,
     pub page_size: Option<u32>,
 }
@@ -38,7 +39,7 @@ pub struct PaginationQuery {
 /// Query parameters for listing document instances (`GET /api/v1/content/:type_id`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FindDocumentsQuery {
+pub(crate) struct FindDocumentsQuery {
     pub page: Option<u32>,
     pub page_size: Option<u32>,
     pub view: Option<String>,
@@ -48,7 +49,7 @@ pub struct FindDocumentsQuery {
 /// Query parameters for fetching a single document instance (`GET /api/v1/content/:type_id/:id`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FindByIdQuery {
+pub(crate) struct FindByIdQuery {
     pub view: Option<String>,
     pub populate: Option<String>,
 }
@@ -56,7 +57,7 @@ pub struct FindByIdQuery {
 /// Query parameters for admin studio header views (`GET /api/v1/content/:type_id/admin/headers`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AdminHeadersQuery {
+pub(crate) struct AdminHeadersQuery {
     pub page: Option<u32>,
     pub page_size: Option<u32>,
     pub status: Option<DocumentStatus>,
@@ -65,7 +66,7 @@ pub struct AdminHeadersQuery {
 /// Query parameters for listing user profiles in the directory (`GET /api/v1/auth/users`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ListUsersQuery {
+pub(crate) struct ListUsersQuery {
     pub q: Option<String>,
     pub page: Option<u32>,
     pub page_size: Option<u32>,
@@ -75,16 +76,17 @@ pub struct ListUsersQuery {
 // Inherent Implementations
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 impl PaginationQuery {
     /// Extracts bounded domain [`Pagination`] from the query.
     #[must_use]
-    pub fn pagination(&self) -> Pagination {
+    pub(crate) fn pagination(&self) -> Pagination {
         compute_bounded_pagination(self.page, self.page_size)
     }
 
     /// Converts optional page and page_size parameters into bounded domain [`Pagination`].
     #[must_use]
-    pub fn into_pagination(self) -> Pagination {
+    fn into_pagination(self) -> Pagination {
         self.pagination()
     }
 }
@@ -92,7 +94,7 @@ impl PaginationQuery {
 impl ListUsersQuery {
     /// Extracts bounded domain [`Pagination`] from the query.
     #[must_use]
-    pub fn pagination(&self) -> Pagination {
+    pub(crate) fn pagination(&self) -> Pagination {
         compute_bounded_pagination(self.page, self.page_size)
     }
 }
@@ -100,7 +102,7 @@ impl ListUsersQuery {
 impl FindDocumentsQuery {
     /// Extracts bounded domain [`Pagination`] from the query.
     #[must_use]
-    pub fn pagination(&self) -> Pagination {
+    pub(crate) fn pagination(&self) -> Pagination {
         compute_bounded_pagination(self.page, self.page_size)
     }
 
@@ -108,7 +110,7 @@ impl FindDocumentsQuery {
     ///
     /// # Errors
     /// Returns [`ApiError`] validation failure if the view name is unrecognized.
-    pub fn parse_view(&self, default_view: VersionView) -> Result<VersionView, ApiError> {
+    pub(crate) fn parse_view(&self, default_view: VersionView) -> Result<VersionView, ApiError> {
         parse_view_param(self.view.as_deref(), default_view)
     }
 
@@ -116,7 +118,10 @@ impl FindDocumentsQuery {
     ///
     /// # Errors
     /// Returns [`ApiError`] validation failure if any requested attribute is unknown.
-    pub fn parse_populate(&self, doc_type: &DocumentType) -> Result<Vec<AttributeId>, ApiError> {
+    pub(crate) fn parse_populate(
+        &self,
+        doc_type: &DocumentType,
+    ) -> Result<Vec<AttributeId>, ApiError> {
         parse_populate_param(self.populate.as_deref(), doc_type)
     }
 }
@@ -126,7 +131,7 @@ impl FindByIdQuery {
     ///
     /// # Errors
     /// Returns [`ApiError`] validation failure if the view name is unrecognized.
-    pub fn parse_view(&self, default_view: VersionView) -> Result<VersionView, ApiError> {
+    pub(crate) fn parse_view(&self, default_view: VersionView) -> Result<VersionView, ApiError> {
         parse_view_param(self.view.as_deref(), default_view)
     }
 
@@ -134,7 +139,10 @@ impl FindByIdQuery {
     ///
     /// # Errors
     /// Returns [`ApiError`] validation failure if any requested attribute is unknown.
-    pub fn parse_populate(&self, doc_type: &DocumentType) -> Result<Vec<AttributeId>, ApiError> {
+    pub(crate) fn parse_populate(
+        &self,
+        doc_type: &DocumentType,
+    ) -> Result<Vec<AttributeId>, ApiError> {
         parse_populate_param(self.populate.as_deref(), doc_type)
     }
 }
@@ -142,7 +150,7 @@ impl FindByIdQuery {
 impl AdminHeadersQuery {
     /// Extracts bounded domain [`Pagination`] from the query.
     #[must_use]
-    pub fn pagination(&self) -> Pagination {
+    pub(crate) fn pagination(&self) -> Pagination {
         compute_bounded_pagination(self.page, self.page_size)
     }
 }
@@ -155,7 +163,7 @@ impl AdminHeadersQuery {
 ///
 /// # Errors
 /// Returns [`ApiError`] 404 Not Found if the document type is unknown or invalid.
-pub fn resolve_document_type(
+pub(crate) fn resolve_document_type(
     context: &'static SystemContext,
     raw_type_id: &str,
 ) -> Result<&'static DocumentType, ApiError> {
@@ -166,26 +174,30 @@ pub fn resolve_document_type(
         })
     })?;
 
-    context
-        .find_type(&type_id)
-        .ok_or_else(|| ApiError::from(ApplicationError::Domain(DomainError::DocumentTypeNotFound(type_id))))
+    context.find_type(&type_id).ok_or_else(|| {
+        ApiError::from(ApplicationError::Domain(DomainError::DocumentTypeNotFound(
+            type_id,
+        )))
+    })
 }
 
 /// Parses and validates a raw document UUID string.
 ///
 /// # Errors
 /// Returns [`ApiError`] 400 Bad Request if the string is not a valid UUID.
-pub fn parse_instance_id(raw_id: &str) -> Result<DocumentInstanceId, ApiError> {
+pub(crate) fn parse_instance_id(raw_id: &str) -> Result<DocumentInstanceId, ApiError> {
     Uuid::parse_str(raw_id)
         .map(DocumentInstanceId::new)
-        .map_err(|_| ApiError::bad_request("invalid_uuid", format!("invalid document UUID '{raw_id}'")))
+        .map_err(|_| {
+            ApiError::bad_request("invalid_uuid", format!("invalid document UUID '{raw_id}'"))
+        })
 }
 
 /// Parses and validates a raw access request UUID string.
 ///
 /// # Errors
 /// Returns [`ApiError`] 400 Bad Request if the string is not a valid UUID.
-pub fn parse_access_request_id(raw_id: &str) -> Result<AccessRequestId, ApiError> {
+pub(crate) fn parse_access_request_id(raw_id: &str) -> Result<AccessRequestId, ApiError> {
     Uuid::parse_str(raw_id)
         .map(AccessRequestId::new)
         .map_err(|_| {
@@ -205,10 +217,7 @@ pub fn parse_access_request_id(raw_id: &str) -> Result<AccessRequestId, ApiError
 ///
 /// # Errors
 /// Returns [`ApiError`] 422 Validation error if an unrecognized view name is passed.
-pub fn parse_view_param(
-    raw: Option<&str>,
-    default_view: VersionView,
-) -> Result<VersionView, ApiError> {
+fn parse_view_param(raw: Option<&str>, default_view: VersionView) -> Result<VersionView, ApiError> {
     let Some(raw) = raw else {
         return Ok(default_view);
     };
@@ -237,7 +246,7 @@ pub fn parse_view_param(
 ///
 /// # Errors
 /// Returns [`ApiError`] 422 Validation error if any attribute does not exist on `doc_type`.
-pub fn parse_populate_param(
+pub(crate) fn parse_populate_param(
     raw: Option<&str>,
     doc_type: &DocumentType,
 ) -> Result<Vec<AttributeId>, ApiError> {
@@ -395,19 +404,37 @@ mod tests {
             page: None,
             page_size: None,
         };
-        assert_eq!(q.into_pagination(), Pagination { page: 1, page_size: 20 });
+        assert_eq!(
+            q.into_pagination(),
+            Pagination {
+                page: 1,
+                page_size: 20
+            }
+        );
 
         let q2 = PaginationQuery {
             page: Some(0),
             page_size: Some(150),
         };
-        assert_eq!(q2.into_pagination(), Pagination { page: 1, page_size: 100 });
+        assert_eq!(
+            q2.into_pagination(),
+            Pagination {
+                page: 1,
+                page_size: 100
+            }
+        );
 
         let q3 = PaginationQuery {
             page: Some(5),
             page_size: Some(0),
         };
-        assert_eq!(q3.into_pagination(), Pagination { page: 5, page_size: 1 });
+        assert_eq!(
+            q3.into_pagination(),
+            Pagination {
+                page: 5,
+                page_size: 1
+            }
+        );
     }
 
     #[test]
@@ -430,7 +457,10 @@ mod tests {
         );
 
         let err = parse_view_param(Some("archived"), VersionView::Published).unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
     }
 
     #[test]
@@ -449,7 +479,10 @@ mod tests {
         assert_eq!(specific[1].as_ref(), "tags");
 
         let err = parse_populate_param(Some("author,nonexistent"), &dt).unwrap_err();
-        assert_eq!(err.status_code(), axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
     }
 
     #[test]
@@ -489,6 +522,12 @@ mod tests {
             page_size: Some(15),
             status: Some(DocumentStatus::Published),
         };
-        assert_eq!(q.pagination(), Pagination { page: 3, page_size: 15 });
+        assert_eq!(
+            q.pagination(),
+            Pagination {
+                page: 3,
+                page_size: 15
+            }
+        );
     }
 }

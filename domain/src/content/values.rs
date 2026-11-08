@@ -561,7 +561,10 @@ mod tests {
         map2.insert(create_locale_id("de"), "Nachrichten".to_string());
 
         let mut fields2 = HashMap::new();
-        fields2.insert(create_attr_id("headline"), ContentValue::LocalizedText(map2));
+        fields2.insert(
+            create_attr_id("headline"),
+            ContentValue::LocalizedText(map2),
+        );
 
         let (_, title_fallback) =
             extract_display_identity(&doc_type, instance_id, &fields2, &create_locale_id("fr"));

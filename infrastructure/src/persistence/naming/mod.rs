@@ -4,8 +4,7 @@ mod identifiers;
 mod registry;
 mod sanitize;
 
-pub use identifiers::*;
-pub use registry::*;
-pub use sanitize::{
-    RESERVED_SQL_KEYWORDS, is_reserved_sql_keyword, join_snake_segments, kebab_to_snake,
-};
+pub(crate) use identifiers::*;
+pub use registry::SchemaNaming;
+pub(crate) use registry::*;
+pub(crate) use sanitize::{is_reserved_sql_keyword, kebab_to_snake};

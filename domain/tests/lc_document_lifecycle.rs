@@ -140,11 +140,7 @@ fn test_document_lifecycle_cases() {
 fn lc_07_new_instance_defaults() {
     let now = Utc::now();
     let alice = create_user_id("alice");
-    let inst = DocumentInstance::new(
-        create_doc_type_id("article"),
-        alice.clone(),
-        now,
-    );
+    let inst = DocumentInstance::new(create_doc_type_id("article"), alice.clone(), now);
 
     assert_eq!(inst.content.publication_state, PublicationState::Draft);
     assert_eq!(inst.audit.version, 1);

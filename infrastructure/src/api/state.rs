@@ -106,7 +106,7 @@ pub struct HttpState<
 }
 
 /// Concrete production type alias binding `HttpState` to database-backed services.
-pub type ProductionHttpState = HttpState<
+pub(crate) type ProductionHttpState = HttpState<
     DocumentsServiceImpl<SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository>,
     AccessRequestsServiceImpl<
         SqlxAccessRequestRepository,
@@ -325,9 +325,7 @@ mod tests {
     use application::errors::ApplicationError;
     use domain::auth::access_request::{AccessRequest, AccessRequestId};
     use domain::auth::role::UserRoleAssignment;
-    use domain::content::header::{
-        DocumentHeader, DocumentSnapshot, SnapshotHeader,
-    };
+    use domain::content::header::{DocumentHeader, DocumentSnapshot, SnapshotHeader};
     use domain::content::instance::DocumentInstance;
     use domain::schema::{DocumentType, DocumentTypeId, SchemaRegistry};
     use domain::system::{LocaleId, SystemConfig, SystemConfigId};
@@ -350,8 +348,12 @@ mod tests {
             &self,
             _caller: &CallerContext,
             _cmd: application::commands::user_directory::ListUsersCommand,
-        ) -> Result<domain::common::Page<domain::auth::profile::UserProfile>, ApplicationError> {
-            Ok(domain::common::Page::empty(domain::common::Pagination { page: 1, page_size: 20 }))
+        ) -> Result<domain::common::Page<domain::auth::profile::UserProfile>, ApplicationError>
+        {
+            Ok(domain::common::Page::empty(domain::common::Pagination {
+                page: 1,
+                page_size: 20,
+            }))
         }
 
         async fn get_user(

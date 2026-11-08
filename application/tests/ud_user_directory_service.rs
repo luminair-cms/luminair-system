@@ -78,10 +78,18 @@ async fn ud_02_list_users_filters_by_name_and_email_and_supports_pagination() {
         chrono::Utc::now(),
     );
 
-    domain::auth::UserProfileRepository::save(&repo, &u1).await.unwrap();
-    domain::auth::UserProfileRepository::save(&repo, &u2).await.unwrap();
-    domain::auth::UserProfileRepository::save(&repo, &u3).await.unwrap();
-    domain::auth::UserProfileRepository::save(&repo, &u4).await.unwrap();
+    domain::auth::UserProfileRepository::save(&repo, &u1)
+        .await
+        .unwrap();
+    domain::auth::UserProfileRepository::save(&repo, &u2)
+        .await
+        .unwrap();
+    domain::auth::UserProfileRepository::save(&repo, &u3)
+        .await
+        .unwrap();
+    domain::auth::UserProfileRepository::save(&repo, &u4)
+        .await
+        .unwrap();
 
     // 1. Filter by domain "acme.org"
     let page_domain = service
@@ -125,7 +133,9 @@ async fn ud_03_get_user_allows_self_lookup_without_manage_users_permission() {
     let (service, repo) = create_test_service();
     let alice_id = create_user_id("alice");
     let u1 = fixture_user_profile("alice");
-    domain::auth::UserProfileRepository::save(&repo, &u1).await.unwrap();
+    domain::auth::UserProfileRepository::save(&repo, &u1)
+        .await
+        .unwrap();
 
     let alice_caller = user_caller("alice", vec![]);
     let profile = service
@@ -142,13 +152,12 @@ async fn ud_04_get_user_denies_other_user_without_manage_users_permission() {
     let (service, repo) = create_test_service();
     let bob_id = create_user_id("bob");
     let u_bob = fixture_user_profile("bob");
-    domain::auth::UserProfileRepository::save(&repo, &u_bob).await.unwrap();
+    domain::auth::UserProfileRepository::save(&repo, &u_bob)
+        .await
+        .unwrap();
 
     let alice_caller = user_caller("alice", vec![]);
-    let err = service
-        .get_user(&alice_caller, &bob_id)
-        .await
-        .unwrap_err();
+    let err = service.get_user(&alice_caller, &bob_id).await.unwrap_err();
 
     assert!(matches!(err, ApplicationError::Unauthorized { .. }));
 }
@@ -158,7 +167,9 @@ async fn ud_05_get_user_allows_admin_to_lookup_any_user() {
     let (service, repo) = create_test_service();
     let bob_id = create_user_id("bob");
     let u_bob = fixture_user_profile("bob");
-    domain::auth::UserProfileRepository::save(&repo, &u_bob).await.unwrap();
+    domain::auth::UserProfileRepository::save(&repo, &u_bob)
+        .await
+        .unwrap();
 
     let admin_caller = user_caller("admin", vec![admin_role()]);
     let profile = service
@@ -178,7 +189,11 @@ async fn ud_06_sync_profile_creates_new_user_profile() {
     let name = DisplayName::try_new("New User").ok();
 
     let profile = service
-        .sync_profile(SyncProfileCommand::new(user_id.clone(), email.clone(), name.clone()))
+        .sync_profile(SyncProfileCommand::new(
+            user_id.clone(),
+            email.clone(),
+            name.clone(),
+        ))
         .await
         .expect("sync profile creates profile");
 
@@ -204,7 +219,11 @@ async fn ud_07_sync_profile_updates_existing_profile_and_preserves_first_seen_at
     let name2 = DisplayName::try_new("Updated Name").ok();
 
     let p2 = service
-        .sync_profile(SyncProfileCommand::new(user_id.clone(), email2.clone(), name2.clone()))
+        .sync_profile(SyncProfileCommand::new(
+            user_id.clone(),
+            email2.clone(),
+            name2.clone(),
+        ))
         .await
         .expect("second sync updates claims");
 

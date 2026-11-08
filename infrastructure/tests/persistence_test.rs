@@ -121,7 +121,10 @@ fn create_test_fields_map() -> HashMap<AttributeId, ContentValue> {
     );
 
     let mut meta = HashMap::new();
-    meta.insert("author".to_string(), PrimitiveValue::Text("Luminair".into()));
+    meta.insert(
+        "author".to_string(),
+        PrimitiveValue::Text("Luminair".into()),
+    );
     meta.insert("views".to_string(), PrimitiveValue::Integer(42));
     fields.insert(
         AttributeId::try_new("metadata").expect("valid attr id"),
@@ -130,8 +133,11 @@ fn create_test_fields_map() -> HashMap<AttributeId, ContentValue> {
     fields
 }
 
-fn create_test_relations_map(
-) -> (AttributeId, DocumentInstanceId, HashMap<AttributeId, Vec<ResolvedRelation>>) {
+fn create_test_relations_map() -> (
+    AttributeId,
+    DocumentInstanceId,
+    HashMap<AttributeId, Vec<ResolvedRelation>>,
+) {
     let cat_attr = AttributeId::try_new("category").expect("valid attr id");
     let cat_id = DocumentInstanceId::new(Uuid::now_v7());
     let mut relations = HashMap::new();
@@ -219,7 +225,10 @@ async fn setup_isolated_db() -> Option<(PgPool, &'static SystemContext, &'static
 
 async fn assert_roles_behavior(role_repo: &SqlxRoleRepository) -> (Role, Role) {
     let roles = role_repo.find_all().await.expect("find_all roles");
-    assert!(roles.len() >= 4, "expected at least 4 seeded built-in roles");
+    assert!(
+        roles.len() >= 4,
+        "expected at least 4 seeded built-in roles"
+    );
 
     let admin_role = role_repo
         .find_by_name("admin")
@@ -235,7 +244,10 @@ async fn assert_roles_behavior(role_repo: &SqlxRoleRepository) -> (Role, Role) {
         description: Some("Community moderator".to_string()),
         permissions: vec![Permission::ManageUsers, Permission::ReadDocument(None)],
     };
-    role_repo.save(&custom_role).await.expect("save custom role");
+    role_repo
+        .save(&custom_role)
+        .await
+        .expect("save custom role");
 
     let found_custom = role_repo
         .find_by_id(custom_role_id)
@@ -411,7 +423,10 @@ async fn assert_user_profile_behavior(profile_repo: &SqlxUserProfileRepository) 
         DisplayName::try_new("Alice Updated").ok(),
         later,
     );
-    profile_repo.save(&alice).await.expect("upsert alice profile");
+    profile_repo
+        .save(&alice)
+        .await
+        .expect("upsert alice profile");
 
     let updated_alice = profile_repo
         .find_by_id(&alice_id)
@@ -556,14 +571,23 @@ async fn assert_lifecycle_publish_and_relations(
     ));
 
     let pub_page = instance_repo
-        .find_by_type(article_type_id, VersionView::Published, Pagination::default(), vec![])
+        .find_by_type(
+            article_type_id,
+            VersionView::Published,
+            Pagination::default(),
+            vec![],
+        )
         .await
         .expect("find_by_type published");
     assert!(pub_page.items.iter().any(|item| item.id == article.id));
 
     let cat_attr = AttributeId::try_new("category").expect("valid attr id");
     let art_relations = instance_repo
-        .fetch_relations(article_type_id, std::slice::from_ref(&cat_attr), &[article.id])
+        .fetch_relations(
+            article_type_id,
+            std::slice::from_ref(&cat_attr),
+            &[article.id],
+        )
         .await
         .expect("fetch_relations article.category");
     let resolved_cat = art_relations
@@ -575,7 +599,11 @@ async fn assert_lifecycle_publish_and_relations(
 
     let arts_attr = AttributeId::try_new("articles").expect("valid attr id");
     let cat_relations = instance_repo
-        .fetch_relations(category_type_id, std::slice::from_ref(&arts_attr), &[category.id])
+        .fetch_relations(
+            category_type_id,
+            std::slice::from_ref(&arts_attr),
+            &[category.id],
+        )
         .await
         .expect("fetch_relations category.articles");
     let resolved_arts = cat_relations
@@ -599,10 +627,8 @@ async fn assert_lifecycle_working_edits(
         text_val("Hexagonal Architecture in Rust (Edition 2)"),
     );
 
-    let modified_display = create_article_display_values(
-        "Hexagonal Architecture in Rust (Edition 2)",
-        "Engineering",
-    );
+    let modified_display =
+        create_article_display_values("Hexagonal Architecture in Rust (Edition 2)", "Engineering");
     instance_repo
         .save_draft(
             article,
@@ -640,7 +666,12 @@ async fn assert_lifecycle_working_edits(
     ));
 
     let pub_page = instance_repo
-        .find_by_type(article_type_id, VersionView::Published, Pagination::default(), vec![])
+        .find_by_type(
+            article_type_id,
+            VersionView::Published,
+            Pagination::default(),
+            vec![],
+        )
         .await
         .expect("find_by_type published while modified");
     assert!(pub_page.items.iter().any(|item| item.id == article.id));
@@ -670,10 +701,8 @@ async fn assert_lifecycle_publish_v2_and_snapshots(
         .expect("article.publish v2");
     assert_eq!(rev2, 2);
 
-    let modified_display = create_article_display_values(
-        "Hexagonal Architecture in Rust (Edition 2)",
-        "Engineering",
-    );
+    let modified_display =
+        create_article_display_values("Hexagonal Architecture in Rust (Edition 2)", "Engineering");
     instance_repo
         .publish(
             article,
@@ -707,10 +736,8 @@ async fn assert_lifecycle_discard_and_unpublish(
     article_type_id: &DocumentTypeId,
     author_actor: &ActorId,
 ) {
-    let modified_display = create_article_display_values(
-        "Hexagonal Architecture in Rust (Edition 2)",
-        "Engineering",
-    );
+    let modified_display =
+        create_article_display_values("Hexagonal Architecture in Rust (Edition 2)", "Engineering");
     article.edit_draft(author_actor.clone(), Utc::now());
     instance_repo
         .save_draft(article, &modified_display, "Draft To Discard")
@@ -922,8 +949,7 @@ fn test_codec_roundtrip_with_loaded_schema() {
 
     let fields = create_test_fields_map();
     let json_val = serialize_fields_json(&fields).expect("serialize fields");
-    let decoded_fields =
-        deserialize_fields_json(json_val, article).expect("deserialize fields");
+    let decoded_fields = deserialize_fields_json(json_val, article).expect("deserialize fields");
     assert_eq!(fields.len(), decoded_fields.len());
 
     let title_attr = AttributeId::try_new("title").expect("valid attr id");
@@ -986,24 +1012,15 @@ async fn test_document_instance_and_snapshot_lifecycle_live() {
 
     let mut category = DocumentInstance::new(category_type_id.clone(), author_actor.clone(), now);
     let name_attr = AttributeId::try_new("name").expect("valid attr id");
-    category.set_field(
-        name_attr,
-        text_val("Engineering"),
-    );
+    category.set_field(name_attr, text_val("Engineering"));
 
     let mut article = DocumentInstance::new(article_type_id.clone(), author_actor.clone(), now);
     let title_attr = AttributeId::try_new("title").expect("valid attr id");
     let slug_attr = AttributeId::try_new("slug").expect("valid attr id");
     let cat_attr = AttributeId::try_new("category").expect("valid attr id");
 
-    article.set_field(
-        title_attr,
-        text_val("Hexagonal Architecture in Rust"),
-    );
-    article.set_field(
-        slug_attr,
-        uid_val("hexagonal-architecture-in-rust"),
-    );
+    article.set_field(title_attr, text_val("Hexagonal Architecture in Rust"));
+    article.set_field(slug_attr, uid_val("hexagonal-architecture-in-rust"));
     article.set_relations(cat_attr, vec![category.id]);
 
     assert_lifecycle_draft_creation(

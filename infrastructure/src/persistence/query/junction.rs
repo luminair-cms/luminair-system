@@ -12,15 +12,18 @@ use uuid::Uuid;
 use domain::content::instance::DocumentInstanceId;
 
 use crate::persistence::naming::StaticIden;
-use crate::persistence::query::common::{COL_ORDER_INDEX_IDEN, COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN};
+use crate::persistence::query::common::{
+    COL_ORDER_INDEX_IDEN, COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN,
+};
 
 // ---------------------------------------------------------------------------
 // Public Junction Table Query Builders
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 /// Builds a Sea-Query insert statement for a single junction link with upsert on order index.
 #[must_use]
-pub fn insert_link_query(
+pub(crate) fn insert_link_query(
     junction_iden: StaticIden,
     source_id: Uuid,
     target_id: Uuid,
@@ -52,8 +55,11 @@ pub fn insert_links_batch_query(
     }
 
     let mut stmt = Query::insert();
-    stmt.into_table(junction_iden)
-        .columns([COL_SOURCE_ID_IDEN, COL_TARGET_ID_IDEN, COL_ORDER_INDEX_IDEN]);
+    stmt.into_table(junction_iden).columns([
+        COL_SOURCE_ID_IDEN,
+        COL_TARGET_ID_IDEN,
+        COL_ORDER_INDEX_IDEN,
+    ]);
 
     for (idx, target_id) in target_ids.iter().enumerate() {
         let order_index = i32::try_from(idx).unwrap_or(i32::MAX);
@@ -75,7 +81,10 @@ pub fn insert_links_batch_query(
 
 /// Builds a delete statement removing all junction links belonging to a source instance.
 #[must_use]
-pub fn delete_links_by_source_query(junction_iden: StaticIden, source_id: Uuid) -> DeleteStatement {
+pub(crate) fn delete_links_by_source_query(
+    junction_iden: StaticIden,
+    source_id: Uuid,
+) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(junction_iden)
         .and_where(Expr::col(COL_SOURCE_ID_IDEN).eq(source_id));
@@ -84,7 +93,7 @@ pub fn delete_links_by_source_query(junction_iden: StaticIden, source_id: Uuid) 
 
 /// Builds a select query retrieving all ordered targets for a single source instance.
 #[must_use]
-pub fn select_targets_by_source_query(
+pub(crate) fn select_targets_by_source_query(
     junction_iden: StaticIden,
     source_id: Uuid,
 ) -> SelectStatement {
@@ -98,7 +107,7 @@ pub fn select_targets_by_source_query(
 
 /// Builds a batch lookup query retrieving all links for a list of parent source instance IDs.
 #[must_use]
-pub fn select_links_by_sources_query(
+pub(crate) fn select_links_by_sources_query(
     junction_iden: StaticIden,
     source_ids: &[Uuid],
 ) -> SelectStatement {
@@ -113,7 +122,7 @@ pub fn select_links_by_sources_query(
 
 /// Builds a batch lookup query retrieving all links for a list of target instance IDs (for inverse relations).
 #[must_use]
-pub fn select_links_by_targets_query(
+pub(crate) fn select_links_by_targets_query(
     junction_iden: StaticIden,
     target_ids: &[Uuid],
 ) -> SelectStatement {
@@ -143,7 +152,9 @@ mod tests {
         let u2 = Uuid::nil();
         let stmt = insert_link_query(JUNCTION_IDEN, u1, u2, 0);
         let sql = stmt.to_string(PostgresQueryBuilder);
-        assert!(sql.contains("INSERT INTO \"articles_tags_links\" (\"source_id\", \"target_id\", \"order_index\")"));
+        assert!(sql.contains(
+            "INSERT INTO \"articles_tags_links\" (\"source_id\", \"target_id\", \"order_index\")"
+        ));
         assert!(sql.contains("ON CONFLICT (\"source_id\", \"target_id\") DO UPDATE SET \"order_index\" = \"excluded\".\"order_index\""));
     }
 

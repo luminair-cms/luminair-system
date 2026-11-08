@@ -9,9 +9,7 @@ use sqlx::{AssertSqlSafe, PgConnection, PgPool, Row};
 use uuid::Uuid;
 
 use domain::auth::ActorId;
-use domain::content::header::{
-    DocumentHeader, DocumentSnapshot, DocumentStatus, VersionView,
-};
+use domain::content::header::{DocumentHeader, DocumentSnapshot, DocumentStatus, VersionView};
 use domain::content::instance::{DocumentInstance, DocumentInstanceId, PublicationState};
 use domain::content::ports::{
     DocumentInstanceRepository, FieldFilter, Page, Pagination, RelationMap,
@@ -126,7 +124,8 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
                     });
                 }
 
-                let items = fetch_published_page(&self.pool, type_naming, &filters, pagination).await?;
+                let items =
+                    fetch_published_page(&self.pool, type_naming, &filters, pagination).await?;
                 Ok(Page {
                     items,
                     total,
@@ -146,7 +145,8 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
                         });
                     }
 
-                    let items = fetch_published_page(&self.pool, type_naming, &filters, pagination).await?;
+                    let items =
+                        fetch_published_page(&self.pool, type_naming, &filters, pagination).await?;
                     return Ok(Page {
                         items,
                         total,
@@ -155,7 +155,8 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
                     });
                 }
 
-                let page = fetch_working_page(&self.pool, type_naming, &filters, pagination).await?;
+                let page =
+                    fetch_working_page(&self.pool, type_naming, &filters, pagination).await?;
                 Ok(page)
             }
         }
@@ -183,14 +184,9 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
             });
         }
 
-        let mut items = fetch_admin_headers_page(
-            &self.pool,
-            doc_type,
-            type_naming,
-            pagination,
-            status_filter,
-        )
-        .await?;
+        let mut items =
+            fetch_admin_headers_page(&self.pool, doc_type, type_naming, pagination, status_filter)
+                .await?;
 
         populate_header_relational_targets(&self.pool, doc_type, type_naming, &mut items).await?;
 

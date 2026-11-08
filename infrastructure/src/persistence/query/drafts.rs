@@ -9,14 +9,13 @@ use uuid::Uuid;
 
 use domain::schema::DocumentTypeId;
 
-use crate::persistence::naming::StaticIden;
 use super::common::{
     COL_CONTENT_IDEN, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN, COL_DISPLAY_TITLE_IDEN,
     COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN,
-    COL_LAST_PUBLISHED_REVISION_IDEN, COL_RELATIONS_IDEN, COL_SCHEMA_VERSION_IDEN,
-    COL_STATUS_IDEN, COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN, COL_VERSION_IDEN,
-    TABLE_DOCUMENT_DRAFTS_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN, COL_RELATIONS_IDEN, COL_SCHEMA_VERSION_IDEN, COL_STATUS_IDEN,
+    COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN, COL_VERSION_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
 };
+use crate::persistence::naming::StaticIden;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -58,7 +57,7 @@ const DRAFT_UPDATE_COLUMNS: [StaticIden; 10] = [
 
 /// Parameters for upserting a document working draft into `document_drafts`.
 #[derive(Debug, Clone)]
-pub struct DraftUpsertParams<'a> {
+pub(crate) struct DraftUpsertParams<'a> {
     pub id: Uuid,
     pub document_type_id: &'a DocumentTypeId,
     pub display_values_json: serde_json::Value,
@@ -81,7 +80,7 @@ pub struct DraftUpsertParams<'a> {
 
 /// Builds a `SELECT * FROM document_drafts WHERE document_type_id = $1 AND id = $2` query.
 #[must_use]
-pub fn select_draft_by_id_query(type_id: &DocumentTypeId, id: Uuid) -> SelectStatement {
+pub(crate) fn select_draft_by_id_query(type_id: &DocumentTypeId, id: Uuid) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .column(Asterisk)
@@ -92,7 +91,7 @@ pub fn select_draft_by_id_query(type_id: &DocumentTypeId, id: Uuid) -> SelectSta
 
 /// Builds a `SELECT * FROM document_drafts WHERE document_type_id = $1 ORDER BY updated_at DESC` query.
 #[must_use]
-pub fn select_drafts_by_type_query(type_id: &DocumentTypeId) -> SelectStatement {
+pub(crate) fn select_drafts_by_type_query(type_id: &DocumentTypeId) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .column(Asterisk)
@@ -103,7 +102,7 @@ pub fn select_drafts_by_type_query(type_id: &DocumentTypeId) -> SelectStatement 
 
 /// Builds an upsert statement into `document_drafts` with `ON CONFLICT (document_type_id, id) DO UPDATE`.
 #[must_use]
-pub fn upsert_draft_query(params: DraftUpsertParams<'_>) -> InsertStatement {
+pub(crate) fn upsert_draft_query(params: DraftUpsertParams<'_>) -> InsertStatement {
     let mut stmt = Query::insert();
     stmt.into_table(TABLE_DOCUMENT_DRAFTS_IDEN)
         .columns(DRAFT_INSERT_COLUMNS)
@@ -133,7 +132,7 @@ pub fn upsert_draft_query(params: DraftUpsertParams<'_>) -> InsertStatement {
 
 /// Builds a `DELETE FROM document_drafts WHERE document_type_id = $1 AND id = $2` query.
 #[must_use]
-pub fn delete_draft_query(type_id: &DocumentTypeId, id: Uuid) -> DeleteStatement {
+pub(crate) fn delete_draft_query(type_id: &DocumentTypeId, id: Uuid) -> DeleteStatement {
     let mut stmt = Query::delete();
     stmt.from_table(TABLE_DOCUMENT_DRAFTS_IDEN)
         .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
@@ -143,7 +142,7 @@ pub fn delete_draft_query(type_id: &DocumentTypeId, id: Uuid) -> DeleteStatement
 
 /// Builds a `SELECT 1 FROM document_drafts WHERE document_type_id = $1 LIMIT 1` existence probe query.
 #[must_use]
-pub fn exists_draft_for_type_query(type_id: &DocumentTypeId) -> SelectStatement {
+pub(crate) fn exists_draft_for_type_query(type_id: &DocumentTypeId) -> SelectStatement {
     let mut stmt = Query::select();
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .expr(Expr::val(1))

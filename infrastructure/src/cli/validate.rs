@@ -37,10 +37,8 @@ pub(super) fn execute_validate_mode(
 // ---------------------------------------------------------------------------
 
 fn extract_document_summaries(context: &SystemContext) -> Vec<DocumentTypeSummary> {
-    let mut summaries: Vec<DocumentTypeSummary> = context
-        .all_types()
-        .map(map_document_summary)
-        .collect();
+    let mut summaries: Vec<DocumentTypeSummary> =
+        context.all_types().map(map_document_summary).collect();
     summaries.sort_by(|a, b| a.id.cmp(&b.id));
     summaries
 }
@@ -132,9 +130,12 @@ mod tests {
             LocaleId::try_new("uk").unwrap(),
         ];
         let default_locale = LocaleId::try_new("en").unwrap();
-        let config =
-            SystemConfig::new(SystemConfigId::new(uuid::Uuid::now_v7()), locales, default_locale)
-                .unwrap();
+        let config = SystemConfig::new(
+            SystemConfigId::new(uuid::Uuid::now_v7()),
+            locales,
+            default_locale,
+        )
+        .unwrap();
 
         Box::leak(Box::new(SystemContext::new(registry, config)))
     }

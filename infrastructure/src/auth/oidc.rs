@@ -13,9 +13,10 @@ use crate::auth::error::AuthError;
 // Types
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 /// Configuration parameters for OpenID Connect token validation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OidcConfig {
+struct OidcConfig {
     pub issuer: Option<String>,
     pub audience: Option<String>,
     pub hmac_secret: Option<String>,
@@ -53,10 +54,11 @@ enum ValidatorInner {
 // Implementations
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 impl OidcConfig {
     /// Creates a default OIDC configuration with optional issuer and audience.
     #[must_use]
-    pub const fn new(issuer: Option<String>, audience: Option<String>) -> Self {
+    pub(crate) const fn new(issuer: Option<String>, audience: Option<String>) -> Self {
         Self {
             issuer,
             audience,
@@ -70,7 +72,7 @@ impl OidcConfig {
     ///
     /// # Errors
     /// Returns [`AuthError::InvalidToken`] if RSA PEM decoding fails or if configuration lacks keys.
-    pub fn build_validator(&self) -> Result<OidcTokenValidator, AuthError> {
+    fn build_validator(&self) -> Result<OidcTokenValidator, AuthError> {
         if self.disabled {
             return Ok(OidcTokenValidator::disabled());
         }
@@ -262,10 +264,7 @@ mod tests {
             user.email.as_ref().map(AsRef::as_ref),
             Some("alice@example.com")
         );
-        assert_eq!(
-            user.name.as_ref().map(AsRef::as_ref),
-            Some("Alice User")
-        );
+        assert_eq!(user.name.as_ref().map(AsRef::as_ref), Some("Alice User"));
     }
 
     #[test]
@@ -273,14 +272,8 @@ mod tests {
         let secret = b"my-super-secret-key-that-is-long-enough";
         let exp = current_timestamp_secs() - 3600; // 1 hour in the past
 
-        let token = OidcTokenValidator::encode_hs256_token(
-            secret,
-            "usr_bob",
-            None,
-            None,
-            exp,
-        )
-        .expect("token encoding");
+        let token = OidcTokenValidator::encode_hs256_token(secret, "usr_bob", None, None, exp)
+            .expect("token encoding");
 
         let validator = OidcTokenValidator::new_hs256(secret, None, None);
         let result = validator.verify_token(&token);
@@ -293,14 +286,9 @@ mod tests {
         let secret_b = b"secret-b-key-which-is-different-1234567";
         let exp = current_timestamp_secs() + 3600;
 
-        let token = OidcTokenValidator::encode_hs256_token(
-            secret_a,
-            "usr_charlie",
-            None,
-            None,
-            exp,
-        )
-        .expect("token encoding");
+        let token =
+            OidcTokenValidator::encode_hs256_token(secret_a, "usr_charlie", None, None, exp)
+                .expect("token encoding");
 
         let validator = OidcTokenValidator::new_hs256(secret_b, None, None);
         let result = validator.verify_token(&token);
@@ -322,7 +310,9 @@ mod tests {
         .expect("token encoding");
 
         let validator = OidcTokenValidator::disabled();
-        let user = validator.verify_token(&token).expect("disabled validator accepts token");
+        let user = validator
+            .verify_token(&token)
+            .expect("disabled validator accepts token");
         assert_eq!(user.user_id.as_ref(), "usr_dev");
     }
 

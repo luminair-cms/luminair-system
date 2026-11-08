@@ -21,14 +21,14 @@ use crate::auth::resolver::AuthContextResolver;
 /// Handlers requesting `Caller` are protected endpoints requiring valid credentials
 /// and active role assignments. Unassigned users fail with 403 onboarding errors.
 #[derive(Debug, Clone)]
-pub struct Caller(pub CallerContext);
+pub(crate) struct Caller(pub CallerContext);
 
 /// Axum extractor for resolving the authenticated user identity during initial onboarding.
 ///
 /// Handlers requesting `OnboardingUser` permit authenticated IdP users who do not
 /// yet have assigned system roles (e.g. submitting an access request).
 #[derive(Debug, Clone)]
-pub struct OnboardingUser(pub AuthenticatedUser);
+pub(crate) struct OnboardingUser(pub AuthenticatedUser);
 
 // ---------------------------------------------------------------------------
 // Trait Implementations
@@ -40,10 +40,7 @@ where
 {
     type Rejection = ApiError;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &St,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &St) -> Result<Self, Self::Rejection> {
         let auth_header = extract_auth_header(parts)?;
         let caller = state
             .auth_resolver()
@@ -60,10 +57,7 @@ where
 {
     type Rejection = ApiError;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &St,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &St) -> Result<Self, Self::Rejection> {
         let auth_header = extract_auth_header(parts)?;
         let user = state
             .auth_resolver()
@@ -206,7 +200,10 @@ mod tests {
         let caller = Caller::from_request_parts(&mut parts, &state)
             .await
             .expect("caller should resolve");
-        assert_eq!(caller.0.actor, ActorId::User(UserId::try_new("usr_test").unwrap()));
+        assert_eq!(
+            caller.0.actor,
+            ActorId::User(UserId::try_new("usr_test").unwrap())
+        );
     }
 
     #[tokio::test]

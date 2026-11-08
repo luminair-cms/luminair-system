@@ -2,13 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use sea_query::{Asterisk, Expr, ExprTrait, Query};
-use sqlx::{AssertSqlSafe, PgPool, Row, Transaction};
-use uuid::Uuid;
 use domain::content::header::{DocumentHeader, DocumentStatus};
 use domain::content::instance::{DocumentInstance, DocumentInstanceId, ResolvedRelation};
 use domain::content::ports::RelationMap;
 use domain::schema::{AttributeId, DocumentType};
+use sea_query::{Asterisk, Expr, ExprTrait, Query};
+use sqlx::{AssertSqlSafe, PgPool, Row, Transaction};
+use uuid::Uuid;
 
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{
@@ -16,8 +16,8 @@ use crate::persistence::naming::{
     SchemaNaming,
 };
 use crate::persistence::query::common::{
-    compile_delete, compile_insert, compile_select, COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN,
-    COL_RELATIONS_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN, COL_RELATIONS_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
+    compile_delete, compile_insert, compile_select,
 };
 use crate::persistence::query::junction::{
     delete_links_by_source_query, insert_links_batch_query, select_links_by_sources_query,
@@ -30,7 +30,7 @@ use crate::persistence::repositories::mappers::{map_draft_row, map_wide_table_ro
 // ---------------------------------------------------------------------------
 
 /// Synchronizes all owning relations for a document instance within an existing transaction.
-pub async fn sync_owning_relations_in_tx(
+pub(crate) async fn sync_owning_relations_in_tx(
     tx: &mut Transaction<'_, sqlx::Postgres>,
     type_naming: &DocumentTypeNaming,
     instance: &DocumentInstance,
@@ -50,7 +50,7 @@ pub async fn sync_owning_relations_in_tx(
 }
 
 /// Loads all owning relational targets for a single instance from their junction tables.
-pub async fn load_owning_relations_for_instance(
+pub(crate) async fn load_owning_relations_for_instance(
     pool: &PgPool,
     type_naming: &DocumentTypeNaming,
     instance_id: Uuid,
@@ -72,7 +72,7 @@ pub async fn load_owning_relations_for_instance(
 }
 
 /// Batch loads all owning relational targets for multiple source instances.
-pub async fn load_owning_relations_batch(
+pub(crate) async fn load_owning_relations_batch(
     pool: &PgPool,
     type_naming: &DocumentTypeNaming,
     source_ids: &[Uuid],
@@ -115,7 +115,7 @@ pub async fn load_owning_relations_batch(
 }
 
 /// Performs two-phase batch relation loading for `DocumentInstanceRepository::fetch_relations`.
-pub async fn batch_fetch_relations(
+pub(crate) async fn batch_fetch_relations(
     pool: &PgPool,
     naming: &'static SchemaNaming,
     type_naming: &DocumentTypeNaming,
@@ -149,7 +149,7 @@ pub async fn batch_fetch_relations(
 }
 
 /// Batch populates `header.relational_display_target` for headers with relational display fields.
-pub async fn populate_header_relational_targets(
+pub(crate) async fn populate_header_relational_targets(
     pool: &PgPool,
     doc_type: &DocumentType,
     type_naming: &DocumentTypeNaming,
@@ -166,7 +166,8 @@ pub async fn populate_header_relational_targets(
     };
 
     let (draft_ids, pub_ids) = partition_header_ids(headers);
-    let draft_targets = fetch_draft_relational_targets(pool, type_naming, &draft_ids, &rel_def.id).await?;
+    let draft_targets =
+        fetch_draft_relational_targets(pool, type_naming, &draft_ids, &rel_def.id).await?;
     let pub_targets = fetch_published_relational_targets(pool, rel_naming, &pub_ids).await?;
 
     for header in headers {
@@ -363,8 +364,7 @@ async fn fetch_draft_target_instances(
     stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
         .column(Asterisk)
         .and_where(
-            Expr::col(COL_DOCUMENT_TYPE_ID_IDEN)
-                .eq(target_type_naming.document_type_id.as_ref()),
+            Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(target_type_naming.document_type_id.as_ref()),
         )
         .and_where(Expr::col(COL_ID_IDEN).is_in(missing.to_vec()));
 
@@ -401,9 +401,7 @@ fn assemble_parent_relation_map(
 // Private Helpers: Header Relational Targets
 // ---------------------------------------------------------------------------
 
-fn partition_header_ids(
-    headers: &[DocumentHeader],
-) -> (Vec<Uuid>, Vec<Uuid>) {
+fn partition_header_ids(headers: &[DocumentHeader]) -> (Vec<Uuid>, Vec<Uuid>) {
     let mut draft_ids = Vec::new();
     let mut pub_ids = Vec::new();
     for header in headers {
@@ -603,6 +601,9 @@ mod tests {
         let invalid_uuid_json = serde_json::json!({
             "category": ["not-a-valid-uuid"]
         });
-        assert_eq!(extract_first_relation_target(&invalid_uuid_json, &attr), None);
+        assert_eq!(
+            extract_first_relation_target(&invalid_uuid_json, &attr),
+            None
+        );
     }
 }

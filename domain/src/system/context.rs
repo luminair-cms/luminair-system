@@ -50,7 +50,7 @@ impl SystemContext {
 mod tests {
     use super::*;
     use crate::test_support::{
-        DocumentTypeBuilder, fixture_system_config, create_doc_type_id, create_locales,
+        DocumentTypeBuilder, create_doc_type_id, create_locales, fixture_system_config,
     };
 
     #[test]

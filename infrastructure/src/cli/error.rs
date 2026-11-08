@@ -76,7 +76,10 @@ mod tests {
             path: PathBuf::from("config.json"),
             source: io_err,
         };
-        assert!(err.to_string().contains("failed to access file 'config.json'"));
+        assert!(
+            err.to_string()
+                .contains("failed to access file 'config.json'")
+        );
     }
 
     #[test]
@@ -86,9 +89,10 @@ mod tests {
             path: PathBuf::from("config.json"),
             source: json_err,
         };
-        assert!(err
-            .to_string()
-            .contains("failed to parse JSON config 'config.json'"));
+        assert!(
+            err.to_string()
+                .contains("failed to parse JSON config 'config.json'")
+        );
     }
 
     #[test]

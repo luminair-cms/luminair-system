@@ -110,11 +110,7 @@ impl TestFixture {
         let service_id = ServiceId::try_new("admin-daemon").expect("valid service id");
         service_tokens.register(&service_token, service_id, vec![admin_role_id]);
 
-        let oidc_validator = Arc::new(OidcTokenValidator::new_hs256(
-            TEST_JWT_SECRET,
-            None,
-            None,
-        ));
+        let oidc_validator = Arc::new(OidcTokenValidator::new_hs256(TEST_JWT_SECRET, None, None));
 
         let resolver = Arc::new(DefaultAuthResolver::new(
             oidc_validator,
@@ -210,7 +206,9 @@ fn build_system_context() -> SystemContext {
         .with_title("Articles")
         .with_field(text_field("title").required(true))
         .with_field(text_field("content").required(false))
-        .with_display_fields(vec![AttributeId::try_new("title").expect("valid title attr")])
+        .with_display_fields(vec![
+            AttributeId::try_new("title").expect("valid title attr"),
+        ])
         .with_relation(RelationDefinition {
             id: AttributeId::try_new("tags").expect("valid tags attr"),
             relation_type: RelationType::HasMany,
@@ -271,11 +269,7 @@ async fn test_02_authentication_and_unauthenticated_rfc9457_errors() {
     // 1. Missing Authorization header -> 401 with RFC 9457 problem details
     let res_missing = fixture.server.get("/api/v1/system/config").await;
     res_missing.assert_status_unauthorized();
-    assert!(
-        res_missing
-            .content_type()
-            .starts_with(PROBLEM_CONTENT_TYPE)
-    );
+    assert!(res_missing.content_type().starts_with(PROBLEM_CONTENT_TYPE));
 
     let body_missing: Value = res_missing.json();
     assert_eq!(body_missing["code"], "unauthenticated");
@@ -387,10 +381,7 @@ async fn test_03_onboarding_lifecycle_and_rbac_flow() {
     res_reject.assert_status_ok();
     let reject_body: Value = res_reject.json();
     assert_eq!(reject_body["data"]["status"]["status"], "rejected");
-    assert_eq!(
-        reject_body["data"]["status"]["reason"],
-        "Wrong department"
-    );
+    assert_eq!(reject_body["data"]["status"]["reason"], "Wrong department");
 
     // 7. Rejected Alice calling protected endpoint -> 403 access_rejected
     let res_rejected = fixture
@@ -419,7 +410,9 @@ async fn test_03_onboarding_lifecycle_and_rbac_flow() {
 
     let res_approve = fixture
         .server
-        .post(&format!("/api/v1/auth/access-requests/{bob_req_id}/approve"))
+        .post(&format!(
+            "/api/v1/auth/access-requests/{bob_req_id}/approve"
+        ))
         .add_header("authorization", fixture.admin_bearer())
         .json(&json!({"roleIds": [*fixture.editor_role_id]}))
         .await;
@@ -548,7 +541,11 @@ async fn test_06_content_validation_and_occ_conflicts() {
     let invalid_params = unknown_body["invalid_params"]
         .as_array()
         .expect("invalid_params");
-    assert!(invalid_params.iter().any(|p| p["code"] == "unknown_attribute"));
+    assert!(
+        invalid_params
+            .iter()
+            .any(|p| p["code"] == "unknown_attribute")
+    );
 
     // 2. Validation failure: invalid field value type -> 422
     let res_type_err = fixture

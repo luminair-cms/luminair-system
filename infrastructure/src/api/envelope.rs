@@ -14,7 +14,7 @@ use domain::content::Pagination;
 /// Standard success envelope wrapping payload data: `{"data": T}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct JsonData<T> {
+pub(crate) struct JsonData<T> {
     /// Inner payload data.
     pub data: T,
 }
@@ -22,7 +22,7 @@ pub struct JsonData<T> {
 /// Resource creation envelope returning HTTP `201 Created` with payload: `{"data": T}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreatedJson<T> {
+pub(crate) struct CreatedJson<T> {
     /// Created resource data.
     pub data: T,
 }
@@ -30,7 +30,7 @@ pub struct CreatedJson<T> {
 /// Pagination metadata accompanying paged collections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PaginationMeta {
+pub(crate) struct PaginationMeta {
     /// Current 1-based page number.
     pub page: u32,
     /// Number of items requested per page.
@@ -44,7 +44,7 @@ pub struct PaginationMeta {
 /// Paginated collection envelope returning `{"data": [...], "meta": {...}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PagedJson<T> {
+pub(crate) struct PagedJson<T> {
     /// Current page items.
     pub data: Vec<T>,
     /// Pagination metadata.
@@ -58,7 +58,7 @@ pub struct PagedJson<T> {
 impl<T> JsonData<T> {
     /// Wraps payload data in a standard success envelope.
     #[must_use]
-    pub const fn new(data: T) -> Self {
+    pub(crate) const fn new(data: T) -> Self {
         Self { data }
     }
 }
@@ -66,7 +66,7 @@ impl<T> JsonData<T> {
 impl<T> CreatedJson<T> {
     /// Wraps payload data in a 201 Created envelope.
     #[must_use]
-    pub const fn new(data: T) -> Self {
+    pub(crate) const fn new(data: T) -> Self {
         Self { data }
     }
 }
@@ -74,7 +74,7 @@ impl<T> CreatedJson<T> {
 impl PaginationMeta {
     /// Computes pagination metadata from requested pagination parameters and total item count.
     #[must_use]
-    pub fn new(pagination: Pagination, total: u64) -> Self {
+    pub(crate) fn new(pagination: Pagination, total: u64) -> Self {
         let total_pages = calculate_total_pages(pagination.page_size, total);
         Self {
             page: pagination.page,
@@ -88,7 +88,7 @@ impl PaginationMeta {
 impl<T> PagedJson<T> {
     /// Constructs a paginated response envelope from items, requested pagination, and total count.
     #[must_use]
-    pub fn new(data: Vec<T>, pagination: Pagination, total: u64) -> Self {
+    pub(crate) fn new(data: Vec<T>, pagination: Pagination, total: u64) -> Self {
         Self {
             data,
             meta: PaginationMeta::new(pagination, total),

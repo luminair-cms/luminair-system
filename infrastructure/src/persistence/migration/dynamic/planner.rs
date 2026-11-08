@@ -58,7 +58,9 @@ impl MigrationPlan {
 ///
 /// # Errors
 /// Returns [`PlannerError::CircularDependency`] if a cycle of foreign key references is detected.
-pub(super) fn plan_migrations(raw_steps: Vec<MigrationStep>) -> Result<MigrationPlan, PlannerError> {
+pub(super) fn plan_migrations(
+    raw_steps: Vec<MigrationStep>,
+) -> Result<MigrationPlan, PlannerError> {
     let partitioned = partition_steps(raw_steps);
     let ordered_create_tables = sort_create_tables(partitioned.create_tables)?;
 
@@ -193,10 +195,8 @@ fn sort_create_tables(tables: Vec<TableDefinition>) -> Result<Vec<TableDefinitio
         return Err(PlannerError::CircularDependency(cycles));
     }
 
-    let mut map: std::collections::HashMap<String, TableDefinition> = tables
-        .into_iter()
-        .map(|t| (t.name.clone(), t))
-        .collect();
+    let mut map: std::collections::HashMap<String, TableDefinition> =
+        tables.into_iter().map(|t| (t.name.clone(), t)).collect();
 
     let ordered = ordered_names
         .into_iter()
@@ -305,6 +305,8 @@ mod tests {
         ];
 
         let err = plan_migrations(raw).unwrap_err();
-        assert!(matches!(err, PlannerError::CircularDependency(tables) if tables.contains(&"t1".to_string()) && tables.contains(&"t2".to_string())));
+        assert!(
+            matches!(err, PlannerError::CircularDependency(tables) if tables.contains(&"t1".to_string()) && tables.contains(&"t2".to_string()))
+        );
     }
 }

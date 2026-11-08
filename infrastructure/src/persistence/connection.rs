@@ -15,7 +15,7 @@ use crate::persistence::error::PersistenceError;
 
 /// Connection target classification parsed from a connection string.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConnectionTarget {
+enum ConnectionTarget {
     /// Standard PostgreSQL instance (local, Docker, or CI).
     Postgres {
         /// Full connection string.
@@ -35,7 +35,7 @@ pub enum ConnectionTarget {
 }
 
 /// Dynamic authentication token provider for Amazon Aurora DSQL.
-pub trait DsqlTokenProvider: Send + Sync {
+trait DsqlTokenProvider: Send + Sync {
     /// Generates a short-lived IAM authentication token for the given cluster and region.
     fn generate_auth_token(
         &self,
@@ -44,30 +44,33 @@ pub trait DsqlTokenProvider: Send + Sync {
     ) -> impl Future<Output = Result<String, PersistenceError>> + Send;
 }
 
+#[cfg(test)]
 /// Static token provider returning a fixed string (primarily for testing and offline development).
 #[derive(Debug, Clone)]
-pub struct StaticDsqlTokenProvider {
+struct StaticDsqlTokenProvider {
     token: String,
 }
 
 /// Environment-driven token provider reading `LUMINAIR_DSQL_AUTH_TOKEN` with local test fallback.
 #[derive(Debug, Default, Clone)]
-pub struct EnvironmentDsqlTokenProvider;
+struct EnvironmentDsqlTokenProvider;
 
 // ---------------------------------------------------------------------------
 // Trait Implementations
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 impl StaticDsqlTokenProvider {
     /// Creates a new static token provider.
     #[must_use]
-    pub fn new(token: impl Into<String>) -> Self {
+    pub(crate) fn new(token: impl Into<String>) -> Self {
         Self {
             token: token.into(),
         }
     }
 }
 
+#[cfg(test)]
 impl DsqlTokenProvider for StaticDsqlTokenProvider {
     async fn generate_auth_token(
         &self,
@@ -96,7 +99,7 @@ impl DsqlTokenProvider for EnvironmentDsqlTokenProvider {
 // ---------------------------------------------------------------------------
 
 /// Creates a new PostgreSQL or Aurora DSQL connection pool using environment token resolution.
-pub async fn create_connection_pool(
+pub(crate) async fn create_connection_pool(
     database_url: &str,
     max_connections: u32,
 ) -> Result<PgPool, PersistenceError> {
@@ -109,7 +112,7 @@ pub async fn create_connection_pool(
 }
 
 /// Creates a new connection pool using a custom [`DsqlTokenProvider`] for IAM credentials.
-pub async fn create_connection_pool_with_provider<P>(
+async fn create_connection_pool_with_provider<P>(
     database_url: &str,
     max_connections: u32,
     provider: &P,
@@ -140,7 +143,7 @@ where
 }
 
 /// Classifies a database connection URL into [`ConnectionTarget::Postgres`] or [`ConnectionTarget::AuroraDsql`].
-pub fn detect_connection_target(url_str: &str) -> Result<ConnectionTarget, PersistenceError> {
+fn detect_connection_target(url_str: &str) -> Result<ConnectionTarget, PersistenceError> {
     let parsed = Url::parse(url_str).map_err(|err| {
         PersistenceError::Configuration(format!("invalid database URL '{url_str}': {err}"))
     })?;
@@ -279,7 +282,8 @@ mod tests {
 
     #[test]
     fn test_detect_aurora_dsql_connection_target_with_query_param() {
-        let url = "postgres://custom_user:pass@mydb.internal/app_db?dsql=true&region=ap-northeast-1";
+        let url =
+            "postgres://custom_user:pass@mydb.internal/app_db?dsql=true&region=ap-northeast-1";
         let target = detect_connection_target(url).expect("valid dsql URL");
         assert_eq!(
             target,

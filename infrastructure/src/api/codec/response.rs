@@ -32,19 +32,19 @@ use domain::system::locale::LocaleId;
 
 /// Streaming serializer wrapper for a fields map.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SerFieldsMap(pub HashMap<AttributeId, ContentValue>);
+pub(crate) struct SerFieldsMap(pub HashMap<AttributeId, ContentValue>);
 
 /// Streaming serializer wrapper for a [`ContentValue`] reference.
 #[derive(Debug, Clone, Copy)]
-pub struct SerContentValue<'a>(pub &'a ContentValue);
+struct SerContentValue<'a>(pub &'a ContentValue);
 
 /// Streaming serializer wrapper for a [`DomainValue`] reference.
 #[derive(Debug, Clone, Copy)]
-pub struct SerDomainValue<'a>(pub &'a DomainValue);
+struct SerDomainValue<'a>(pub &'a DomainValue);
 
 /// Streaming serializer wrapper for a [`PrimitiveValue`] reference.
 #[derive(Debug, Clone, Copy)]
-pub struct SerPrimitiveValue<'a>(pub &'a PrimitiveValue);
+struct SerPrimitiveValue<'a>(pub &'a PrimitiveValue);
 
 // ---------------------------------------------------------------------------
 // Response DTO Types
@@ -53,7 +53,7 @@ pub struct SerPrimitiveValue<'a>(pub &'a PrimitiveValue);
 /// Full document instance DTO for content management and editing responses.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentInstanceDto {
+pub(crate) struct DocumentInstanceDto {
     pub id: DocumentInstanceId,
     pub document_type_id: DocumentTypeId,
     pub fields: SerFieldsMap,
@@ -66,8 +66,12 @@ pub struct DocumentInstanceDto {
 
 /// Publication lifecycle state DTO.
 #[derive(Debug, serde::Serialize)]
-#[serde(tag = "status", rename_all = "snake_case", rename_all_fields = "camelCase")]
-pub enum PublicationStateDto {
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub(crate) enum PublicationStateDto {
     Draft,
     Published {
         revision: u32,
@@ -90,7 +94,7 @@ pub enum PublicationStateDto {
 /// Audit trail metadata DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuditTrailDto {
+pub(crate) struct AuditTrailDto {
     pub created_at: DateTime<Utc>,
     pub created_by: ActorId,
     pub updated_at: DateTime<Utc>,
@@ -101,7 +105,7 @@ pub struct AuditTrailDto {
 /// Lightweight document header projection DTO for listings and table views.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentHeaderDto {
+pub(crate) struct DocumentHeaderDto {
     pub id: DocumentInstanceId,
     pub document_type_id: DocumentTypeId,
     pub display_values: IndexMap<AttributeId, String>,
@@ -128,7 +132,7 @@ pub struct DocumentHeaderDto {
 /// Historical document revision snapshot DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentSnapshotDto {
+pub(crate) struct DocumentSnapshotDto {
     pub id: SnapshotId,
     pub document_type_id: DocumentTypeId,
     pub document_id: DocumentInstanceId,
@@ -143,7 +147,7 @@ pub struct DocumentSnapshotDto {
 /// Historical revision snapshot header listing DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SnapshotHeaderDto {
+pub(crate) struct SnapshotHeaderDto {
     pub id: SnapshotId,
     pub document_type_id: DocumentTypeId,
     pub document_id: DocumentInstanceId,
@@ -156,7 +160,7 @@ pub struct SnapshotHeaderDto {
 /// Document type schema definition DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentTypeDto {
+pub(crate) struct DocumentTypeDto {
     pub id: DocumentTypeId,
     pub kind: DocumentKind,
     pub info: DocumentTypeInfoDto,
@@ -168,7 +172,7 @@ pub struct DocumentTypeDto {
 /// Metadata describing a document type.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentTypeInfoDto {
+pub(crate) struct DocumentTypeInfoDto {
     pub title: String,
     pub singular_name: DocumentTypeId,
     pub plural_name: DocumentTypeId,
@@ -180,14 +184,14 @@ pub struct DocumentTypeInfoDto {
 /// Lifecycle options for a document type.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DocumentTypeOptionsDto {
+pub(crate) struct DocumentTypeOptionsDto {
     pub draft_and_publish: bool,
 }
 
 /// Schema field definition DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FieldDefinitionDto {
+pub(crate) struct FieldDefinitionDto {
     pub id: AttributeId,
     #[serde(rename = "type")]
     pub field_type: &'static str,
@@ -204,7 +208,7 @@ pub struct FieldDefinitionDto {
 /// Field constraint descriptor DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum FieldConstraintDto {
+pub(crate) enum FieldConstraintDto {
     Pattern(String),
     MinLength(usize),
     MaxLength(usize),
@@ -217,7 +221,7 @@ pub enum FieldConstraintDto {
 /// Schema relation definition DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RelationDefinitionDto {
+pub(crate) struct RelationDefinitionDto {
     pub id: AttributeId,
     pub relation_type: RelationType,
     pub target: DocumentTypeId,
@@ -226,7 +230,7 @@ pub struct RelationDefinitionDto {
 /// Access request review DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AccessRequestDto {
+pub(crate) struct AccessRequestDto {
     pub id: AccessRequestId,
     pub user_id: UserId,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -245,7 +249,7 @@ pub struct AccessRequestDto {
 /// Access request status DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum AccessRequestStatusDto {
+pub(crate) enum AccessRequestStatusDto {
     Pending,
     Approved,
     Rejected {
@@ -257,7 +261,7 @@ pub enum AccessRequestStatusDto {
 /// User profile directory identity projection DTO.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UserProfileDto {
+pub(crate) struct UserProfileDto {
     pub user_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
@@ -270,7 +274,7 @@ pub struct UserProfileDto {
 /// User role assignment DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RoleAssignmentDto {
+pub(crate) struct RoleAssignmentDto {
     pub id: UserRoleAssignmentId,
     pub user_id: UserId,
     pub role_id: RoleId,
@@ -282,7 +286,7 @@ pub struct RoleAssignmentDto {
 /// Borrowed zero-clone system configuration DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SystemConfigDto<'a> {
+pub(crate) struct SystemConfigDto<'a> {
     pub id: SystemConfigId,
     pub default_locale: &'a str,
     pub available_locales: Vec<&'a str>,
@@ -291,7 +295,7 @@ pub struct SystemConfigDto<'a> {
 /// Borrowed zero-clone active locales DTO.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LocalesDto<'a> {
+pub(crate) struct LocalesDto<'a> {
     pub default_locale: &'a str,
     pub available_locales: Vec<&'a str>,
 }
@@ -303,7 +307,7 @@ pub struct LocalesDto<'a> {
 impl<'a> LocalesDto<'a> {
     /// Creates a borrowed locales response DTO without string allocations.
     #[must_use]
-    pub fn new(default_locale: &'a LocaleId, available_locales: &'a [LocaleId]) -> Self {
+    pub(crate) fn new(default_locale: &'a LocaleId, available_locales: &'a [LocaleId]) -> Self {
         Self {
             default_locale: default_locale.as_ref(),
             available_locales: available_locales.iter().map(AsRef::as_ref).collect(),

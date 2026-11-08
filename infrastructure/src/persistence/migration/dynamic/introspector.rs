@@ -57,7 +57,9 @@ type RawFkRow = (String, String, String, String, String, String);
 ///
 /// # Errors
 /// Returns [`PersistenceError`] if database queries fail.
-pub(super) async fn introspect_database_schema(pool: &PgPool) -> Result<DatabaseSchema, PersistenceError> {
+pub(super) async fn introspect_database_schema(
+    pool: &PgPool,
+) -> Result<DatabaseSchema, PersistenceError> {
     let candidate_tables = fetch_candidate_tables(pool).await?;
     if candidate_tables.is_empty() {
         return Ok(DatabaseSchema::new());

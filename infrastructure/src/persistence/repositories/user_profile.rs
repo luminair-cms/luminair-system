@@ -11,9 +11,8 @@ use domain::errors::DomainError;
 use super::mappers::{map_user_profile_row, map_user_profile_rows};
 use crate::persistence::error::PersistenceError;
 use crate::persistence::query::auth::{
-    count_user_profiles_query, select_user_profile_by_id_query,
-    select_user_profiles_by_ids_query, select_user_profiles_paginated_query,
-    upsert_user_profile_query,
+    count_user_profiles_query, select_user_profile_by_id_query, select_user_profiles_by_ids_query,
+    select_user_profiles_paginated_query, upsert_user_profile_query,
 };
 use crate::persistence::query::common::{compile_insert, compile_select};
 use crate::persistence::query::occ::with_occ_retry;
@@ -92,7 +91,12 @@ impl UserProfileRepository for SqlxUserProfileRepository {
             .map_err(PersistenceError::from)?;
 
         let items = map_user_profile_rows(&rows)?;
-        Ok(Page::new(items, total as u64, pagination.page, pagination.page_size))
+        Ok(Page::new(
+            items,
+            total as u64,
+            pagination.page,
+            pagination.page_size,
+        ))
     }
 
     async fn save(&self, profile: &UserProfile) -> Result<(), DomainError> {

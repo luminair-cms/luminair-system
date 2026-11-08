@@ -1,7 +1,5 @@
 //! Schema synchronization pipeline: Registry -> Desired AST -> Introspect -> Diff -> Plan -> DDL Execution.
 
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
@@ -16,7 +14,6 @@ use super::model::DatabaseSchema;
 use super::planner::{MigrationPlan, PlannerError, plan_migrations};
 use super::step::{MigrationStep, SafetyPolicy};
 use crate::persistence::error::PersistenceError;
-use crate::schema_loader::load_system_context_from_dir;
 
 // ---------------------------------------------------------------------------
 // Result Types
@@ -45,19 +42,6 @@ pub struct PlannedMigrationStep {
 // ---------------------------------------------------------------------------
 // Public Synchronization Entry Points
 // ---------------------------------------------------------------------------
-
-/// Synchronizes a live database pool from a directory of schema JSON definitions.
-///
-/// # Errors
-/// Returns [`PersistenceError`] if schema loading, diffing, or DDL execution fails.
-pub async fn sync_dynamic_schemas_from_dir(
-    pool: &PgPool,
-    schema_dir: &Path,
-    policy: SafetyPolicy,
-) -> Result<SchemaSyncResult, PersistenceError> {
-    let context = load_system_context_from_dir(schema_dir)?;
-    sync_dynamic_schemas(pool, &context.schema, policy).await
-}
 
 /// Synchronizes a live database schema to match an in-memory `SchemaRegistry`.
 ///
@@ -100,7 +84,7 @@ pub async fn sync_dynamic_schemas(
 ///
 /// # Errors
 /// Returns [`PersistenceError`] if database introspection or topological planning fails.
-pub async fn preview_dynamic_schemas(
+pub(crate) async fn preview_dynamic_schemas(
     pool: Option<&PgPool>,
     registry: &SchemaRegistry,
     policy: SafetyPolicy,
@@ -109,9 +93,10 @@ pub async fn preview_dynamic_schemas(
     Ok(compile_planned_steps(&plan))
 }
 
+#[cfg(test)]
 /// Generates all additive DDL statements for all document types in the registry without executing them.
 #[must_use]
-pub fn generate_ddl_for_registry(registry: &SchemaRegistry) -> Vec<String> {
+fn generate_ddl_for_registry(registry: &SchemaRegistry) -> Vec<String> {
     let actual = DatabaseSchema::new();
     let plan =
         compute_migration_plan(&actual, registry, SafetyPolicy::AdditiveOnly).unwrap_or_default();

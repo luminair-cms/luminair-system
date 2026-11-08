@@ -1,7 +1,10 @@
 //! Verified authentication claims and identity models.
 
+#[cfg(test)]
 use domain::auth::role::RoleId;
-use domain::auth::user::{ServiceId, UserId};
+#[cfg(test)]
+use domain::auth::user::ServiceId;
+use domain::auth::user::UserId;
 use domain::common::{DisplayName, Email};
 
 // ---------------------------------------------------------------------------
@@ -16,9 +19,10 @@ pub struct AuthenticatedUser {
     pub name: Option<DisplayName>,
 }
 
+#[cfg(test)]
 /// Discriminated caller identity distinguishing human users from machine services.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthenticatedIdentity {
+enum AuthenticatedIdentity {
     User(AuthenticatedUser),
     Service {
         service_id: ServiceId,
@@ -33,11 +37,7 @@ pub enum AuthenticatedIdentity {
 impl AuthenticatedUser {
     /// Creates a new authenticated user identity.
     #[must_use]
-    pub const fn new(
-        user_id: UserId,
-        email: Option<Email>,
-        name: Option<DisplayName>,
-    ) -> Self {
+    pub const fn new(user_id: UserId, email: Option<Email>, name: Option<DisplayName>) -> Self {
         Self {
             user_id,
             email,
@@ -46,10 +46,11 @@ impl AuthenticatedUser {
     }
 }
 
+#[cfg(test)]
 impl AuthenticatedIdentity {
     /// Returns the human user identity if this identity represents a user.
     #[must_use]
-    pub const fn as_user(&self) -> Option<&AuthenticatedUser> {
+    const fn as_user(&self) -> Option<&AuthenticatedUser> {
         match self {
             Self::User(u) => Some(u),
             Self::Service { .. } => None,
@@ -58,7 +59,7 @@ impl AuthenticatedIdentity {
 
     /// Returns the service id and roles if this identity represents a service.
     #[must_use]
-    pub fn as_service(&self) -> Option<(&ServiceId, &[RoleId])> {
+    fn as_service(&self) -> Option<(&ServiceId, &[RoleId])> {
         match self {
             Self::User(_) => None,
             Self::Service { service_id, roles } => Some((service_id, roles.as_slice())),
@@ -67,17 +68,18 @@ impl AuthenticatedIdentity {
 
     /// Returns `true` if this identity represents a human user.
     #[must_use]
-    pub const fn is_user(&self) -> bool {
+    const fn is_user(&self) -> bool {
         matches!(self, Self::User(_))
     }
 
     /// Returns `true` if this identity represents a machine service.
     #[must_use]
-    pub const fn is_service(&self) -> bool {
+    const fn is_service(&self) -> bool {
         matches!(self, Self::Service { .. })
     }
 }
 
+#[cfg(test)]
 impl From<AuthenticatedUser> for AuthenticatedIdentity {
     fn from(user: AuthenticatedUser) -> Self {
         Self::User(user)

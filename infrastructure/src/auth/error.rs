@@ -56,7 +56,10 @@ mod tests {
     fn test_auth_resolution_error_from_auth_error() {
         let err: AuthResolutionError = AuthError::MissingToken.into();
         assert_eq!(err.to_string(), "missing Authorization header");
-        assert!(matches!(err, AuthResolutionError::Auth(AuthError::MissingToken)));
+        assert!(matches!(
+            err,
+            AuthResolutionError::Auth(AuthError::MissingToken)
+        ));
     }
 
     #[test]

@@ -30,7 +30,9 @@ use crate::persistence::repositories::codec::{
 // ---------------------------------------------------------------------------
 
 /// Maps a row from `roles` into a base tuple of `(RoleId, name, description)`.
-pub fn map_role_base_row(row: &PgRow) -> Result<(RoleId, String, Option<String>), PersistenceError> {
+pub(crate) fn map_role_base_row(
+    row: &PgRow,
+) -> Result<(RoleId, String, Option<String>), PersistenceError> {
     let id: Uuid = row.try_get(COL_ID)?;
     let name: String = row.try_get(COL_NAME)?;
     let description: Option<String> = row.try_get(COL_DESCRIPTION)?;
@@ -38,7 +40,7 @@ pub fn map_role_base_row(row: &PgRow) -> Result<(RoleId, String, Option<String>)
 }
 
 /// Maps a row from `role_permissions` into a `(RoleId, Permission)` pair.
-pub fn map_permission_row(row: &PgRow) -> Result<(RoleId, Permission), PersistenceError> {
+pub(crate) fn map_permission_row(row: &PgRow) -> Result<(RoleId, Permission), PersistenceError> {
     let role_id: Uuid = row.try_get(COL_ROLE_ID)?;
     let action: &str = row.try_get(COL_ACTION)?;
     let doc_type_id: Option<String> = row.try_get(COL_DOCUMENT_TYPE_ID)?;
@@ -48,7 +50,7 @@ pub fn map_permission_row(row: &PgRow) -> Result<(RoleId, Permission), Persisten
 
 /// Assembles complete [`Role`] entities by pairing base role records with their permissions.
 #[must_use]
-pub fn assemble_roles(
+pub(crate) fn assemble_roles(
     base_rows: Vec<(RoleId, String, Option<String>)>,
     perm_rows: Vec<(RoleId, Permission)>,
 ) -> Vec<Role> {
@@ -72,11 +74,13 @@ pub fn assemble_roles(
 }
 
 /// Maps a row from `user_role_assignments` into a [`UserRoleAssignment`].
-pub fn map_user_role_assignment_row(row: &PgRow) -> Result<UserRoleAssignment, PersistenceError> {
+pub(crate) fn map_user_role_assignment_row(
+    row: &PgRow,
+) -> Result<UserRoleAssignment, PersistenceError> {
     let id: Uuid = row.try_get(COL_ID)?;
     let user_id_str: String = row.try_get(COL_USER_ID)?;
-    let user_id = UserId::try_new(user_id_str)
-        .map_err(|e| PersistenceError::Validation(e.to_string()))?;
+    let user_id =
+        UserId::try_new(user_id_str).map_err(|e| PersistenceError::Validation(e.to_string()))?;
     let role_id: Uuid = row.try_get(COL_ROLE_ID)?;
     let granted_at: DateTime<Utc> = row.try_get(COL_GRANTED_AT)?;
     let granted_by_str: Option<&str> = row.try_get(COL_GRANTED_BY)?;
@@ -92,11 +96,11 @@ pub fn map_user_role_assignment_row(row: &PgRow) -> Result<UserRoleAssignment, P
 }
 
 /// Maps a row from `access_requests` into an [`AccessRequest`].
-pub fn map_access_request_row(row: &PgRow) -> Result<AccessRequest, PersistenceError> {
+pub(crate) fn map_access_request_row(row: &PgRow) -> Result<AccessRequest, PersistenceError> {
     let id: Uuid = row.try_get(COL_ID)?;
     let user_id_str: String = row.try_get(COL_USER_ID)?;
-    let user_id = UserId::try_new(user_id_str)
-        .map_err(|e| PersistenceError::Validation(e.to_string()))?;
+    let user_id =
+        UserId::try_new(user_id_str).map_err(|e| PersistenceError::Validation(e.to_string()))?;
     let email_str: Option<String> = row.try_get(COL_EMAIL)?;
     let email = email_str
         .map(|s| Email::try_new(s).map_err(|e| PersistenceError::Validation(e.to_string())))
@@ -129,10 +133,10 @@ pub fn map_access_request_row(row: &PgRow) -> Result<AccessRequest, PersistenceE
 }
 
 /// Maps a row from `user_profiles` into a [`UserProfile`] entity.
-pub fn map_user_profile_row(row: &PgRow) -> Result<UserProfile, PersistenceError> {
+pub(crate) fn map_user_profile_row(row: &PgRow) -> Result<UserProfile, PersistenceError> {
     let user_id_str: String = row.try_get(COL_USER_ID)?;
-    let user_id = UserId::try_new(user_id_str)
-        .map_err(|e| PersistenceError::Validation(e.to_string()))?;
+    let user_id =
+        UserId::try_new(user_id_str).map_err(|e| PersistenceError::Validation(e.to_string()))?;
     let email_str: Option<String> = row.try_get(COL_EMAIL)?;
     let email = email_str
         .map(|s| Email::try_new(s).map_err(|e| PersistenceError::Validation(e.to_string())))
@@ -154,7 +158,7 @@ pub fn map_user_profile_row(row: &PgRow) -> Result<UserProfile, PersistenceError
 }
 
 /// Maps multiple `user_profiles` rows into a `Vec<UserProfile>`.
-pub fn map_user_profile_rows(rows: &[PgRow]) -> Result<Vec<UserProfile>, PersistenceError> {
+pub(crate) fn map_user_profile_rows(rows: &[PgRow]) -> Result<Vec<UserProfile>, PersistenceError> {
     rows.iter().map(map_user_profile_row).collect()
 }
 

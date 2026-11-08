@@ -1,15 +1,8 @@
 //! Generic REST API route handlers for content, schemas, access requests, and system probes.
 
-pub mod access_requests;
-pub mod content;
-pub mod health;
-pub mod schema;
-pub mod system;
-pub mod users;
-
-pub use access_requests::*;
-pub use content::*;
-pub use health::*;
-pub use schema::*;
-pub use system::*;
-pub use users::*;
+pub(crate) mod access_requests;
+pub(crate) mod content;
+pub(crate) mod health;
+pub(crate) mod schema;
+pub(crate) mod system;
+pub(crate) mod users;

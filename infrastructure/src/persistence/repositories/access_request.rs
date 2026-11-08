@@ -8,6 +8,8 @@ use domain::auth::ports::AccessRequestRepository;
 use domain::auth::user::UserId;
 use domain::errors::DomainError;
 
+use super::codec::{access_request_status_to_db, serialize_assigned_roles_json};
+use super::mappers::map_access_request_row;
 use crate::persistence::error::PersistenceError;
 use crate::persistence::query::auth::{
     select_access_request_by_id_query, select_active_access_request_by_user_query,
@@ -16,8 +18,6 @@ use crate::persistence::query::auth::{
 };
 use crate::persistence::query::common::{compile_insert, compile_select};
 use crate::persistence::query::occ::with_occ_retry;
-use super::codec::{access_request_status_to_db, serialize_assigned_roles_json};
-use super::mappers::map_access_request_row;
 
 // ---------------------------------------------------------------------------
 // Public Repository Struct & Constructors
@@ -41,10 +41,7 @@ impl SqlxAccessRequestRepository {
 // ---------------------------------------------------------------------------
 
 impl AccessRequestRepository for SqlxAccessRequestRepository {
-    async fn find_by_id(
-        &self,
-        id: AccessRequestId,
-    ) -> Result<Option<AccessRequest>, DomainError> {
+    async fn find_by_id(&self, id: AccessRequestId) -> Result<Option<AccessRequest>, DomainError> {
         let (sql, values) = compile_select(&select_access_request_by_id_query(*id));
         let maybe_row = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
             .fetch_optional(&self.pool)
@@ -59,10 +56,7 @@ impl AccessRequestRepository for SqlxAccessRequestRepository {
         Ok(Some(request))
     }
 
-    async fn find_by_user(
-        &self,
-        user_id: &UserId,
-    ) -> Result<Option<AccessRequest>, DomainError> {
+    async fn find_by_user(&self, user_id: &UserId) -> Result<Option<AccessRequest>, DomainError> {
         let (sql, values) = compile_select(&select_latest_access_request_by_user_query(user_id));
         let maybe_row = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
             .fetch_optional(&self.pool)
@@ -127,12 +121,8 @@ async fn execute_upsert_access_request(
 ) -> Result<(), PersistenceError> {
     let (status_str, rejection_reason) = access_request_status_to_db(&request.status);
     let assigned_roles_json = serialize_assigned_roles_json(&request.assigned_roles)?;
-    let stmt = upsert_access_request_query(
-        request,
-        status_str,
-        rejection_reason,
-        assigned_roles_json,
-    );
+    let stmt =
+        upsert_access_request_query(request, status_str, rejection_reason, assigned_roles_json);
     let (sql, values) = compile_insert(&stmt);
     sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
         .execute(pool)

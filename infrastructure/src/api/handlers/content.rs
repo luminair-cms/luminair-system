@@ -34,7 +34,7 @@ use crate::auth::Caller;
 /// Request payload for creating a document instance (`POST /api/v1/content/{type_id}`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateDocumentPayload {
+pub(crate) struct CreateDocumentPayload {
     /// Document attribute field values.
     #[serde(default)]
     pub fields: serde_json::Map<String, serde_json::Value>,
@@ -45,7 +45,7 @@ pub struct CreateDocumentPayload {
 /// Request payload for updating an existing document (`PUT /api/v1/content/{type_id}/{id}`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateDocumentPayload {
+pub(crate) struct UpdateDocumentPayload {
     /// Updated document attribute field values.
     #[serde(default)]
     pub fields: serde_json::Map<String, serde_json::Value>,
@@ -59,7 +59,7 @@ pub struct UpdateDocumentPayload {
 /// Optional payload for publishing a draft document (`POST .../publish`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PublishDocumentPayload {
+pub(crate) struct PublishDocumentPayload {
     /// Expected working draft version for optimistic concurrency control.
     #[serde(alias = "expected_version")]
     pub expected_version: Option<u32>,
@@ -68,7 +68,7 @@ pub struct PublishDocumentPayload {
 /// Optional payload for taking a published document offline (`POST .../unpublish`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UnpublishDocumentPayload {
+pub(crate) struct UnpublishDocumentPayload {
     /// Strategy for resolving pending working draft edits.
     #[serde(alias = "draft_resolution")]
     pub draft_resolution: Option<UnpublishDraftResolution>,
@@ -77,7 +77,7 @@ pub struct UnpublishDocumentPayload {
 /// Optional payload for restoring a snapshot revision (`POST .../restore`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RestoreSnapshotPayload {
+pub(crate) struct RestoreSnapshotPayload {
     /// When true, allows restoring even if uncommitted working draft edits exist.
     #[serde(default, alias = "discard_pending_edits")]
     pub discard_pending_edits: bool,
@@ -86,7 +86,7 @@ pub struct RestoreSnapshotPayload {
 /// Query parameter for relational attribute population (`?populate=author,tags`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PopulateQuery {
+pub(crate) struct PopulateQuery {
     /// Comma-separated attribute IDs to populate, or `*` for all relations.
     pub populate: Option<String>,
 }
@@ -96,7 +96,7 @@ pub struct PopulateQuery {
 // ---------------------------------------------------------------------------
 
 /// Queries a paginated list of documents (`GET /api/v1/content/{type_id}`).
-pub async fn find_documents<St>(
+pub(crate) async fn find_documents<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path(type_id): Path<String>,
@@ -115,12 +115,15 @@ where
         .with_populate(populate);
 
     let (instances, total) = state.documents_service().find(&caller, cmd).await?;
-    let dtos = instances.into_iter().map(DocumentInstanceDto::from).collect();
+    let dtos = instances
+        .into_iter()
+        .map(DocumentInstanceDto::from)
+        .collect();
     Ok(PagedJson::new(dtos, pagination, total))
 }
 
 /// Lists lightweight document headers for Admin Studio views (`GET /api/v1/content/{type_id}/admin/headers`).
-pub async fn list_admin_headers<St>(
+pub(crate) async fn list_admin_headers<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path(type_id): Path<String>,
@@ -136,13 +139,16 @@ where
         cmd = cmd.with_status_filter(status);
     }
 
-    let (headers, total) = state.documents_service().list_admin_headers(&caller, cmd).await?;
+    let (headers, total) = state
+        .documents_service()
+        .list_admin_headers(&caller, cmd)
+        .await?;
     let dtos = headers.into_iter().map(DocumentHeaderDto::from).collect();
     Ok(PagedJson::new(dtos, pagination, total))
 }
 
 /// Fetches a single document instance by identifier (`GET /api/v1/content/{type_id}/{id}`).
-pub async fn find_document_by_id<St>(
+pub(crate) async fn find_document_by_id<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id)): Path<(String, String)>,
@@ -172,7 +178,7 @@ where
 }
 
 /// Creates a new document instance (`POST /api/v1/content/{type_id}`).
-pub async fn create_document<St>(
+pub(crate) async fn create_document<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path(type_id): Path<String>,
@@ -195,7 +201,7 @@ where
 }
 
 /// Updates an existing document instance (`PUT /api/v1/content/{type_id}/{id}`).
-pub async fn update_document<St>(
+pub(crate) async fn update_document<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id)): Path<(String, String)>,
@@ -222,7 +228,7 @@ where
 }
 
 /// Deletes a document instance (`DELETE /api/v1/content/{type_id}/{id}`).
-pub async fn delete_document<St>(
+pub(crate) async fn delete_document<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id)): Path<(String, String)>,
@@ -239,7 +245,7 @@ where
 }
 
 /// Publishes a draft document (`POST /api/v1/content/{type_id}/{id}/publish`).
-pub async fn publish_document<St>(
+pub(crate) async fn publish_document<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id)): Path<(String, String)>,
@@ -262,7 +268,7 @@ where
 }
 
 /// Takes a published document offline (`POST /api/v1/content/{type_id}/{id}/unpublish`).
-pub async fn unpublish_document<St>(
+pub(crate) async fn unpublish_document<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id)): Path<(String, String)>,
@@ -283,7 +289,7 @@ where
 }
 
 /// Discards uncommitted working draft edits (`POST /api/v1/content/{type_id}/{id}/discard-draft`).
-pub async fn discard_draft<St>(
+pub(crate) async fn discard_draft<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id)): Path<(String, String)>,
@@ -295,12 +301,15 @@ where
     let id = parse_instance_id(&raw_id)?;
     let cmd = DiscardDraftCommand::new(id, &doc_type.id);
 
-    let instance = state.documents_service().discard_draft(&caller, cmd).await?;
+    let instance = state
+        .documents_service()
+        .discard_draft(&caller, cmd)
+        .await?;
     Ok(JsonData::new(DocumentInstanceDto::from(instance)))
 }
 
 /// Lists historical revision snapshot headers for a document (`GET /api/v1/content/{type_id}/{id}/snapshots`).
-pub async fn list_snapshots<St>(
+pub(crate) async fn list_snapshots<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id)): Path<(String, String)>,
@@ -312,13 +321,16 @@ where
     let id = parse_instance_id(&raw_id)?;
     let cmd = ListSnapshotsCommand::new(&doc_type.id, id);
 
-    let snapshots = state.documents_service().list_snapshots(&caller, cmd).await?;
+    let snapshots = state
+        .documents_service()
+        .list_snapshots(&caller, cmd)
+        .await?;
     let dtos = snapshots.into_iter().map(SnapshotHeaderDto::from).collect();
     Ok(JsonData::new(dtos))
 }
 
 /// Retrieves a specific historical revision snapshot (`GET /api/v1/content/{type_id}/{id}/snapshots/{revision}`).
-pub async fn get_snapshot<St>(
+pub(crate) async fn get_snapshot<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id, revision)): Path<(String, String, u32)>,
@@ -335,7 +347,7 @@ where
 }
 
 /// Restores a historical revision snapshot into the working draft (`POST /api/v1/content/{type_id}/{id}/snapshots/{revision}/restore`).
-pub async fn restore_snapshot<St>(
+pub(crate) async fn restore_snapshot<St>(
     State(state): State<St>,
     Caller(caller): Caller,
     Path((type_id, raw_id, revision)): Path<(String, String, u32)>,
@@ -353,7 +365,10 @@ where
         cmd = cmd.with_discard_pending_edits();
     }
 
-    let instance = state.documents_service().restore_snapshot(&caller, cmd).await?;
+    let instance = state
+        .documents_service()
+        .restore_snapshot(&caller, cmd)
+        .await?;
     Ok(JsonData::new(DocumentInstanceDto::from(instance)))
 }
 
@@ -369,12 +384,19 @@ mod tests {
 
     use chrono::Utc;
     use domain::auth::user::{ActorId, UserId};
-    use domain::content::header::{DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader, SnapshotId, SnapshotReason};
-    use domain::content::instance::{AuditTrail, DocumentContent, DocumentInstance, DocumentInstanceId, PublicationState};
-    use domain::schema::documents::{DocumentKind, DocumentType, DocumentTypeInfo, DocumentTypeOptions};
-    use domain::schema::types::{FieldType, PrimitiveType};
-    use domain::schema::attributes::FieldDefinition;
+    use domain::content::header::{
+        DocumentHeader, DocumentSnapshot, DocumentStatus, SnapshotHeader, SnapshotId,
+        SnapshotReason,
+    };
+    use domain::content::instance::{
+        AuditTrail, DocumentContent, DocumentInstance, DocumentInstanceId, PublicationState,
+    };
     use domain::schema::SchemaRegistry;
+    use domain::schema::attributes::FieldDefinition;
+    use domain::schema::documents::{
+        DocumentKind, DocumentType, DocumentTypeInfo, DocumentTypeOptions,
+    };
+    use domain::schema::types::{FieldType, PrimitiveType};
     use domain::system::locale::LocaleId;
     use domain::system::{SystemConfig, SystemConfigId, SystemContext};
     use uuid::Uuid;
@@ -602,12 +624,8 @@ mod tests {
         };
         let registry = SchemaRegistry::new(vec![dt]);
         let en = LocaleId::try_new("en").expect("valid locale");
-        let config = SystemConfig::new(
-            SystemConfigId::new(Uuid::now_v7()),
-            vec![en.clone()],
-            en,
-        )
-        .expect("valid config");
+        let config = SystemConfig::new(SystemConfigId::new(Uuid::now_v7()), vec![en.clone()], en)
+            .expect("valid config");
         Box::leak(Box::new(SystemContext::new(registry, config)))
     }
 
@@ -637,7 +655,9 @@ mod tests {
         let state = MockContentState {
             context: test_system_context(),
             resolver: Arc::new(MockAuthResolver),
-            service: Arc::new(MockDocService { sample_instance: inst }),
+            service: Arc::new(MockDocService {
+                sample_instance: inst,
+            }),
         };
         let caller = Caller(application::context::CallerContext::new(
             ActorId::User(UserId::try_new("usr_test").unwrap()),
@@ -664,20 +684,18 @@ mod tests {
         let state = MockContentState {
             context: test_system_context(),
             resolver: Arc::new(MockAuthResolver),
-            service: Arc::new(MockDocService { sample_instance: inst }),
+            service: Arc::new(MockDocService {
+                sample_instance: inst,
+            }),
         };
         let caller = Caller(application::context::CallerContext::new(
             ActorId::User(UserId::try_new("usr_test").unwrap()),
             vec![],
         ));
 
-        let status = delete_document(
-            State(state),
-            caller,
-            Path(("articles".to_string(), raw_id)),
-        )
-        .await
-        .expect("delete should succeed");
+        let status = delete_document(State(state), caller, Path(("articles".to_string(), raw_id)))
+            .await
+            .expect("delete should succeed");
 
         assert_eq!(status, StatusCode::NO_CONTENT);
     }

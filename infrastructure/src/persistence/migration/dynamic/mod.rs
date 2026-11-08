@@ -10,9 +10,9 @@ mod planner;
 mod step;
 mod sync;
 
-pub(crate) use model::SqlColumnType;
 pub use step::SafetyPolicy;
-pub use sync::{
-    PlannedMigrationStep, SchemaSyncResult, generate_ddl_for_registry, preview_dynamic_schemas,
-    sync_dynamic_schemas, sync_dynamic_schemas_from_dir,
-};
+pub use sync::{PlannedMigrationStep, SchemaSyncResult, sync_dynamic_schemas};
+
+#[cfg(test)]
+pub(crate) use model::SqlColumnType;
+pub(crate) use sync::preview_dynamic_schemas;

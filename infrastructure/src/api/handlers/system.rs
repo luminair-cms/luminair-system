@@ -15,7 +15,7 @@ use crate::auth::Caller;
 // ---------------------------------------------------------------------------
 
 /// Returns active system configuration including locales and identifier (`GET /api/v1/system/config`).
-pub async fn get_system_config<St>(
+pub(crate) async fn get_system_config<St>(
     State(state): State<St>,
     Caller(_caller): Caller,
 ) -> Response
@@ -27,7 +27,7 @@ where
 }
 
 /// Returns default and available system locales (`GET /api/v1/system/locales`).
-pub async fn get_system_locales<St>(
+pub(crate) async fn get_system_locales<St>(
     State(state): State<St>,
     Caller(_caller): Caller,
 ) -> Response

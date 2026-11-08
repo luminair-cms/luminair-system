@@ -31,7 +31,7 @@ use crate::persistence::{PersistenceError, create_connection_pool};
 /// Returns [`CliError::Config`] if required database or auth parameters are missing or invalid.
 /// Returns [`CliError::Persistence`] if database connection or auto-migration fails.
 /// Returns [`CliError::Server`] if listener binding or HTTP server execution fails.
-pub async fn execute_service_mode(
+pub(crate) async fn execute_service_mode(
     config: &CliConfig,
     context: &'static SystemContext,
 ) -> Result<CliOutcome, CliError> {
@@ -69,9 +69,10 @@ async fn setup_database(
     config: &CliConfig,
     context: &'static SystemContext,
 ) -> Result<PgPool, CliError> {
-    let db_url = config.database_url.as_deref().ok_or_else(|| {
-        CliError::Config("database_url is required for 'serve' mode".to_string())
-    })?;
+    let db_url = config
+        .database_url
+        .as_deref()
+        .ok_or_else(|| CliError::Config("database_url is required for 'serve' mode".to_string()))?;
 
     let pool = create_connection_pool(db_url, config.max_db_connections).await?;
 
@@ -149,10 +150,12 @@ fn parse_role_id(role_str: &str) -> Result<RoleId, CliError> {
 
 async fn bind_listener(config: &CliConfig) -> Result<TcpListener, CliError> {
     let addr = format!("{}:{}", config.http_host, config.http_port);
-    TcpListener::bind(&addr).await.map_err(|source| CliError::Io {
-        path: std::path::PathBuf::from(addr),
-        source,
-    })
+    TcpListener::bind(&addr)
+        .await
+        .map_err(|source| CliError::Io {
+            path: std::path::PathBuf::from(addr),
+            source,
+        })
 }
 
 async fn serve_with_graceful_shutdown(
