@@ -14,7 +14,7 @@
     "use_new_terminal": false
   },
   {
-    "label": "httpYac: Run All Requests in File",
+    "label": "httpYac: Run All Requests in Current File",
     "command": "httpyac",
     "args": ["send", "$ZED_FILE", "--all"],
     "reveal": "always",
