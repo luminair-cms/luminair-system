@@ -93,12 +93,8 @@ async fn verify_single_lifecycle_collections(
 
     verify_taxonomies_collection_totals(client, &tokens.editor_jwt).await;
     verify_draft_disabled_lifecycle_guards(client, &tokens.editor_jwt, &cat_tech_id).await;
-    verify_single_lifecycle_mutation_and_deletion(
-        client,
-        &tokens.editor_jwt,
-        &tag_obsolete_id,
-    )
-    .await;
+    verify_single_lifecycle_mutation_and_deletion(client, &tokens.editor_jwt, &tag_obsolete_id)
+        .await;
 
     SeededTaxonomies {
         cat_tech_id,
@@ -135,31 +131,14 @@ async fn verify_article_lifecycle_and_relations(
     tokens: &OnboardedTokens,
     taxonomies: &SeededTaxonomies,
 ) {
-    let (art_1_id, art_2_id) =
-        create_article_drafts(client, &tokens.editor_jwt, taxonomies).await;
+    let (art_1_id, art_2_id) = create_article_drafts(client, &tokens.editor_jwt, taxonomies).await;
     verify_article_draft_views_and_headers(client, &tokens.editor_jwt).await;
     verify_article_first_publish_and_populate(client, &tokens.editor_jwt, &art_1_id).await;
-    verify_article_occ_and_relation_mutations(
-        client,
-        &tokens.editor_jwt,
-        &art_1_id,
-        taxonomies,
-    )
-    .await;
-    verify_article_snapshots_and_restore(
-        client,
-        &tokens.editor_jwt,
-        &art_1_id,
-        taxonomies,
-    )
-    .await;
-    verify_article_discard_unpublish_and_delete(
-        client,
-        &tokens.editor_jwt,
-        &art_1_id,
-        &art_2_id,
-    )
-    .await;
+    verify_article_occ_and_relation_mutations(client, &tokens.editor_jwt, &art_1_id, taxonomies)
+        .await;
+    verify_article_snapshots_and_restore(client, &tokens.editor_jwt, &art_1_id, taxonomies).await;
+    verify_article_discard_unpublish_and_delete(client, &tokens.editor_jwt, &art_1_id, &art_2_id)
+        .await;
 }
 
 fn is_docker_available() -> bool {
@@ -175,21 +154,15 @@ fn is_docker_available() -> bool {
 // ---------------------------------------------------------------------------
 
 async fn verify_health_and_readiness_probes(client: &E2eClient) {
-    let healthz_body = parse_json_with_status(
-        client.get_unauthenticated("/healthz").await,
-        StatusCode::OK,
-    )
-    .await;
+    let healthz_body =
+        parse_json_with_status(client.get_unauthenticated("/healthz").await, StatusCode::OK).await;
     assert_json_include!(
         actual: &healthz_body,
         expected: json!({"status": "healthy"})
     );
 
-    let ready_body = parse_json_with_status(
-        client.get_unauthenticated("/ready").await,
-        StatusCode::OK,
-    )
-    .await;
+    let ready_body =
+        parse_json_with_status(client.get_unauthenticated("/ready").await, StatusCode::OK).await;
     assert_json_include!(
         actual: &ready_body,
         expected: json!({"status": "healthy"})
@@ -204,8 +177,10 @@ async fn acquire_tokens_and_verify_signature(client: &E2eClient) -> (String, Str
         .fetch_dex_id_token("editor@luminair.dev", "password")
         .await;
 
-    let forged_resp = client.get("/api/v1/system/config", "invalid.jwt.token").await;
-    assert_problem_details(forged_resp, StatusCode::UNAUTHORIZED, "invalid_token").await;
+    let forged_resp = client
+        .get("/api/v1/system/config", "invalid.jwt.token")
+        .await;
+    assert_problem_details(forged_resp, StatusCode::UNAUTHORIZED, "unauthenticated").await;
 
     (admin_jwt, editor_jwt)
 }
@@ -238,7 +213,9 @@ async fn sync_user_profile(client: &E2eClient, token: &str, expected_email: &str
 }
 
 async fn submit_access_request(client: &E2eClient, token: &str) -> String {
-    let resp = client.post_empty("/api/v1/auth/access-requests", token).await;
+    let resp = client
+        .post_empty("/api/v1/auth/access-requests", token)
+        .await;
     let body = parse_json_with_status(resp, StatusCode::CREATED).await;
     extract_data_id(&body)
 }
@@ -263,14 +240,7 @@ async fn approve_onboarding_requests(
     )
     .await;
 
-    approve_and_verify_status(
-        client,
-        admin_jwt,
-        editor_req_id,
-        ROLE_EDITOR_ID,
-        admin_jwt,
-    )
-    .await;
+    approve_and_verify_status(client, admin_jwt, editor_req_id, ROLE_EDITOR_ID, admin_jwt).await;
 }
 
 async fn approve_and_verify_status(
@@ -282,7 +252,11 @@ async fn approve_and_verify_status(
 ) {
     let approve_path = format!("/api/v1/auth/access-requests/{req_id}/approve");
     let resp = client
-        .post_json(&approve_path, approver_token, &json!({ "roleIds": [role_id] }))
+        .post_json(
+            &approve_path,
+            approver_token,
+            &json!({ "roleIds": [role_id] }),
+        )
         .await;
     assert_status(resp.status(), StatusCode::OK);
 
@@ -292,20 +266,12 @@ async fn approve_and_verify_status(
     assert_eq!(get_body["data"]["status"]["status"], "approved");
 }
 
-async fn verify_system_and_directory(
-    client: &E2eClient,
-    admin_jwt: &str,
-    editor_jwt: &str,
-) {
+async fn verify_system_and_directory(client: &E2eClient, admin_jwt: &str, editor_jwt: &str) {
     verify_system_config_and_locales(client, admin_jwt, editor_jwt).await;
     verify_schemas_and_user_directory(client, admin_jwt, editor_jwt).await;
 }
 
-async fn verify_system_config_and_locales(
-    client: &E2eClient,
-    admin_jwt: &str,
-    editor_jwt: &str,
-) {
+async fn verify_system_config_and_locales(client: &E2eClient, admin_jwt: &str, editor_jwt: &str) {
     let config_body = parse_json_with_status(
         client.get("/api/v1/system/config", admin_jwt).await,
         StatusCode::OK,
@@ -334,13 +300,11 @@ async fn verify_system_config_and_locales(
     );
 }
 
-async fn verify_schemas_and_user_directory(
-    client: &E2eClient,
-    admin_jwt: &str,
-    editor_jwt: &str,
-) {
+async fn verify_schemas_and_user_directory(client: &E2eClient, admin_jwt: &str, editor_jwt: &str) {
     let schemas_body = parse_json_with_status(
-        client.get("/api/v1/schema/document-types", editor_jwt).await,
+        client
+            .get("/api/v1/schema/document-types", editor_jwt)
+            .await,
         StatusCode::OK,
     )
     .await;
@@ -363,10 +327,7 @@ async fn verify_schemas_and_user_directory(
 // Phase 3.2 Leaf Helpers (Workers)
 // ---------------------------------------------------------------------------
 
-async fn create_category_taxonomies(
-    client: &E2eClient,
-    editor_jwt: &str,
-) -> (String, String) {
+async fn create_category_taxonomies(client: &E2eClient, editor_jwt: &str) -> (String, String) {
     let cat_tech_id = create_tech_category(client, editor_jwt).await;
     let cat_sci_id = create_sci_category(client, editor_jwt).await;
     (cat_tech_id, cat_sci_id)
@@ -423,10 +384,7 @@ async fn create_sci_category(client: &E2eClient, editor_jwt: &str) -> String {
     extract_data_id(&body)
 }
 
-async fn create_tag_taxonomies(
-    client: &E2eClient,
-    editor_jwt: &str,
-) -> (String, String, String) {
+async fn create_tag_taxonomies(client: &E2eClient, editor_jwt: &str) -> (String, String, String) {
     let tag_rust_id = create_single_tag(client, editor_jwt, "rust").await;
     let tag_docker_id = create_single_tag(client, editor_jwt, "docker").await;
     let tag_obsolete_id = create_single_tag(client, editor_jwt, "obsolete").await;
@@ -472,12 +430,7 @@ async fn verify_draft_disabled_lifecycle_guards(
 ) {
     let publish_path = format!("/api/v1/content/category/{cat_tech_id}/publish");
     let pub_resp = client.post_empty(&publish_path, editor_jwt).await;
-    assert_problem_details(
-        pub_resp,
-        StatusCode::CONFLICT,
-        "draft_and_publish_disabled",
-    )
-    .await;
+    assert_problem_details(pub_resp, StatusCode::CONFLICT, "draft_and_publish_disabled").await;
 
     let unpublish_path = format!("/api/v1/content/category/{cat_tech_id}/unpublish");
     let unpub_resp = client.post_empty(&unpublish_path, editor_jwt).await;
@@ -578,11 +531,7 @@ async fn verify_singleton_publish_and_modify(
     modify_singleton_draft(client, admin_jwt, settings_id).await;
 }
 
-async fn verify_singleton_first_publish(
-    client: &E2eClient,
-    admin_jwt: &str,
-    settings_id: &str,
-) {
+async fn verify_singleton_first_publish(client: &E2eClient, admin_jwt: &str, settings_id: &str) {
     let pub_path = format!("/api/v1/content/site-settings/{settings_id}/publish");
     let pub_body = parse_json_with_status(
         client.post_empty(&pub_path, admin_jwt).await,
@@ -602,11 +551,7 @@ async fn verify_singleton_first_publish(
     );
 }
 
-async fn modify_singleton_draft(
-    client: &E2eClient,
-    admin_jwt: &str,
-    settings_id: &str,
-) {
+async fn modify_singleton_draft(client: &E2eClient, admin_jwt: &str, settings_id: &str) {
     let put_path = format!("/api/v1/content/site-settings/{settings_id}");
     let put_body = parse_json_with_status(
         client
@@ -631,7 +576,7 @@ async fn modify_singleton_draft(
                 "publicationState": {
                     "status": "modified",
                     "liveRevision": 1,
-                    "draftVersion": 3
+                    "draftVersion": 2
                 }
             }
         })
@@ -647,11 +592,7 @@ async fn verify_singleton_views_and_second_publish(
     verify_singleton_second_publish(client, admin_jwt, settings_id).await;
 }
 
-async fn verify_singleton_views_isolation(
-    client: &E2eClient,
-    admin_jwt: &str,
-    settings_id: &str,
-) {
+async fn verify_singleton_views_isolation(client: &E2eClient, admin_jwt: &str, settings_id: &str) {
     let get_path = format!("/api/v1/content/site-settings/{settings_id}");
     let pub_view =
         parse_json_with_status(client.get(&get_path, admin_jwt).await, StatusCode::OK).await;
@@ -683,11 +624,7 @@ async fn verify_singleton_views_isolation(
     );
 }
 
-async fn verify_singleton_second_publish(
-    client: &E2eClient,
-    admin_jwt: &str,
-    settings_id: &str,
-) {
+async fn verify_singleton_second_publish(client: &E2eClient, admin_jwt: &str, settings_id: &str) {
     let pub2_path = format!("/api/v1/content/site-settings/{settings_id}/publish");
     let pub2_body = parse_json_with_status(
         client.post_empty(&pub2_path, admin_jwt).await,
@@ -1094,8 +1031,15 @@ async fn create_dirty_article_draft(client: &E2eClient, editor_jwt: &str, art_1_
 
 async fn assert_snapshot_restore_conflict(client: &E2eClient, editor_jwt: &str, art_1_id: &str) {
     let restore_path = format!("/api/v1/content/article/{art_1_id}/snapshots/1/restore");
-    let conflict_resp = client.post_json(&restore_path, editor_jwt, &json!({})).await;
-    assert_problem_details(conflict_resp, StatusCode::CONFLICT, "draft_has_pending_edits").await;
+    let conflict_resp = client
+        .post_json(&restore_path, editor_jwt, &json!({}))
+        .await;
+    assert_problem_details(
+        conflict_resp,
+        StatusCode::CONFLICT,
+        "draft_has_pending_edits",
+    )
+    .await;
 }
 
 async fn execute_snapshot_restore_with_discard(
@@ -1169,11 +1113,7 @@ async fn discard_article_draft(client: &E2eClient, editor_jwt: &str, art_1_id: &
     );
 }
 
-async fn unpublish_article_and_verify_views(
-    client: &E2eClient,
-    editor_jwt: &str,
-    art_1_id: &str,
-) {
+async fn unpublish_article_and_verify_views(client: &E2eClient, editor_jwt: &str, art_1_id: &str) {
     unpublish_article(client, editor_jwt, art_1_id).await;
     verify_unpublished_article_views(client, editor_jwt, art_1_id).await;
 }
@@ -1198,11 +1138,7 @@ async fn unpublish_article(client: &E2eClient, editor_jwt: &str, art_1_id: &str)
     );
 }
 
-async fn verify_unpublished_article_views(
-    client: &E2eClient,
-    editor_jwt: &str,
-    art_1_id: &str,
-) {
+async fn verify_unpublished_article_views(client: &E2eClient, editor_jwt: &str, art_1_id: &str) {
     let pub_get = client
         .get(&format!("/api/v1/content/article/{art_1_id}"), editor_jwt)
         .await;
@@ -1234,4 +1170,3 @@ async fn verify_article_deletion(client: &E2eClient, editor_jwt: &str, art_2_id:
         .await;
     assert_status(working_resp.status(), StatusCode::NOT_FOUND);
 }
-

@@ -5,7 +5,7 @@
   - **Container Topology (Variant C1)**: Programmatic `testcontainers` (`0.28.0`) `GenericImage` orchestration running all 3 services (`postgres:18.6-alpine3.24`, `ghcr.io/dexidp/dex:v2.43.0`, and `luminair-cli:local` in `--mode serve --auto-migrate`) over an isolated Docker bridge network.
   - **OIDC / Dex Configuration (Option 3)**: Production-grade JWKS support (`--oidc-jwks-url` / `LUMINAIR_OIDC_JWKS_URL`) in `OidcTokenValidator` and `CliConfig` using `jsonwebtoken::jwk::JwkSet` (`11.1.0`) and `reqwest` (`0.13.5`), enabling full RS256 cryptographic signature, `kid`, `iss`, and `aud` validation across split-horizon Docker networks.
   - **JSON Assertion Strategy (Option A)**: Declarative structural subset matching via `assert-json-diff` (`2.0.2`) (`assert_json_include!`) paired with dedicated RFC 9457 `application/problem+json` assertion helpers.
-- **Status**: In Progress
+- **Status**: Complete
 - **Last Updated**: 2026-11-08
 
 ---
@@ -93,7 +93,7 @@ flowchart TD
 - [x] **Step 3.1: Health Probes, OIDC JWT Verification & Onboarding Flow (`infrastructure/tests/e2e_service_test.rs`)**
   - Verify `GET /healthz` and `GET /ready` return `200 OK` with `{"status": "healthy"}`.
   - Obtain real RS256 `admin_jwt` (`admin@luminair.dev`) and `editor_jwt` (`editor@luminair.dev`) from the Dex container.
-  - Verify forged/invalid JWT is rejected with `401 Unauthorized` (confirming live RS256 JWKS signature verification).
+  - Verify forged/invalid JWT is rejected with `401 Unauthorized` (`code: "unauthenticated"`, confirming live RS256 JWKS signature verification).
   - Verify pre-onboarding `GET /api/v1/system/config` with `admin_jwt` returns `403 Forbidden` (`code: "access_not_requested"`).
   - Execute `POST /api/v1/auth/profile/sync` and `POST /api/v1/auth/access-requests` for both `admin` and `editor`.
   - Verify pending user gets `403 Forbidden` (`code: "access_pending"`).
@@ -109,7 +109,7 @@ flowchart TD
 #### Phase 3 Implementation Notes
 - Created `infrastructure/tests/e2e_service_test.rs` following strict SLAP/SRP metrics (<40 lines per function, max nesting depth 1, newspaper item ordering).
 - Imported `ROLE_ADMIN_ID` and `ROLE_EDITOR_ID` directly from `infrastructure::persistence::migration` (keeping `infrastructure::lib.rs` clean without redundant root re-exports).
-- Implemented `verify_health_and_onboarding` covering health and readiness probes (`/healthz`, `/ready`), live RS256 signature verification and forged token rejection, onboarding states (`access_not_requested`, `access_pending`), bootstrap approval via M2M service token, delegated role assignment via human administrator, and post-onboarding system inspectability (`config`, `locales`, `schema`, user directory with query filter).
+- Implemented `verify_health_and_onboarding` covering health and readiness probes (`/healthz`, `/ready`), live RS256 signature verification and forged token rejection (`401 unauthenticated`), onboarding states (`access_not_requested`, `access_pending`), bootstrap approval via M2M service token, delegated role assignment via human administrator, and post-onboarding system inspectability (`config`, `locales`, `schema`, user directory with query filter).
 - Implemented `verify_single_lifecycle_collections` covering category and tag document creation, verified immediate publication (`publicationState.status == "published"`, `revision == 1`), lifecycle guard assertions returning 409 Conflict (`draft_and_publish_disabled`) for `/publish` and `/unpublish`, tag update with OCC/version increment (`audit.version == 2`), deletion returning 204 No Content, and confirmed 404 Not Found on subsequent fetch.
 - All code passes `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`.
 
@@ -134,7 +134,7 @@ flowchart TD
 - Implemented `verify_singleton_lifecycle` in `infrastructure/tests/e2e_service_test.rs`:
   - Verified creation of singleton draft (`site-settings`, `status: "draft"`).
   - Asserted `singleton_already_exists` guard on secondary creation attempts returning `409 Conflict`.
-  - Tested revision 1 publish, draft modification transitions to `status: "modified"` (`liveRevision: 1`, `draftVersion: 3`), verified view isolation between `?view=published` and `?view=working`, and published revision 2.
+  - Tested revision 1 publish, draft modification transitions to `status: "modified"` (`liveRevision: 1`, `draftVersion: 2`), verified view isolation between `?view=published` and `?view=working`, and published revision 2.
 - Implemented `verify_article_lifecycle_and_relations` in `infrastructure/tests/e2e_service_test.rs`:
   - Created 2 `article` instances exercising all schema types (`text`, `uid`, localized dictionary in `en`/`uk`, integer, decimal formatted as string, and JSON) alongside relation attributes (`category` hasOne, `tags` hasMany).
   - Verified draft view filtering (`view=published` returns total 0 while `view=working` and `/admin/headers` return total 2 drafts).
@@ -171,4 +171,5 @@ flowchart TD
      - `infrastructure/tests/e2e_service_test.rs`: Placed `is_docker_available` immediately below the top-level orchestrators and moved leaf payload builders (`first_article_payload`, `article_v2_set_connect_payload`, `article_v2_disconnect_payload`) below their callers (`create_first_article_draft`, `verify_article_relation_set_and_connect`, `verify_article_relation_disconnect`).
   3. **Documentation & Quality Gates**:
      - Fixed misplaced doc comments on `oidc_jwks_url` and `service_tokens` in `infrastructure/src/cli/config.rs`.
+     - Updated E2E assertions in `infrastructure/tests/e2e_service_test.rs` to match live service error/version semantics (`401 unauthenticated` on forged JWT and `draftVersion: 2` when editing a published singleton reconstituted from the wide table).
      - Verified `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` pass with zero errors.

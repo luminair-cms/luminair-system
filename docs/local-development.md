@@ -383,7 +383,7 @@ When a local Docker daemon is available, `E2eEnvironment::start()` ([`infrastruc
 3. **Luminair Service (`luminair-cli:local`)** — compiled Docker image running in `--mode serve --auto-migrate` with live RS256 JWKS verification (`LUMINAIR_OIDC_JWKS_URL=http://<dex_alias>:5556/dex/keys`).
 
 The suite exercises the complete production HTTP stack over real TCP sockets:
-- **Health & OIDC JWKS Verification**: `/healthz`, `/ready`, live RS256 ID token acquisition from Dex (`admin@luminair.dev` and `editor@luminair.dev`), and forged token rejection (`401 invalid_token`).
+- **Health & OIDC JWKS Verification**: `/healthz`, `/ready`, live RS256 ID token acquisition from Dex (`admin@luminair.dev` and `editor@luminair.dev`), and forged token rejection (`401 unauthenticated`).
 - **User Onboarding & Directory**: Pre-onboarding guard (`403 access_not_requested`), profile sync (`/api/v1/auth/profile/sync`), access request submission (`403 access_pending`), M2M bootstrap approval (`local-dev-admin-token`), delegated human role approval, and user directory search (`/api/v1/auth/users`).
 - **Single-Lifecycle Collections (`category`, `tag`)**: Immediate publication (`draftAndPublish: false`), lifecycle guards (`409 draft_and_publish_disabled`), update with version increment, and deletion (`204 No Content` $\rightarrow$ `404 Not Found`).
 - **Singleton Lifecycle (`site-settings`)**: Draft creation, singleton uniqueness guard (`409 singleton_already_exists`), revision 1 publish, `modified` state transitions, `?view=published` vs `?view=working` isolation, and revision 2 publish.
@@ -391,6 +391,19 @@ The suite exercises the complete production HTTP stack over real TCP sockets:
 
 ### 5.2 Running the E2E Component Test Suite
 
+**PowerShell (Windows):**
+```powershell
+# Run the full E2E Testcontainers suite (builds luminair-cli:local automatically):
+cargo test -p infrastructure --test e2e_service_test -- --nocapture
+
+# Skip rebuilding the Docker image on subsequent runs when only test code changed:
+$env:LUMINAIR_SKIP_DOCKER_BUILD="1"; cargo test -p infrastructure --test e2e_service_test -- --nocapture
+
+# Clear the variable in the current PowerShell session when you want to rebuild again:
+Remove-Item Env:LUMINAIR_SKIP_DOCKER_BUILD -ErrorAction SilentlyContinue
+```
+
+**Bash / Zsh (Linux / macOS / Git Bash):**
 ```bash
 # Run the full E2E Testcontainers suite (builds luminair-cli:local automatically):
 cargo test -p infrastructure --test e2e_service_test -- --nocapture
