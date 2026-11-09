@@ -24,7 +24,7 @@ For cloud-native production setup with **AWS Cognito & Amazon Aurora DSQL** (arc
 For instructions on running all CLI execution modes (`validate`, `dry-run`, `migrate`, `serve`) via **Docker Compose** or **Cargo**, configuring a local `.env` file, debugging HTTP REST endpoints in the **Zed Editor** with **`httpYac`** and **Dex OIDC**, and running the automated **Testcontainers E2E Component Test Suite**, see:
 
 - **[Local Development, CLI Modes & REST Debugging Guide (`docs/local-development.md`)](./docs/local-development.md)**
-- **[E2E Testcontainers Architecture & Implementation Plan (`docs/plan-e2e-testcontainers.md`)](./docs/plan-e2e-testcontainers.md)**
+- **[End-to-End Component Testing with Testcontainers (`docs/e2e-testing.md`)](./docs/e2e-testing.md)**
 
 ## Environment Variables
 

@@ -237,7 +237,7 @@ flowchart TD
   - Update `config/cli-config.json` with service parameters.
   - Update `docker-compose.yml` adding service / web container profile.
   - Write integration tests in `cli_test.rs` testing service mode ephemeral port binding, `/healthz` HTTP probe, and clean signal termination.
-  - Implement full container-to-container E2E component test suite (`infrastructure/tests/e2e_service_test.rs` and `infrastructure/tests/e2e_support/`) using `testcontainers` (`postgres`, `dex`, and `luminair-cli:local` in `--mode serve --auto-migrate`); see [`docs/plan-e2e-testcontainers.md`](./plan-e2e-testcontainers.md).
+  - Implement full container-to-container E2E component test suite (`infrastructure/tests/e2e_service_test.rs` and `infrastructure/tests/e2e_support/`) using `testcontainers` (`postgres`, `dex`, and `luminair-cli:local` in `--mode serve --auto-migrate`); see [`docs/e2e-testing.md`](./e2e-testing.md).
 
 ---
 

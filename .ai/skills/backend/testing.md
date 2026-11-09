@@ -21,7 +21,7 @@ E2E container component tests    infrastructure/tests/e2e_service_test.rs  Full 
 - **Spec-backed tests** (rules in `docs/specs/`) must live in `<crate>/tests/*.rs` as integration tests. They test external, observable behavior only.
 - **Inline unit tests** (`#[cfg(test)]`) are reserved for private algorithms, helpers, or internal invariants.
 - **Fake repository self-tests** live directly inside `application/src/test_support.rs`.
-- **E2E container component tests** (`infrastructure/tests/e2e_service_test.rs` + `infrastructure/tests/e2e_support/`) use `testcontainers` (`0.28.0`) to orchestrate `postgres`, `dex` OIDC, and `luminair-cli:local` (`--mode serve --auto-migrate`) over an isolated Docker bridge network, asserting JSON responses with `assert_json_include!` and RFC 9457 `assert_problem_details` (see [`docs/plan-e2e-testcontainers.md`](../../../docs/plan-e2e-testcontainers.md)).
+- **E2E container component tests** (`infrastructure/tests/e2e_service_test.rs` + `infrastructure/tests/e2e_support/`) use `testcontainers` (`0.28.0`) to orchestrate `postgres`, `dex` OIDC, and `luminair-cli:local` (`--mode serve --auto-migrate`) over an isolated Docker bridge network, asserting JSON responses with `assert_json_include!` and RFC 9457 `assert_problem_details` (see [`docs/e2e-testing.md`](../../../docs/e2e-testing.md)).
 
 ---
 

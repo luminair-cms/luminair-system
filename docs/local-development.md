@@ -370,46 +370,9 @@ Accept: application/json
 
 ---
 
-## 5. Automated End-to-End (E2E) Component Testing with Testcontainers
+## 5. Automated End-to-End (E2E) Testing
 
-In addition to manual REST debugging via `httpYac`, Luminair includes a fully automated container-to-container E2E component test suite ([`infrastructure/tests/e2e_service_test.rs`](../infrastructure/tests/e2e_service_test.rs)) powered by [`testcontainers`](https://docs.rs/testcontainers) (`0.28.0`), [`reqwest`](https://docs.rs/reqwest) (`0.13.5`), and [`assert-json-diff`](https://docs.rs/assert-json-diff) (`2.0.2`).
+For automated end-to-end component testing across the complete production Docker container stack (PostgreSQL, Dex OIDC, and `luminair-cli:local` via `testcontainers`), including container topology, test scenario flow, and execution commands, see the dedicated guide:
 
-### 5.1 Container Topology & What It Verifies
+- **[End-to-End Component Testing with Testcontainers (`docs/e2e-testing.md`)](./e2e-testing.md)**
 
-When a local Docker daemon is available, `E2eEnvironment::start()` ([`infrastructure/tests/e2e_support/containers.rs`](../infrastructure/tests/e2e_support/containers.rs)) programmatically provisions an isolated Docker bridge network (`luminair-e2e-<uuid_v7>`) and orchestrates three containers:
-
-1. **PostgreSQL (`postgres:18.6-alpine3.24`)** — target relational database.
-2. **Dex OIDC (`ghcr.io/dexidp/dex:v2.43.0`)** — live OpenID Connect identity provider mounted with [`config/dex.yaml`](../config/dex.yaml).
-3. **Luminair Service (`luminair-cli:local`)** — compiled Docker image running in `--mode serve --auto-migrate` with live RS256 JWKS verification (`LUMINAIR_OIDC_JWKS_URL=http://<dex_alias>:5556/dex/keys`).
-
-The suite exercises the complete production HTTP stack over real TCP sockets:
-- **Health & OIDC JWKS Verification**: `/healthz`, `/ready`, live RS256 ID token acquisition from Dex (`admin@luminair.dev` and `editor@luminair.dev`), and forged token rejection (`401 unauthenticated`).
-- **User Onboarding & Directory**: Pre-onboarding guard (`403 access_not_requested`), profile sync (`/api/v1/auth/profile/sync`), access request submission (`403 access_pending`), M2M bootstrap approval (`local-dev-admin-token`), delegated human role approval, and user directory search (`/api/v1/auth/users`).
-- **Single-Lifecycle Collections (`category`, `tag`)**: Immediate publication (`draftAndPublish: false`), lifecycle guards (`409 draft_and_publish_disabled`), update with version increment, and deletion (`204 No Content` $\rightarrow$ `404 Not Found`).
-- **Singleton Lifecycle (`site-settings`)**: Draft creation, singleton uniqueness guard (`409 singleton_already_exists`), revision 1 publish, `modified` state transitions, `?view=published` vs `?view=working` isolation, and revision 2 publish.
-- **Full Collection Lifecycle, Relations & Snapshots (`article`)**: All field types (`text`, `uid`, `localizedText`, `int32`, `decimal`, `json`), OCC conflict detection (`409 version_mismatch`), relational mutations (`set`, `connect`, `disconnect`), `?populate=category,tags`, revision snapshots (`/snapshots`), conflict-guarded snapshot restore (`409 draft_has_pending_edits` and `discardPendingEdits: true`), `/discard-draft`, `/unpublish`, and `DELETE`.
-
-### 5.2 Running the E2E Component Test Suite
-
-**PowerShell (Windows):**
-```powershell
-# Run the full E2E Testcontainers suite (builds luminair-cli:local automatically):
-cargo test -p infrastructure --test e2e_service_test -- --nocapture
-
-# Skip rebuilding the Docker image on subsequent runs when only test code changed:
-$env:LUMINAIR_SKIP_DOCKER_BUILD="1"; cargo test -p infrastructure --test e2e_service_test -- --nocapture
-
-# Clear the variable in the current PowerShell session when you want to rebuild again:
-Remove-Item Env:LUMINAIR_SKIP_DOCKER_BUILD -ErrorAction SilentlyContinue
-```
-
-**Bash / Zsh (Linux / macOS / Git Bash):**
-```bash
-# Run the full E2E Testcontainers suite (builds luminair-cli:local automatically):
-cargo test -p infrastructure --test e2e_service_test -- --nocapture
-
-# Skip rebuilding the Docker image on subsequent runs when only test code changed:
-LUMINAIR_SKIP_DOCKER_BUILD=1 cargo test -p infrastructure --test e2e_service_test -- --nocapture
-```
-
-*(Note: If the Docker daemon is not accessible in the current environment, `test_e2e_full_service_lifecycle` logs a notice and skips gracefully so offline `cargo test --workspace` runs always succeed. See [`docs/plan-e2e-testcontainers.md`](./plan-e2e-testcontainers.md) for the full architectural specification.)*

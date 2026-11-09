@@ -19,7 +19,7 @@ Read in this order:
 5. [`docs/ui-architecture.md`](./docs/ui-architecture.md) — admin studio UI architecture
 6. [`docs/api.md`](./docs/api.md) — REST API endpoints, canonical RFC 9457 error schema, and UI localization guide
 7. [`docs/plan-infrastructure.md`](./docs/plan-infrastructure.md) — infrastructure crate module structure, composition root, and step-by-step implementation plan
-8. [`docs/plan-e2e-testcontainers.md`](./docs/plan-e2e-testcontainers.md) — end-to-end component testing architecture using Testcontainers (`postgres`, `dex`, and `luminair-cli:local`)
+8. [`docs/e2e-testing.md`](./docs/e2e-testing.md) — end-to-end component testing architecture using Testcontainers (`postgres`, `dex`, and `luminair-cli:local`)
 
 *(Note: `docs/roadmap.md` and `docs/data-model.md` are planned milestone artifacts).*
 
