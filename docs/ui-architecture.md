@@ -24,7 +24,7 @@ flowchart TD
     end
 
     subgraph Backend["Luminair Backend Service"]
-        Axum["Axum REST API (Port 3000)<br/>RFC 9457 Problem Details"]
+        Axum["Axum REST API (Port 8080)<br/>RFC 9457 Problem Details"]
         DSQL["PostgreSQL / AWS Aurora DSQL"]
     end
 
@@ -48,23 +48,24 @@ flowchart TD
 
 | Area | Package | Version | Purpose |
 |---|---|---|---|
-| **Core Framework** | `react`, `react-dom` | `^19.0.0` | UI component runtime |
-| **Language** | `typescript` | `^5.8.0` | Strict static type checking |
-| **Bundler & Tooling** | `vite` | `^6.2.0` | Build tool, dev server, and HMR |
-| **Design System** | `@mantine/core` | `^7.16.0` | Accessible UI component primitives |
-| **UI Utilities & Hooks** | `@mantine/hooks` | `^7.16.0` | Keyboard, clipboard, responsive layout hooks |
-| **Form Management** | `@mantine/form` | `^7.16.0` | Type-safe form handling and validation |
-| **Notifications & Toasts** | `@mantine/notifications` | `^7.16.0` | System alerts and problem-details toasts |
-| **Modals Manager** | `@mantine/modals` | `^7.16.0` | Dynamic confirm dialogs & relation pickers |
-| **Date & Time Controls** | `@mantine/dates`, `dayjs` | `^7.16.0` | Date and DateTime pickers |
-| **Rich Text Editor** | `@mantine/tiptap`, `@tiptap/react` | `^7.16.0` | WYSIWYG & rich markdown editing |
-| **Iconography** | `@tabler/icons-react` | `^3.30.0` | Comprehensive SVG icon suite |
-| **Routing** | `@tanstack/react-router` | `^1.110.0` | 100% type-safe routing & search params |
-| **Server State & Cache** | `@tanstack/react-query` | `^5.66.0` | Data fetching, caching, and mutation orchestration |
-| **Global Client State** | `zustand` | `^5.0.3` | Lightweight auth, layout, and draft state |
-| **HTTP Client** | `axios` | `^1.7.9` | Request/response interceptors & error mapping |
-| **Authentication** | `oidc-client-ts` | `^3.1.0` | OIDC Authorization Code Flow with PKCE |
-| **Validation Schemas** | `zod` | `^3.24.2` | Runtime schema validation for query parameters |
+| **Core Framework** | `react`, `react-dom` | `^19.3.1` | UI component runtime |
+| **Language** | `typescript` | `^7.0.2` | Strict static type checking |
+| **Bundler & Tooling** | `vite` | `^8.3.6` | Build tool, dev server, and HMR |
+| **Design System** | `@mantine/core` | `^9.8.0` | Accessible UI component primitives |
+| **UI Utilities & Hooks** | `@mantine/hooks` | `^9.8.0` | Keyboard, clipboard, responsive layout hooks |
+| **Form Management** | `@mantine/form` | `^9.8.0` | Type-safe form handling and validation |
+| **Notifications & Toasts** | `@mantine/notifications` | `^9.8.0` | System alerts and problem-details toasts |
+| **Modals Manager** | `@mantine/modals` | `^9.8.0` | Dynamic confirm dialogs & relation pickers |
+| **Date & Time Controls** | `@mantine/dates`, `dayjs` | `^9.8.0` / `^1.11.23` | Date and DateTime pickers |
+| **Rich Text Editor** | `@mantine/tiptap`, `@tiptap/react`, `@tiptap/starter-kit` | `^9.8.0` / `^3.33.0` | WYSIWYG & rich markdown editing |
+| **Iconography** | `@tabler/icons-react` | `^3.51.0` | Comprehensive SVG icon suite |
+| **Routing** | `@tanstack/react-router` | `^1.170.46` | 100% type-safe routing & search params |
+| **Server State & Cache** | `@tanstack/react-query` | `^5.107.1` | Data fetching, caching, and mutation orchestration |
+| **Global Client State** | `zustand` | `^5.1.0` | Lightweight auth, layout, and draft state |
+| **HTTP Client** | `axios` | `^1.21.0` | Request/response interceptors & error mapping |
+| **Authentication** | `oidc-client-ts` | `^3.5.0` | OIDC Authorization Code Flow with PKCE |
+| **Validation Schemas** | `zod` | `^4.6.7` | Runtime schema validation for query parameters |
+| **Localization (i18n)** | `i18next`, `react-i18next` | `^27.0.1` / `^18.0.1` | Multi-language translation & error catalog localization |
 
 ---
 
@@ -336,14 +337,20 @@ VITE_OIDC_SCOPE="openid email profile"
 ```typescript
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(import.meta.dirname, './src'),
+    },
+  },
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },

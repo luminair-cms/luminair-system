@@ -31,7 +31,7 @@ Rules are **mandatory invariants** that must never be violated. Skills are **on-
 
 - **Common Rules**: [`.ai/rules/common.md`](.ai/rules/common.md) — Human governance, hexagonal boundaries, RFC 9457 error contracts, security.
 - **Backend (Rust) Rules**: [`.ai/rules/backend-rust.md`](.ai/rules/backend-rust.md) — Strict domain purity, `nutype`, `Decimal`, `Uuid::now_v7()`, zero `.unwrap()`, SLAP metrics, `cargo clippy`.
-- **Frontend (React) Rules**: [`.ai/rules/frontend-react.md`](.ai/rules/frontend-react.md) — Strict TypeScript, Mantine v7 design system, TanStack Query/Router, RFC 9457 i18n localization.
+- **Frontend (React) Rules**: [`.ai/rules/frontend-react.md`](.ai/rules/frontend-react.md) — Strict TypeScript, Mantine design system, TanStack Query/Router, React Compiler invariants, RFC 9457 i18n localization.
 
 ### B. Skills by Domain
 

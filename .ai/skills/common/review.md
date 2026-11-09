@@ -54,7 +54,8 @@ npm test
 ## 5. Frontend Architecture & Design System ([`frontend-react.md`](../../rules/frontend-react.md), [`react-patterns.md`](../frontend/react-patterns.md))
 
 - [ ] Strict TypeScript: Zero `any`; all props and hook return types explicitly typed.
-- [ ] Mantine v7 components used; zero raw CSS or inline styles where Mantine style props or theme tokens exist.
+- [ ] Mantine components used; zero raw CSS or inline styles where Mantine style props or theme tokens exist.
+- [ ] React Compiler & React 19 compliance: zero manual `useMemo`/`useCallback` for performance; render functions strictly pure; zero compiler diagnostic suppressions; `ref` passed as a regular prop (no `forwardRef`).
 - [ ] Server state managed via TanStack Query v5 custom hooks (zero data fetching in `useEffect`).
 - [ ] Client state properly separated: local state in `useState`, global session/draft state in Zustand.
 - [ ] RFC 9457 error mapping: `error.code` mapped to translation dictionary (`t('errors.' + error.code)`); backend developer `detail` never displayed directly as localized user copy.
