@@ -106,8 +106,8 @@ In alignment with Hexagonal Architecture and DDD boundaries:
 
 The UI layer is an independent **Decoupled Single-Page Application (SPA)** adhering strictly to Hexagonal Architecture boundaries:
 - **Location**: Isolated `/frontend` directory in the repository (independent package management, zero impact on Cargo workspace).
-- **Technology Stack**: React 19, TypeScript, Mantine v7 design system (`@mantine/*`), Zustand for global client state, TanStack Router for type-safe routing, and TanStack Query v5 for server state.
+- **Technology Stack**: React 19.3, TypeScript 7, Mantine v9 design system (`@mantine/*`), Zustand for global client state, TanStack Router for type-safe routing, and TanStack Query v5 for server state.
 - **Dynamic Schema Forms**: Queries `/api/schema/document-types` at runtime to generate forms for all 12 field types, multi-locale editing tabs (`LocalizedText`), and relational association pickers (`HasOne` and `HasMany`).
 - **Authentication**: OIDC Authorization Code Flow with PKCE (`oidc-client-ts`). Uses Dex for local development (~15MB RAM via Docker Compose) and AWS Cognito in production.
 - **Deployment**: Static assets hosted on AWS S3 behind an Amazon CloudFront CDN distribution with Origin Access Control (OAC). CloudFront routes `/*` to S3 and `/api/*` to the Axum backend, eliminating CORS preflight overhead in production.
-- **Specification**: See [`docs/ui-architecture.md`](./ui-architecture.md).
+- **Specification & Implementation Plan**: See [`docs/ui-architecture.md`](./ui-architecture.md) and [`docs/plan-ui.md`](./plan-ui.md).

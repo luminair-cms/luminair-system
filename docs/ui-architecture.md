@@ -4,10 +4,12 @@
 
 The Luminair Admin Dashboard is a modern, responsive Single-Page Application (SPA) providing content authors, editors, and administrators with an intuitive interface to manage dynamic schema-driven documents, publication lifecycles, relational associations, and user access requests.
 
+> For the phased execution roadmap, package matrix, React 19 / React Compiler harmonization, and step-by-step deliverables, see [`docs/plan-ui.md`](./plan-ui.md).
+
 ```mermaid
 flowchart TD
     subgraph Browser["User Browser"]
-        SPA["React 19 + TypeScript SPA<br/>(Mantine v7 + Zustand)"]
+        SPA["React 19 + TypeScript SPA<br/>(Mantine v9 + Zustand)"]
         Router["TanStack Router<br/>(Type-Safe Routing & Guards)"]
         Query["TanStack Query v5<br/>(Server State & Cache)"]
         Store["Zustand Stores<br/>(Auth, UI, Draft Buffers)"]
