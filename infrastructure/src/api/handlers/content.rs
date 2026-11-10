@@ -110,7 +110,7 @@ where
     let view = query.parse_view(VersionView::Published)?;
     let populate = query.parse_populate(doc_type)?;
 
-    let cmd = FindDocumentsCommand::new(&doc_type.id, pagination)
+    let cmd = FindDocumentsCommand::new(doc_type, pagination)
         .with_view(view)
         .with_populate(populate);
 
@@ -134,7 +134,7 @@ where
 {
     let doc_type = resolve_document_type(state.system_context(), &type_id)?;
     let pagination = query.pagination();
-    let mut cmd = ListAdminHeadersCommand::new(&doc_type.id, pagination);
+    let mut cmd = ListAdminHeadersCommand::new(doc_type, pagination);
     if let Some(status) = query.status {
         cmd = cmd.with_status_filter(status);
     }
@@ -162,7 +162,7 @@ where
     let view = query.parse_view(VersionView::Published)?;
     let populate = query.parse_populate(doc_type)?;
 
-    let cmd = FindByIdCommand::new(&doc_type.id, id)
+    let cmd = FindByIdCommand::new(doc_type, id)
         .with_view(view)
         .with_populate(populate);
 
@@ -192,7 +192,7 @@ where
     let populate = parse_populate_param(query.populate.as_deref(), doc_type)?;
     let (fields, relations) = decode_document_payload(doc_type, payload.fields, payload.relations)?;
 
-    let cmd = CreateDocumentCommand::new(&doc_type.id, fields)
+    let cmd = CreateDocumentCommand::new(doc_type, fields)
         .with_relations(relations)
         .with_populate(populate);
 
@@ -216,7 +216,7 @@ where
     let populate = parse_populate_param(query.populate.as_deref(), doc_type)?;
     let (fields, relations) = decode_document_payload(doc_type, payload.fields, payload.relations)?;
 
-    let mut cmd = UpdateDocumentCommand::new(id, &doc_type.id, fields)
+    let mut cmd = UpdateDocumentCommand::new(id, doc_type, fields)
         .with_relations(relations)
         .with_populate(populate);
     if let Some(expected_version) = payload.expected_version {
@@ -238,7 +238,7 @@ where
 {
     let doc_type = resolve_document_type(state.system_context(), &type_id)?;
     let id = parse_instance_id(&raw_id)?;
-    let cmd = DeleteDocumentCommand::new(id, &doc_type.id);
+    let cmd = DeleteDocumentCommand::new(id, doc_type);
 
     state.documents_service().delete(&caller, cmd).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -256,7 +256,7 @@ where
 {
     let doc_type = resolve_document_type(state.system_context(), &type_id)?;
     let id = parse_instance_id(&raw_id)?;
-    let mut cmd = PublishDocumentCommand::new(id, &doc_type.id);
+    let mut cmd = PublishDocumentCommand::new(id, doc_type);
     if let Some(Json(p)) = payload
         && let Some(v) = p.expected_version
     {
@@ -282,7 +282,7 @@ where
     let resolution = payload
         .and_then(|Json(p)| p.draft_resolution)
         .unwrap_or_default();
-    let cmd = UnpublishDocumentCommand::new(id, &doc_type.id).with_draft_resolution(resolution);
+    let cmd = UnpublishDocumentCommand::new(id, doc_type).with_draft_resolution(resolution);
 
     let instance = state.documents_service().unpublish(&caller, cmd).await?;
     Ok(JsonData::new(DocumentInstanceDto::from(instance)))
@@ -299,7 +299,7 @@ where
 {
     let doc_type = resolve_document_type(state.system_context(), &type_id)?;
     let id = parse_instance_id(&raw_id)?;
-    let cmd = DiscardDraftCommand::new(id, &doc_type.id);
+    let cmd = DiscardDraftCommand::new(id, doc_type);
 
     let instance = state
         .documents_service()
@@ -319,7 +319,7 @@ where
 {
     let doc_type = resolve_document_type(state.system_context(), &type_id)?;
     let id = parse_instance_id(&raw_id)?;
-    let cmd = ListSnapshotsCommand::new(&doc_type.id, id);
+    let cmd = ListSnapshotsCommand::new(doc_type, id);
 
     let snapshots = state
         .documents_service()
@@ -340,7 +340,7 @@ where
 {
     let doc_type = resolve_document_type(state.system_context(), &type_id)?;
     let id = parse_instance_id(&raw_id)?;
-    let cmd = GetSnapshotCommand::new(&doc_type.id, id, revision);
+    let cmd = GetSnapshotCommand::new(doc_type, id, revision);
 
     let snapshot = state.documents_service().get_snapshot(&caller, cmd).await?;
     Ok(JsonData::new(DocumentSnapshotDto::from(snapshot)))
@@ -360,7 +360,7 @@ where
     let id = parse_instance_id(&raw_id)?;
     let discard_pending_edits = payload.is_some_and(|Json(p)| p.discard_pending_edits);
 
-    let mut cmd = RestoreSnapshotCommand::new(id, &doc_type.id, revision);
+    let mut cmd = RestoreSnapshotCommand::new(id, doc_type, revision);
     if discard_pending_edits {
         cmd = cmd.with_discard_pending_edits();
     }

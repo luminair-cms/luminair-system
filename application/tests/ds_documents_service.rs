@@ -63,7 +63,7 @@ async fn ds_01_create_collection_draft_success() {
     );
 
     let res = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await;
 
     assert!(res.is_ok(), "expected successful creation: {:?}", res);
@@ -90,13 +90,13 @@ async fn ds_02_create_blocked_for_second_singletype_instance() {
     let first = service
         .create(
             &caller,
-            CreateDocumentCommand::new(&doc_type.id, fields.clone()),
+            CreateDocumentCommand::new(doc_type, fields.clone()),
         )
         .await;
     assert!(first.is_ok());
 
     let second = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await;
 
     assert!(matches!(
@@ -118,7 +118,7 @@ async fn ds_03_create_rejects_content_violating_field_constraints() {
     );
 
     let res = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await;
 
     assert!(matches!(res, Err(ApplicationError::Validation(_))));
@@ -133,7 +133,7 @@ async fn ds_04_update_bumps_version_and_touches_audit_trail() {
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("V1".into()))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
@@ -146,7 +146,7 @@ async fn ds_04_update_bumps_version_and_touches_audit_trail() {
     let updated = service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, update_fields),
+            UpdateDocumentCommand::new(inst.id, doc_type, update_fields),
         )
         .await
         .unwrap();
@@ -166,7 +166,7 @@ async fn ds_05_update_retains_unmentioned_fields() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
@@ -174,7 +174,7 @@ async fn ds_05_update_retains_unmentioned_fields() {
     let updated = service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, HashMap::new()),
+            UpdateDocumentCommand::new(inst.id, doc_type, HashMap::new()),
         )
         .await
         .unwrap();
@@ -193,12 +193,12 @@ async fn ds_06_publish_advances_revision_on_draftpublish_enabled_type() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
     let published = service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
 
@@ -219,18 +219,18 @@ async fn ds_17_publish_rejects_already_published_document_without_pending_change
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
     let published = service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
     let version_before = published.audit.version;
 
     // DS-17: second publish without any pending draft changes is rejected
     let res = service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await;
     match res {
         Err(ApplicationError::Conflict { code, message, .. }) => {
@@ -244,7 +244,7 @@ async fn ds_17_publish_rejects_already_published_document_without_pending_change
     }
 
     let live = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap()
         .expect("live document must still exist");
@@ -255,7 +255,7 @@ async fn ds_17_publish_rejects_already_published_document_without_pending_change
     assert_eq!(live.audit.version, version_before);
 
     let snapshots = service
-        .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
+        .list_snapshots(&caller, ListSnapshotsCommand::new(doc_type, inst.id))
         .await
         .unwrap();
     assert!(
@@ -275,7 +275,7 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
@@ -289,7 +289,7 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
     );
 
     let res = service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await;
 
     assert!(matches!(
@@ -310,7 +310,7 @@ async fn ds_07_publish_rejects_document_of_draftpublish_disabled_type() {
     let updated = service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, update_fields),
+            UpdateDocumentCommand::new(inst.id, doc_type, update_fields),
         )
         .await
         .unwrap();
@@ -336,18 +336,18 @@ async fn ds_08_unpublish_transitions_to_draft_with_last_revision() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
     service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
 
     let draft = service
         .unpublish(
             &caller,
-            UnpublishDocumentCommand::new(inst.id, &doc_type.id),
+            UnpublishDocumentCommand::new(inst.id, doc_type),
         )
         .await
         .unwrap();
@@ -362,7 +362,7 @@ async fn ds_08_unpublish_transitions_to_draft_with_last_revision() {
 
     // Verify Published view returns None after unpublish
     let published_view = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap();
     assert!(published_view.is_none());
@@ -371,7 +371,7 @@ async fn ds_08_unpublish_transitions_to_draft_with_last_revision() {
     let working_view = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -394,14 +394,14 @@ async fn ds_09_unpublish_rejects_already_draft_instance() {
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft".into()))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
     let res = service
         .unpublish(
             &caller,
-            UnpublishDocumentCommand::new(inst.id, &doc_type.id),
+            UnpublishDocumentCommand::new(inst.id, doc_type),
         )
         .await;
 
@@ -424,17 +424,17 @@ async fn ds_10_delete_removes_instance() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
     service
-        .delete(&caller, DeleteDocumentCommand::new(inst.id, &doc_type.id))
+        .delete(&caller, DeleteDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
 
     let fetched = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap();
     assert!(fetched.is_none());
@@ -442,7 +442,7 @@ async fn ds_10_delete_removes_instance() {
     let fetched_working = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst.id).with_view(VersionView::Working),
         )
         .await
         .unwrap();
@@ -459,7 +459,7 @@ async fn ds_11_find_applies_filters_and_returns_total_count() {
             ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(title.into()))),
         );
         service
-            .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+            .create(&caller, CreateDocumentCommand::new(doc_type, fields))
             .await
             .unwrap();
     }
@@ -472,7 +472,7 @@ async fn ds_11_find_applies_filters_and_returns_total_count() {
     let (items, total) = service
         .find(
             &caller,
-            FindDocumentsCommand::new(&doc_type.id, Pagination::default())
+            FindDocumentsCommand::new(doc_type, Pagination::default())
                 .with_filters(vec![filter]),
         )
         .await
@@ -493,7 +493,7 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
         ))),
     );
     let inst = service
-        .create(&admin, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&admin, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
@@ -502,7 +502,7 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
     let update_res = service
         .update(
             &stranger,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, HashMap::new()),
+            UpdateDocumentCommand::new(inst.id, doc_type, HashMap::new()),
         )
         .await;
     assert!(matches!(
@@ -511,7 +511,7 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
     ));
 
     let delete_res = service
-        .delete(&stranger, DeleteDocumentCommand::new(inst.id, &doc_type.id))
+        .delete(&stranger, DeleteDocumentCommand::new(inst.id, doc_type))
         .await;
     assert!(matches!(
         delete_res,
@@ -521,7 +521,7 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
     let publish_res = service
         .publish(
             &stranger,
-            PublishDocumentCommand::new(inst.id, &doc_type.id),
+            PublishDocumentCommand::new(inst.id, doc_type),
         )
         .await;
     assert!(matches!(
@@ -532,7 +532,7 @@ async fn ds_12_unauthorized_caller_denied_on_all_mutations() {
     let unpublish_res = service
         .unpublish(
             &stranger,
-            UnpublishDocumentCommand::new(inst.id, &doc_type.id),
+            UnpublishDocumentCommand::new(inst.id, doc_type),
         )
         .await;
     assert!(matches!(
@@ -553,13 +553,13 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
     );
 
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
     // 1. Publish to live
     let published = service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
     assert!(matches!(
@@ -569,7 +569,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
 
     // Attempting to discard draft when clean published fails
     let fail_discard = service
-        .discard_draft(&caller, DiscardDraftCommand::new(inst.id, &doc_type.id))
+        .discard_draft(&caller, DiscardDraftCommand::new(inst.id, doc_type))
         .await;
     assert!(matches!(
         fail_discard,
@@ -590,7 +590,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
     let modified = service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, update_fields),
+            UpdateDocumentCommand::new(inst.id, doc_type, update_fields),
         )
         .await
         .unwrap();
@@ -610,7 +610,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
 
     // 3. Discard draft -> reverts to clean live Published copy
     let restored = service
-        .discard_draft(&caller, DiscardDraftCommand::new(inst.id, &doc_type.id))
+        .discard_draft(&caller, DiscardDraftCommand::new(inst.id, doc_type))
         .await
         .expect("discard draft succeeds");
 
@@ -627,7 +627,7 @@ async fn ds_13_discard_draft_reverts_to_published_state() {
 
     // Verify subsequent find_by_id returns the clean published instance
     let fetched = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap()
         .expect("found");
@@ -652,12 +652,12 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_v1))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields_v1))
         .await
         .unwrap();
 
     let pub1 = service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
     assert!(matches!(
@@ -676,13 +676,13 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, fields_v2),
+            UpdateDocumentCommand::new(inst.id, doc_type, fields_v2),
         )
         .await
         .unwrap();
 
     let pub2 = service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
     assert!(matches!(
@@ -693,7 +693,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     // 3. Verify snapshot history via list_snapshots (newest first)
     // Under archive-on-replace, publishing revision 2 archives revision 1, leaving 1 snapshot.
     let snapshots = service
-        .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
+        .list_snapshots(&caller, ListSnapshotsCommand::new(doc_type, inst.id))
         .await
         .expect("list snapshots ok");
     assert_eq!(snapshots.len(), 1);
@@ -711,7 +711,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     let modified = service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, fields_v3),
+            UpdateDocumentCommand::new(inst.id, doc_type, fields_v3),
         )
         .await
         .unwrap();
@@ -727,7 +727,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     let conflict_err = service
         .restore_snapshot(
             &caller,
-            RestoreSnapshotCommand::new(inst.id, &doc_type.id, 1),
+            RestoreSnapshotCommand::new(inst.id, doc_type, 1),
         )
         .await
         .unwrap_err();
@@ -747,7 +747,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     let restored = service
         .restore_snapshot(
             &caller,
-            RestoreSnapshotCommand::new(inst.id, &doc_type.id, 1).with_discard_pending_edits(),
+            RestoreSnapshotCommand::new(inst.id, doc_type, 1).with_discard_pending_edits(),
         )
         .await
         .expect("restore snapshot succeeds with discard_pending_edits");
@@ -768,7 +768,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
 
     // Verify snapshot list contains only the superseded Publish snapshot (no checkpoint created)
     let snapshots_after = service
-        .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst.id))
+        .list_snapshots(&caller, ListSnapshotsCommand::new(doc_type, inst.id))
         .await
         .expect("list snapshots ok");
     assert_eq!(snapshots_after.len(), 1);
@@ -777,7 +777,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
 
     // Verify default view (Published) returns live revision 2
     let published_view = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap()
         .expect("found published view");
@@ -796,7 +796,7 @@ async fn ds_14_restore_snapshot_loads_historical_revision_to_draft() {
     let working_view = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -830,14 +830,14 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
         ))),
     );
     let inst_a = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_a1))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields_a1))
         .await
         .unwrap();
 
     service
         .publish(
             &caller,
-            PublishDocumentCommand::new(inst_a.id, &doc_type.id),
+            PublishDocumentCommand::new(inst_a.id, doc_type),
         )
         .await
         .unwrap();
@@ -852,7 +852,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst_a.id, &doc_type.id, fields_a2),
+            UpdateDocumentCommand::new(inst_a.id, doc_type, fields_a2),
         )
         .await
         .unwrap();
@@ -860,7 +860,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     let unpub_a = service
         .unpublish(
             &caller,
-            UnpublishDocumentCommand::new(inst_a.id, &doc_type.id)
+            UnpublishDocumentCommand::new(inst_a.id, doc_type)
                 .with_draft_resolution(UnpublishDraftResolution::KeepDraft),
         )
         .await
@@ -883,7 +883,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
 
     // Published view is None
     let pub_view_a = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst_a.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst_a.id))
         .await
         .unwrap();
     assert!(pub_view_a.is_none());
@@ -892,7 +892,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     let work_view_a = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst_a.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst_a.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -906,7 +906,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
 
     // Snapshots has the unpublish snapshot for Live V1
     let snaps_a = service
-        .list_snapshots(&caller, ListSnapshotsCommand::new(&doc_type.id, inst_a.id))
+        .list_snapshots(&caller, ListSnapshotsCommand::new(doc_type, inst_a.id))
         .await
         .unwrap();
     assert_eq!(snaps_a.len(), 1);
@@ -922,14 +922,14 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
         ))),
     );
     let inst_b = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields_b1))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields_b1))
         .await
         .unwrap();
 
     service
         .publish(
             &caller,
-            PublishDocumentCommand::new(inst_b.id, &doc_type.id),
+            PublishDocumentCommand::new(inst_b.id, doc_type),
         )
         .await
         .unwrap();
@@ -944,7 +944,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst_b.id, &doc_type.id, fields_b2),
+            UpdateDocumentCommand::new(inst_b.id, doc_type, fields_b2),
         )
         .await
         .unwrap();
@@ -952,7 +952,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     let unpub_b = service
         .unpublish(
             &caller,
-            UnpublishDocumentCommand::new(inst_b.id, &doc_type.id)
+            UnpublishDocumentCommand::new(inst_b.id, doc_type)
                 .with_draft_resolution(UnpublishDraftResolution::ReplaceWithPublished),
         )
         .await
@@ -977,7 +977,7 @@ async fn ds_16_unpublish_draft_resolution_on_modified_document() {
     let work_view_b = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst_b.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst_b.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -1038,7 +1038,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     let author = service
         .create(
             &caller,
-            CreateDocumentCommand::new(&leaked_author.id, author_fields),
+            CreateDocumentCommand::new(leaked_author, author_fields),
         )
         .await
         .unwrap();
@@ -1060,7 +1060,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     let art1 = service
         .create(
             &caller,
-            CreateDocumentCommand::new(&leaked_article.id, art1_fields).with_relations(art1_rels),
+            CreateDocumentCommand::new(leaked_article, art1_fields).with_relations(art1_rels),
         )
         .await
         .unwrap();
@@ -1069,7 +1069,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     service
         .publish(
             &caller,
-            PublishDocumentCommand::new(art1.id, &leaked_article.id),
+            PublishDocumentCommand::new(art1.id, leaked_article),
         )
         .await
         .unwrap();
@@ -1084,7 +1084,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     service
         .update(
             &caller,
-            UpdateDocumentCommand::new(art1.id, &leaked_article.id, update_fields),
+            UpdateDocumentCommand::new(art1.id, leaked_article, update_fields),
         )
         .await
         .unwrap();
@@ -1100,7 +1100,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     service
         .create(
             &caller,
-            CreateDocumentCommand::new(&leaked_article.id, art2_fields),
+            CreateDocumentCommand::new(leaked_article, art2_fields),
         )
         .await
         .unwrap();
@@ -1109,7 +1109,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     let (headers, total) = service
         .list_admin_headers(
             &caller,
-            ListAdminHeadersCommand::new(&leaked_article.id, Pagination::default()),
+            ListAdminHeadersCommand::new(leaked_article, Pagination::default()),
         )
         .await
         .expect("list admin headers ok");
@@ -1142,7 +1142,7 @@ async fn ds_15_list_admin_headers_returns_lightweight_projections_and_enriches_r
     let (draft_headers, draft_total) = service
         .list_admin_headers(
             &caller,
-            ListAdminHeadersCommand::new(&leaked_article.id, Pagination::default())
+            ListAdminHeadersCommand::new(leaked_article, Pagination::default())
                 .with_status_filter(DocumentStatus::Draft),
         )
         .await
@@ -1169,13 +1169,13 @@ async fn test_version_views_across_all_four_document_states() {
     let inst = service
         .create(
             &caller,
-            CreateDocumentCommand::new(&doc_type.id, draft_fields),
+            CreateDocumentCommand::new(doc_type, draft_fields),
         )
         .await
         .unwrap();
 
     let pub_view_1 = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap();
     assert!(
@@ -1186,7 +1186,7 @@ async fn test_version_views_across_all_four_document_states() {
     let work_view_1 = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -1204,12 +1204,12 @@ async fn test_version_views_across_all_four_document_states() {
 
     // 2. State: Published
     service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
 
     let pub_view_2 = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap()
         .expect("Published instance must be visible in Published tab");
@@ -1227,7 +1227,7 @@ async fn test_version_views_across_all_four_document_states() {
     let work_view_2 = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -1254,13 +1254,13 @@ async fn test_version_views_across_all_four_document_states() {
     service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, modified_fields),
+            UpdateDocumentCommand::new(inst.id, doc_type, modified_fields),
         )
         .await
         .unwrap();
 
     let pub_view_3 = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap()
         .expect("Live published content must remain visible in Published tab");
@@ -1278,7 +1278,7 @@ async fn test_version_views_across_all_four_document_states() {
     let work_view_3 = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -1301,13 +1301,13 @@ async fn test_version_views_across_all_four_document_states() {
     service
         .unpublish(
             &caller,
-            UnpublishDocumentCommand::new(inst.id, &doc_type.id),
+            UnpublishDocumentCommand::new(inst.id, doc_type),
         )
         .await
         .unwrap();
 
     let pub_view_4 = service
-        .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, inst.id))
+        .find_by_id(&caller, FindByIdCommand::new(doc_type, inst.id))
         .await
         .unwrap();
     assert!(
@@ -1318,7 +1318,7 @@ async fn test_version_views_across_all_four_document_states() {
     let work_view_4 = service
         .find_by_id(
             &caller,
-            FindByIdCommand::new(&doc_type.id, inst.id).with_view(VersionView::Working),
+            FindByIdCommand::new(doc_type, inst.id).with_view(VersionView::Working),
         )
         .await
         .unwrap()
@@ -1352,11 +1352,11 @@ async fn ds_18_get_snapshot_returns_historical_revision() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, f1))
+        .create(&caller, CreateDocumentCommand::new(doc_type, f1))
         .await
         .unwrap();
     service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
 
@@ -1371,18 +1371,18 @@ async fn ds_18_get_snapshot_returns_historical_revision() {
     service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, f2),
+            UpdateDocumentCommand::new(inst.id, doc_type, f2),
         )
         .await
         .unwrap();
     service
-        .publish(&caller, PublishDocumentCommand::new(inst.id, &doc_type.id))
+        .publish(&caller, PublishDocumentCommand::new(inst.id, doc_type))
         .await
         .unwrap();
 
     // 3. Inspect historical revision 1 snapshot via get_snapshot
     let snap = service
-        .get_snapshot(&caller, GetSnapshotCommand::new(&doc_type.id, inst.id, 1))
+        .get_snapshot(&caller, GetSnapshotCommand::new(doc_type, inst.id, 1))
         .await
         .unwrap();
     assert_eq!(snap.revision, 1);
@@ -1396,7 +1396,7 @@ async fn ds_18_get_snapshot_returns_historical_revision() {
 
     // 4. Non-existent revision returns NotFound
     let res = service
-        .get_snapshot(&caller, GetSnapshotCommand::new(&doc_type.id, inst.id, 99))
+        .get_snapshot(&caller, GetSnapshotCommand::new(doc_type, inst.id, 99))
         .await;
     assert!(matches!(
         res,
@@ -1420,7 +1420,7 @@ async fn test_update_occ_version_mismatch_conflict() {
         ))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
     assert_eq!(inst.audit.version, 1);
@@ -1436,7 +1436,7 @@ async fn test_update_occ_version_mismatch_conflict() {
     let updated = service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, u1).with_expected_version(1),
+            UpdateDocumentCommand::new(inst.id, doc_type, u1).with_expected_version(1),
         )
         .await
         .unwrap();
@@ -1451,7 +1451,7 @@ async fn test_update_occ_version_mismatch_conflict() {
     let res = service
         .update(
             &caller,
-            UpdateDocumentCommand::new(inst.id, &doc_type.id, u2).with_expected_version(1),
+            UpdateDocumentCommand::new(inst.id, doc_type, u2).with_expected_version(1),
         )
         .await;
     assert!(matches!(
@@ -1474,7 +1474,7 @@ async fn test_restore_snapshot_on_draft_fails_immediately_with_invalid_state_tra
         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text("Draft".into()))),
     );
     let inst = service
-        .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+        .create(&caller, CreateDocumentCommand::new(doc_type, fields))
         .await
         .unwrap();
 
@@ -1482,7 +1482,7 @@ async fn test_restore_snapshot_on_draft_fails_immediately_with_invalid_state_tra
     let res = service
         .restore_snapshot(
             &caller,
-            RestoreSnapshotCommand::new(inst.id, &doc_type.id, 1),
+            RestoreSnapshotCommand::new(inst.id, doc_type, 1),
         )
         .await;
     assert!(matches!(

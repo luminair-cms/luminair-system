@@ -64,9 +64,9 @@ impl PersistenceContainer {
     pub(crate) fn new(pool: PgPool, context: &'static SystemContext) -> Self {
         let naming = SchemaNaming::from_registry(&context.schema);
         let document_instance_repo =
-            SqlxDocumentInstanceRepository::new(pool.clone(), context, naming);
+            SqlxDocumentInstanceRepository::new(pool.clone(), naming);
         let document_snapshot_repo =
-            SqlxDocumentSnapshotRepository::new(pool.clone(), context, naming);
+            SqlxDocumentSnapshotRepository::new(pool.clone(), naming);
         let role_repo = SqlxRoleRepository::new(pool.clone());
         let assignment_repo = SqlxUserRoleAssignmentRepository::new(pool.clone());
         let access_request_repo = SqlxAccessRequestRepository::new(pool.clone());

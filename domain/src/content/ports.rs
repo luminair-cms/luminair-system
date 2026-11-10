@@ -9,7 +9,7 @@ use super::header::{
 use super::instance::{DocumentInstance, DocumentInstanceId};
 use super::values::DomainValue;
 use crate::errors::DomainError;
-use crate::schema::{AttributeId, DocumentTypeId};
+use crate::schema::{AttributeId, DocumentType, DocumentTypeId};
 
 pub use crate::common::{Page, Pagination};
 
@@ -41,7 +41,7 @@ pub trait DocumentInstanceRepository: Send + Sync {
     /// - `VersionView::Working`: queries working copies (drafts or working state).
     fn find_by_type(
         &self,
-        type_id: &DocumentTypeId,
+        doc_type: &DocumentType,
         view: VersionView,
         pagination: Pagination,
         filters: Vec<FieldFilter>,
@@ -50,7 +50,7 @@ pub trait DocumentInstanceRepository: Send + Sync {
     /// Admin Studio listing: returns lightweight `DocumentHeader` projections across drafts and published rows.
     fn list_admin_headers(
         &self,
-        type_id: &DocumentTypeId,
+        doc_type: &DocumentType,
         pagination: Pagination,
         status_filter: Option<DocumentStatus>,
     ) -> impl Future<Output = Result<Page<DocumentHeader>, DomainError>> + Send;
@@ -58,7 +58,7 @@ pub trait DocumentInstanceRepository: Send + Sync {
     /// Resolves human-readable display titles for a list of document instance IDs within a target type.
     fn find_display_titles_by_ids(
         &self,
-        type_id: &DocumentTypeId,
+        target_type: &DocumentType,
         ids: &[DocumentInstanceId],
     ) -> impl Future<Output = Result<HashMap<DocumentInstanceId, String>, DomainError>> + Send;
 

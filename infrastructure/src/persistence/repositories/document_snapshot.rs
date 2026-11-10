@@ -8,7 +8,6 @@ use domain::content::instance::DocumentInstanceId;
 use domain::content::ports::DocumentSnapshotRepository;
 use domain::errors::DomainError;
 use domain::schema::DocumentTypeId;
-use domain::system::SystemContext;
 
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{DocumentTypeNaming, SchemaNaming};
@@ -30,7 +29,6 @@ use crate::persistence::repositories::mappers::{map_snapshot_header_row, map_sna
 #[derive(Debug, Clone)]
 pub struct SqlxDocumentSnapshotRepository {
     pool: PgPool,
-    context: &'static SystemContext,
     naming: &'static SchemaNaming,
 }
 
@@ -38,19 +36,12 @@ impl SqlxDocumentSnapshotRepository {
     #[must_use]
     pub const fn new(
         pool: PgPool,
-        context: &'static SystemContext,
         naming: &'static SchemaNaming,
     ) -> Self {
         Self {
             pool,
-            context,
             naming,
         }
-    }
-
-    #[must_use]
-    pub const fn context(&self) -> &'static SystemContext {
-        self.context
     }
 }
 
@@ -165,32 +156,19 @@ async fn fetch_snapshot_by_revision(
 mod tests {
     use super::*;
     use domain::schema::SchemaRegistry;
-    use domain::system::{LocaleId, SystemConfig, SystemConfigId};
 
-    fn fixture_context_and_naming() -> (&'static SystemContext, &'static SchemaNaming) {
+    fn fixture_naming() -> &'static SchemaNaming {
         let registry = SchemaRegistry::new(vec![]);
-        let naming = SchemaNaming::from_registry(&registry);
-        let locale = LocaleId::try_new("en").unwrap();
-        let config = SystemConfig::new(
-            SystemConfigId::new(Uuid::now_v7()),
-            vec![locale.clone()],
-            locale,
-        )
-        .unwrap();
-        let context = Box::leak(Box::new(SystemContext::new(registry, config)));
-        (context, naming)
+        SchemaNaming::from_registry(&registry)
     }
 
     #[tokio::test]
     async fn test_sqlx_document_snapshot_repository_new() {
-        let (context, naming) = fixture_context_and_naming();
+        let naming = fixture_naming();
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test")
             .expect("lazy pool creation must succeed");
 
-        let repo = SqlxDocumentSnapshotRepository::new(pool, context, naming);
-        assert_eq!(
-            repo.context().config.default_locale,
-            context.config.default_locale
-        );
+        let repo = SqlxDocumentSnapshotRepository::new(pool, naming);
+        assert_eq!(repo.naming.iter().count(), 0);
     }
 }

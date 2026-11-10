@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use domain::content::{ContentValue, DocumentInstanceId, FieldFilter, Pagination};
 pub use domain::content::{UnpublishDraftResolution, VersionView};
-use domain::schema::{AttributeId, DocumentTypeId};
+use domain::schema::{AttributeId, DocumentType};
 
 // ---------------------------------------------------------------------------
 // Command Types
@@ -14,7 +14,7 @@ use domain::schema::{AttributeId, DocumentTypeId};
 #[derive(Debug, Clone, PartialEq)]
 pub struct FindDocumentsCommand {
     /// Target document type to query.
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     /// Pagination parameters (page number and page size).
     pub pagination: Pagination,
     /// Lifecycle representation to retrieve (`Published` by default for visitors, `Working` for admin drafts).
@@ -29,7 +29,7 @@ pub struct FindDocumentsCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindByIdCommand {
     /// Document type of the target document.
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     /// Unique identifier of the document instance.
     pub document_instance_id: DocumentInstanceId,
     /// Lifecycle representation to retrieve (`Published` by default, or `Working` for the Admin draft tab).
@@ -55,7 +55,7 @@ pub enum RelationAction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateDocumentCommand {
     /// Target document type to create an instance for.
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     /// Initial field values keyed by attribute ID.
     pub fields: HashMap<AttributeId, ContentValue>,
     /// Relational mutations keyed by attribute ID.
@@ -70,7 +70,7 @@ pub struct UpdateDocumentCommand {
     /// Identifier of the document instance to update.
     pub document_instance_id: DocumentInstanceId,
     /// Document type of the target document.
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     /// Updated field values keyed by attribute ID.
     pub fields: HashMap<AttributeId, ContentValue>,
     /// Relational mutations keyed by attribute ID.
@@ -87,7 +87,7 @@ pub struct DeleteDocumentCommand {
     /// Identifier of the document instance to delete.
     pub document_instance_id: DocumentInstanceId,
     /// Document type of the target document.
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
 }
 
 /// Command to publish a draft document instance.
@@ -96,7 +96,7 @@ pub struct PublishDocumentCommand {
     /// Identifier of the document instance to publish.
     pub document_instance_id: DocumentInstanceId,
     /// Document type of the target document.
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     /// Optional expected draft version for optimistic concurrency control.
     pub expected_version: Option<u32>,
 }
@@ -107,7 +107,7 @@ pub struct UnpublishDocumentCommand {
     /// Identifier of the document instance to unpublish.
     pub document_instance_id: DocumentInstanceId,
     /// Document type of the target document.
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     /// Strategy for resolving pending working draft edits when unpublishing a modified document.
     pub draft_resolution: UnpublishDraftResolution,
 }
@@ -116,14 +116,14 @@ pub struct UnpublishDocumentCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscardDraftCommand {
     pub document_instance_id: DocumentInstanceId,
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
 }
 
 /// Command to restore a historical snapshot revision into the working draft.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreSnapshotCommand {
     pub document_instance_id: DocumentInstanceId,
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     pub revision: u32,
     /// When true, allows restoring a snapshot even if the document currently has uncommitted working draft edits (`Modified` state).
     pub discard_pending_edits: bool,
@@ -132,7 +132,7 @@ pub struct RestoreSnapshotCommand {
 /// Query command to list lightweight document headers for the Admin UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListAdminHeadersCommand {
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     pub pagination: Pagination,
     pub status_filter: Option<domain::content::DocumentStatus>,
 }
@@ -140,14 +140,14 @@ pub struct ListAdminHeadersCommand {
 /// Query command to list revision snapshot headers for a document instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListSnapshotsCommand {
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     pub document_instance_id: DocumentInstanceId,
 }
 
 /// Query command to inspect a specific historical revision snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetSnapshotCommand {
-    pub document_type: &'static DocumentTypeId,
+    pub document_type: &'static DocumentType,
     pub document_instance_id: DocumentInstanceId,
     pub revision: u32,
 }
@@ -158,7 +158,7 @@ pub struct GetSnapshotCommand {
 
 impl FindDocumentsCommand {
     #[must_use]
-    pub fn new(document_type: &'static DocumentTypeId, pagination: Pagination) -> Self {
+    pub fn new(document_type: &'static DocumentType, pagination: Pagination) -> Self {
         Self {
             document_type,
             pagination,
@@ -190,7 +190,7 @@ impl FindDocumentsCommand {
 impl FindByIdCommand {
     #[must_use]
     pub fn new(
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
         document_instance_id: DocumentInstanceId,
     ) -> Self {
         Self {
@@ -217,7 +217,7 @@ impl FindByIdCommand {
 impl CreateDocumentCommand {
     #[must_use]
     pub fn new(
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
         fields: HashMap<AttributeId, ContentValue>,
     ) -> Self {
         Self {
@@ -245,7 +245,7 @@ impl UpdateDocumentCommand {
     #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
         fields: HashMap<AttributeId, ContentValue>,
     ) -> Self {
         Self {
@@ -281,7 +281,7 @@ impl DeleteDocumentCommand {
     #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
     ) -> Self {
         Self {
             document_instance_id,
@@ -294,7 +294,7 @@ impl PublishDocumentCommand {
     #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
     ) -> Self {
         Self {
             document_instance_id,
@@ -314,7 +314,7 @@ impl UnpublishDocumentCommand {
     #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
     ) -> Self {
         Self {
             document_instance_id,
@@ -334,7 +334,7 @@ impl DiscardDraftCommand {
     #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
     ) -> Self {
         Self {
             document_instance_id,
@@ -347,7 +347,7 @@ impl RestoreSnapshotCommand {
     #[must_use]
     pub fn new(
         document_instance_id: DocumentInstanceId,
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
         revision: u32,
     ) -> Self {
         Self {
@@ -367,7 +367,7 @@ impl RestoreSnapshotCommand {
 
 impl ListAdminHeadersCommand {
     #[must_use]
-    pub fn new(document_type: &'static DocumentTypeId, pagination: Pagination) -> Self {
+    pub fn new(document_type: &'static DocumentType, pagination: Pagination) -> Self {
         Self {
             document_type,
             pagination,
@@ -385,7 +385,7 @@ impl ListAdminHeadersCommand {
 impl ListSnapshotsCommand {
     #[must_use]
     pub fn new(
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
         document_instance_id: DocumentInstanceId,
     ) -> Self {
         Self {
@@ -398,7 +398,7 @@ impl ListSnapshotsCommand {
 impl GetSnapshotCommand {
     #[must_use]
     pub fn new(
-        document_type: &'static DocumentTypeId,
+        document_type: &'static DocumentType,
         document_instance_id: DocumentInstanceId,
         revision: u32,
     ) -> Self {
@@ -416,8 +416,10 @@ mod tests {
     use domain::content::DocumentStatus;
     use uuid::Uuid;
 
-    fn test_type() -> &'static DocumentTypeId {
-        Box::leak(Box::new(DocumentTypeId::try_new("articles").unwrap()))
+    use domain::test_support::DocumentTypeBuilder;
+
+    fn test_type() -> &'static DocumentType {
+        Box::leak(Box::new(DocumentTypeBuilder::collection("articles").build()))
     }
 
     #[test]
@@ -456,7 +458,7 @@ mod tests {
         let create = CreateDocumentCommand::new(type_id, HashMap::new())
             .with_relations(HashMap::new())
             .with_populate(vec![]);
-        assert_eq!(create.document_type.as_ref(), "articles");
+        assert_eq!(create.document_type.id.as_ref(), "articles");
 
         let update = UpdateDocumentCommand::new(id, type_id, HashMap::new())
             .with_expected_version(3)

@@ -26,7 +26,7 @@ use domain::content::instance::{
 };
 use domain::content::ports::{DocumentInstanceRepository, DocumentSnapshotRepository, Pagination};
 use domain::content::values::{ContentValue, DomainValue, PrimitiveValue};
-use domain::schema::{AttributeId, DocumentTypeId};
+use domain::schema::{AttributeId, DocumentType, DocumentTypeId};
 use domain::system::{LocaleId, SystemContext};
 
 use infrastructure::persistence::migration::{
@@ -531,7 +531,7 @@ async fn assert_lifecycle_publish_and_relations(
     category: &mut DocumentInstance,
     article: &mut DocumentInstance,
     category_type_id: &DocumentTypeId,
-    article_type_id: &DocumentTypeId,
+    article_type: &DocumentType,
     author_actor: &ActorId,
 ) {
     let cat_display = create_category_display_values("Engineering");
@@ -561,7 +561,7 @@ async fn assert_lifecycle_publish_and_relations(
         .expect("publish article");
 
     let pub_article = instance_repo
-        .find_by_id(article_type_id, article.id, VersionView::Published)
+        .find_by_id(&article_type.id, article.id, VersionView::Published)
         .await
         .expect("find_by_id published")
         .expect("published article found");
@@ -572,7 +572,7 @@ async fn assert_lifecycle_publish_and_relations(
 
     let pub_page = instance_repo
         .find_by_type(
-            article_type_id,
+            article_type,
             VersionView::Published,
             Pagination::default(),
             vec![],
@@ -584,7 +584,7 @@ async fn assert_lifecycle_publish_and_relations(
     let cat_attr = AttributeId::try_new("category").expect("valid attr id");
     let art_relations = instance_repo
         .fetch_relations(
-            article_type_id,
+            &article_type.id,
             std::slice::from_ref(&cat_attr),
             &[article.id],
         )
@@ -617,7 +617,7 @@ async fn assert_lifecycle_publish_and_relations(
 async fn assert_lifecycle_working_edits(
     instance_repo: &SqlxDocumentInstanceRepository,
     article: &mut DocumentInstance,
-    article_type_id: &DocumentTypeId,
+    article_type: &DocumentType,
     author_actor: &ActorId,
 ) {
     let title_attr = AttributeId::try_new("title").expect("valid attr id");
@@ -639,7 +639,7 @@ async fn assert_lifecycle_working_edits(
         .expect("save modified draft");
 
     let live_article = instance_repo
-        .find_by_id(article_type_id, article.id, VersionView::Published)
+        .find_by_id(&article_type.id, article.id, VersionView::Published)
         .await
         .expect("find live published")
         .expect("live row still exists");
@@ -653,7 +653,7 @@ async fn assert_lifecycle_working_edits(
     );
 
     let working_draft = instance_repo
-        .find_by_id(article_type_id, article.id, VersionView::Working)
+        .find_by_id(&article_type.id, article.id, VersionView::Working)
         .await
         .expect("find working draft")
         .expect("working draft exists");
@@ -667,7 +667,7 @@ async fn assert_lifecycle_working_edits(
 
     let pub_page = instance_repo
         .find_by_type(
-            article_type_id,
+            article_type,
             VersionView::Published,
             Pagination::default(),
             vec![],
@@ -677,7 +677,7 @@ async fn assert_lifecycle_working_edits(
     assert!(pub_page.items.iter().any(|item| item.id == article.id));
 
     let headers_page = instance_repo
-        .list_admin_headers(article_type_id, Pagination::default(), None)
+        .list_admin_headers(article_type, Pagination::default(), None)
         .await
         .expect("list_admin_headers");
     let header = headers_page
@@ -1002,11 +1002,12 @@ async fn test_document_instance_and_snapshot_lifecycle_live() {
         return;
     };
 
-    let instance_repo = SqlxDocumentInstanceRepository::new(pool.clone(), ctx, naming);
-    let snapshot_repo = SqlxDocumentSnapshotRepository::new(pool, ctx, naming);
+    let instance_repo = SqlxDocumentInstanceRepository::new(pool.clone(), naming);
+    let snapshot_repo = SqlxDocumentSnapshotRepository::new(pool, naming);
 
     let article_type_id = DocumentTypeId::try_new("article").expect("valid doc type id");
     let category_type_id = DocumentTypeId::try_new("category").expect("valid doc type id");
+    let article_type = ctx.schema.get(&article_type_id).expect("article type");
     let author_actor = ActorId::User(UserId::try_new("usr_author_01").expect("valid user id"));
     let now = Utc::now();
 
@@ -1037,7 +1038,7 @@ async fn test_document_instance_and_snapshot_lifecycle_live() {
         &mut category,
         &mut article,
         &category_type_id,
-        &article_type_id,
+        article_type,
         &author_actor,
     )
     .await;
@@ -1057,7 +1058,7 @@ async fn test_document_instance_and_snapshot_lifecycle_live() {
     assert_lifecycle_working_edits(
         &instance_repo,
         &mut article,
-        &article_type_id,
+        article_type,
         &author_actor,
     )
     .await;

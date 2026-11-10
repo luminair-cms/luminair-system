@@ -17,7 +17,6 @@ use domain::content::ports::{
 use domain::content::values::ContentValue;
 use domain::errors::DomainError;
 use domain::schema::{AttributeId, DocumentType, DocumentTypeId};
-use domain::system::SystemContext;
 
 use crate::persistence::error::PersistenceError;
 use crate::persistence::naming::{COL_ID, COL_STATUS, DocumentTypeNaming, SchemaNaming};
@@ -61,7 +60,6 @@ use crate::persistence::repositories::relations::{
 #[derive(Debug, Clone)]
 pub struct SqlxDocumentInstanceRepository {
     pool: PgPool,
-    context: &'static SystemContext,
     naming: &'static SchemaNaming,
 }
 
@@ -69,12 +67,10 @@ impl SqlxDocumentInstanceRepository {
     #[must_use]
     pub const fn new(
         pool: PgPool,
-        context: &'static SystemContext,
         naming: &'static SchemaNaming,
     ) -> Self {
         Self {
             pool,
-            context,
             naming,
         }
     }
@@ -101,16 +97,12 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
 
     async fn find_by_type(
         &self,
-        type_id: &DocumentTypeId,
+        doc_type: &DocumentType,
         view: VersionView,
         pagination: Pagination,
         filters: Vec<FieldFilter>,
     ) -> Result<Page<DocumentInstance>, DomainError> {
-        let doc_type = self
-            .context
-            .find_type(type_id)
-            .ok_or_else(|| DomainError::DocumentTypeNotFound(type_id.clone()))?;
-        let type_naming = self.naming.require(type_id)?;
+        let type_naming = self.naming.require(&doc_type.id)?;
 
         match view {
             VersionView::Published => {
@@ -161,17 +153,14 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
             }
         }
     }
+
     async fn list_admin_headers(
         &self,
-        type_id: &DocumentTypeId,
+        doc_type: &DocumentType,
         pagination: Pagination,
         status_filter: Option<DocumentStatus>,
     ) -> Result<Page<DocumentHeader>, DomainError> {
-        let doc_type = self
-            .context
-            .find_type(type_id)
-            .ok_or_else(|| DomainError::DocumentTypeNotFound(type_id.clone()))?;
-        let type_naming = self.naming.require(type_id)?;
+        let type_naming = self.naming.require(&doc_type.id)?;
 
         let total =
             fetch_admin_headers_count(&self.pool, doc_type, type_naming, status_filter).await?;
@@ -200,23 +189,19 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
 
     async fn find_display_titles_by_ids(
         &self,
-        type_id: &DocumentTypeId,
+        target_type: &DocumentType,
         ids: &[DocumentInstanceId],
     ) -> Result<HashMap<DocumentInstanceId, String>, DomainError> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let doc_type = self
-            .context
-            .find_type(type_id)
-            .ok_or_else(|| DomainError::DocumentTypeNotFound(type_id.clone()))?;
-        let type_naming = self.naming.require(type_id)?;
+        let type_naming = self.naming.require(&target_type.id)?;
 
         let uuids: Vec<Uuid> = ids.iter().map(|id| **id).collect();
         let stmt = find_display_titles_by_ids_query(
             type_naming,
             &uuids,
-            doc_type.options.draft_and_publish,
+            target_type.options.draft_and_publish,
         );
         let (sql, values) = compile_select(&stmt);
         let rows = sqlx::query_with(AssertSqlSafe(sql.as_str()), values)
@@ -228,6 +213,27 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
             .map(map_display_title_row)
             .collect::<Result<_, _>>()
             .map_err(DomainError::from)
+    }
+
+    async fn exists_for_type(&self, type_id: &DocumentTypeId) -> Result<bool, DomainError> {
+        let type_naming = self.naming.require(type_id)?;
+        let (sql_wide, val_wide) = compile_select(&exists_in_wide_table_query(type_naming));
+        let has_wide = sqlx::query_with(AssertSqlSafe(sql_wide.as_str()), val_wide)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(PersistenceError::from)?
+            .is_some();
+        if has_wide {
+            return Ok(true);
+        }
+
+        let (sql_draft, val_draft) = compile_select(&exists_draft_for_type_query(type_id));
+        let has_draft = sqlx::query_with(AssertSqlSafe(sql_draft.as_str()), val_draft)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(PersistenceError::from)?
+            .is_some();
+        Ok(has_draft)
     }
 
     async fn count(
@@ -345,27 +351,6 @@ impl DocumentInstanceRepository for SqlxDocumentInstanceRepository {
         with_occ_retry(|| async { delete_in_tx(&self.pool, type_naming, type_id, *id).await })
             .await
             .map_err(DomainError::from)
-    }
-
-    async fn exists_for_type(&self, type_id: &DocumentTypeId) -> Result<bool, DomainError> {
-        let type_naming = self.naming.require(type_id)?;
-        let (sql_wide, val_wide) = compile_select(&exists_in_wide_table_query(type_naming));
-        let has_wide = sqlx::query_with(AssertSqlSafe(sql_wide.as_str()), val_wide)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(PersistenceError::from)?
-            .is_some();
-        if has_wide {
-            return Ok(true);
-        }
-
-        let (sql_draft, val_draft) = compile_select(&exists_draft_for_type_query(type_id));
-        let has_draft = sqlx::query_with(AssertSqlSafe(sql_draft.as_str()), val_draft)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(PersistenceError::from)?
-            .is_some();
-        Ok(has_draft)
     }
 }
 
@@ -806,33 +791,20 @@ mod tests {
     use domain::content::instance::{AuditTrail, DocumentContent};
     use domain::content::values::{DomainValue, PrimitiveValue};
     use domain::schema::SchemaRegistry;
-    use domain::system::{LocaleId, SystemConfig, SystemConfigId};
 
-    fn fixture_context_and_naming() -> (&'static SystemContext, &'static SchemaNaming) {
+    fn fixture_naming() -> &'static SchemaNaming {
         let registry = SchemaRegistry::new(vec![]);
-        let naming = SchemaNaming::from_registry(&registry);
-        let locale = LocaleId::try_new("en").unwrap();
-        let config = SystemConfig::new(
-            SystemConfigId::new(Uuid::now_v7()),
-            vec![locale.clone()],
-            locale,
-        )
-        .unwrap();
-        let context = Box::leak(Box::new(SystemContext::new(registry, config)));
-        (context, naming)
+        SchemaNaming::from_registry(&registry)
     }
 
     #[tokio::test]
     async fn test_sqlx_document_instance_repository_new() {
-        let (context, naming) = fixture_context_and_naming();
+        let naming = fixture_naming();
         let pool = sqlx::PgPool::connect_lazy("postgres://localhost/test")
             .expect("lazy pool creation must succeed");
 
-        let repo = SqlxDocumentInstanceRepository::new(pool, context, naming);
-        assert_eq!(
-            repo.context.config.default_locale,
-            context.config.default_locale
-        );
+        let repo = SqlxDocumentInstanceRepository::new(pool, naming);
+        assert_eq!(repo.naming.iter().count(), 0);
     }
 
     #[test]

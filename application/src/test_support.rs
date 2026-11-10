@@ -16,7 +16,7 @@ use domain::content::{
     PublicationState, RelationMap, SnapshotHeader, VersionView,
 };
 use domain::errors::DomainError;
-use domain::schema::{AttributeId, DocumentTypeId};
+use domain::schema::{AttributeId, DocumentType, DocumentTypeId};
 
 pub type DisplayMetaMap = HashMap<DocumentInstanceId, (IndexMap<AttributeId, String>, String)>;
 
@@ -184,7 +184,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
 
     async fn find_by_type(
         &self,
-        type_id: &DocumentTypeId,
+        doc_type: &DocumentType,
         view: VersionView,
         pagination: Pagination,
         filters: Vec<FieldFilter>,
@@ -198,7 +198,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
                     pub_store
                         .values()
                         .filter(|inst| {
-                            inst.document_type_id == *type_id && matches_filters(inst, &filters)
+                            inst.document_type_id == doc_type.id && matches_filters(inst, &filters)
                         })
                         .cloned()
                         .collect()
@@ -206,7 +206,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
                     inst_store
                         .values()
                         .filter(|inst| {
-                            inst.document_type_id == *type_id
+                            inst.document_type_id == doc_type.id
                                 && matches!(
                                     inst.content.publication_state,
                                     PublicationState::Published { .. }
@@ -241,7 +241,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
                 let mut filtered: Vec<DocumentInstance> = store
                     .values()
                     .filter(|inst| {
-                        inst.document_type_id == *type_id && matches_filters(inst, &filters)
+                        inst.document_type_id == doc_type.id && matches_filters(inst, &filters)
                     })
                     .cloned()
                     .collect();
@@ -267,7 +267,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
     }
     async fn list_admin_headers(
         &self,
-        type_id: &DocumentTypeId,
+        doc_type: &DocumentType,
         pagination: Pagination,
         status_filter: Option<DocumentStatus>,
     ) -> Result<Page<DocumentHeader>, DomainError> {
@@ -276,7 +276,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
 
         let mut headers = Vec::new();
         for inst in inst_store.values() {
-            if inst.document_type_id != *type_id {
+            if inst.document_type_id != doc_type.id {
                 continue;
             }
 
@@ -374,7 +374,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
 
     async fn find_display_titles_by_ids(
         &self,
-        type_id: &DocumentTypeId,
+        target_type: &DocumentType,
         ids: &[DocumentInstanceId],
     ) -> Result<HashMap<DocumentInstanceId, String>, DomainError> {
         let meta_store = self.display_meta.read().map_err(lock_error)?;
@@ -382,7 +382,7 @@ impl DocumentInstanceRepository for FakeDocumentInstanceRepository {
         let mut result = HashMap::new();
         for &id in ids {
             if let Some(inst) = inst_store.get(&id)
-                && inst.document_type_id == *type_id
+                && inst.document_type_id == target_type.id
             {
                 if let Some((_, title)) = meta_store.get(&id) {
                     result.insert(id, title.clone());
@@ -788,12 +788,14 @@ mod tests {
     use chrono::{Duration, Utc};
     use domain::auth::ActorId;
     use domain::content::{DomainValue, PrimitiveValue};
-    use domain::test_support::{create_attr_id, create_doc_type_id, create_user_id};
+    use domain::test_support::{create_attr_id, create_user_id};
 
     use super::*;
 
-    fn leak_type(name: &str) -> &'static DocumentTypeId {
-        Box::leak(Box::new(create_doc_type_id(name)))
+    fn leak_type(name: &str) -> &'static DocumentType {
+        Box::leak(Box::new(
+            domain::test_support::DocumentTypeBuilder::collection(name).build(),
+        ))
     }
 
     fn text(v: &str) -> DomainValue {
@@ -801,10 +803,10 @@ mod tests {
     }
 
     fn instance_with(
-        type_id: &'static DocumentTypeId,
+        doc_type: &'static DocumentType,
         fields: &[(&str, ContentValue)],
     ) -> DocumentInstance {
-        let mut inst = DocumentInstance::new(type_id.clone(), ActorId::System, Utc::now());
+        let mut inst = DocumentInstance::new(doc_type.id.clone(), ActorId::System, Utc::now());
         for (name, value) in fields {
             inst.set_field(create_attr_id(name), value.clone());
         }
@@ -825,7 +827,7 @@ mod tests {
         }
     }
 
-    fn seeded() -> (FakeDocumentInstanceRepository, &'static DocumentTypeId) {
+    fn seeded() -> (FakeDocumentInstanceRepository, &'static DocumentType) {
         let t = leak_type("article");
         let repo = FakeDocumentInstanceRepository::new()
             .with_instance(instance_with(
@@ -864,7 +866,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(page.total, 4);
-        assert_eq!(repo.count(t, vec![]).await.unwrap(), 4);
+        assert_eq!(repo.count(&t.id, vec![]).await.unwrap(), 4);
     }
 
     #[tokio::test]
@@ -872,7 +874,7 @@ mod tests {
         let (repo, t) = seeded();
         let f = vec![filter("title", text("a"))];
 
-        assert_eq!(repo.count(t, f.clone()).await.unwrap(), 2);
+        assert_eq!(repo.count(&t.id, f.clone()).await.unwrap(), 2);
         let page = repo
             .find_by_type(t, VersionView::Working, all(), f)
             .await
@@ -885,7 +887,7 @@ mod tests {
     async fn test_filters_are_combined_with_and() {
         let (repo, t) = seeded();
         let f = vec![filter("title", text("a")), filter("lang", text("uk"))];
-        assert_eq!(repo.count(t, f).await.unwrap(), 1);
+        assert_eq!(repo.count(&t.id, f).await.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -893,13 +895,13 @@ mod tests {
         let (repo, t) = seeded();
         // `lang` is missing on two instances, `title` is Null on one.
         assert_eq!(
-            repo.count(t, vec![filter("lang", text("de"))])
+            repo.count(&t.id, vec![filter("lang", text("de"))])
                 .await
                 .unwrap(),
             0
         );
         assert_eq!(
-            repo.count(t, vec![filter("absent", text("a"))])
+            repo.count(&t.id, vec![filter("absent", text("a"))])
                 .await
                 .unwrap(),
             0
@@ -961,7 +963,7 @@ mod tests {
         }));
 
         let err = repo
-            .exists_for_type(leak_type("article"))
+            .exists_for_type(&leak_type("article").id)
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::Storage(_)), "got {err:?}");

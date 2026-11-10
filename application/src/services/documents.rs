@@ -267,14 +267,8 @@ where
         caller: &CallerContext,
         cmd: FindDocumentsCommand,
     ) -> Result<(Vec<DocumentInstance>, u64), ApplicationError> {
-        caller.check_read_document(cmd.document_type, None)?;
+        caller.check_read_document(&cmd.document_type.id, None)?;
 
-        self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
-
-        // Sequential fetch for MVP (routes to published wide table for visitors, or drafts store for working copies)
-        // Unified fetch routed by VersionView: Published targets live wide table, Working targets draft/modified state
         let page = self
             .instance_repo
             .find_by_type(cmd.document_type, cmd.view, cmd.pagination, cmd.filters)
@@ -283,7 +277,7 @@ where
 
         // Two-phase batch relation enrichment
         let enriched = self
-            .enrich(cmd.document_type, &cmd.populate, page.items)
+            .enrich(&cmd.document_type.id, &cmd.populate, page.items)
             .await?;
 
         Ok((enriched, count))
@@ -296,7 +290,7 @@ where
     ) -> Result<Option<DocumentInstance>, ApplicationError> {
         let Some(instance) = self
             .instance_repo
-            .find_by_id(cmd.document_type, cmd.document_instance_id, cmd.view)
+            .find_by_id(&cmd.document_type.id, cmd.document_instance_id, cmd.view)
             .await?
         else {
             return Ok(None);
@@ -305,7 +299,7 @@ where
         caller.check_read_document(&instance.document_type_id, Some(&instance))?;
 
         let enriched = self
-            .enrich_single(cmd.document_type, &cmd.populate, instance)
+            .enrich_single(&cmd.document_type.id, &cmd.populate, instance)
             .await?;
         Ok(Some(enriched))
     }
@@ -315,16 +309,14 @@ where
         caller: &CallerContext,
         cmd: CreateDocumentCommand,
     ) -> Result<DocumentInstance, ApplicationError> {
-        caller.check_create_document(cmd.document_type)?;
+        caller.check_create_document(&cmd.document_type.id)?;
 
-        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
+        let doc_type = cmd.document_type;
 
         self.check_singleton_guard(doc_type).await?;
 
         let mut instance =
-            DocumentInstance::new(cmd.document_type.clone(), caller.actor.clone(), Utc::now());
+            DocumentInstance::new(doc_type.id.clone(), caller.actor.clone(), Utc::now());
         instance.replace_fields(cmd.fields);
 
         self.validate_content_for_type(doc_type, &instance)?;
@@ -333,7 +325,7 @@ where
         self.persist_new_instance(doc_type, &mut instance, &caller.actor)
             .await?;
 
-        self.enrich_single(cmd.document_type, &cmd.populate, instance)
+        self.enrich_single(&doc_type.id, &cmd.populate, instance)
             .await
     }
 
@@ -374,7 +366,7 @@ where
         )
         .await?;
 
-        self.enrich_single(cmd.document_type, &cmd.populate, instance)
+        self.enrich_single(&cmd.document_type.id, &cmd.populate, instance)
             .await
     }
 
@@ -393,7 +385,7 @@ where
             .await?;
 
         self.instance_repo
-            .delete(cmd.document_type, cmd.document_instance_id)
+            .delete(&cmd.document_type.id, cmd.document_instance_id)
             .await?;
         Ok(())
     }
@@ -419,7 +411,7 @@ where
         let prev_published = self
             .instance_repo
             .find_by_id(
-                cmd.document_type,
+                &cmd.document_type.id,
                 cmd.document_instance_id,
                 VersionView::Published,
             )
@@ -468,7 +460,7 @@ where
         let live_published = self
             .instance_repo
             .find_by_id(
-                cmd.document_type,
+                &cmd.document_type.id,
                 cmd.document_instance_id,
                 VersionView::Published,
             )
@@ -519,7 +511,7 @@ where
 
         let restored = self
             .instance_repo
-            .discard_draft(cmd.document_type, cmd.document_instance_id)
+            .discard_draft(&cmd.document_type.id, cmd.document_instance_id)
             .await?;
 
         Ok(restored.unwrap_or(instance))
@@ -550,7 +542,7 @@ where
 
         let snapshot = self
             .snapshot_repo
-            .get_snapshot(cmd.document_type, cmd.document_instance_id, cmd.revision)
+            .get_snapshot(&cmd.document_type.id, cmd.document_instance_id, cmd.revision)
             .await?
             .ok_or_else(|| ApplicationError::NotFound {
                 entity: "DocumentSnapshot",
@@ -572,15 +564,13 @@ where
         caller: &CallerContext,
         cmd: ListAdminHeadersCommand,
     ) -> Result<(Vec<DocumentHeader>, u64), ApplicationError> {
-        caller.check_read_document(cmd.document_type, None)?;
+        caller.check_read_document(&cmd.document_type.id, None)?;
 
-        let doc_type = self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
+        let doc_type = cmd.document_type;
 
         let mut page = self
             .instance_repo
-            .list_admin_headers(cmd.document_type, cmd.pagination, cmd.status_filter)
+            .list_admin_headers(doc_type, cmd.pagination, cmd.status_filter)
             .await?;
 
         self.enrich_admin_headers_relational_display(doc_type, &mut page.items)
@@ -594,15 +584,11 @@ where
         caller: &CallerContext,
         cmd: ListSnapshotsCommand,
     ) -> Result<Vec<SnapshotHeader>, ApplicationError> {
-        caller.check_read_document(cmd.document_type, None)?;
-
-        self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
+        caller.check_read_document(&cmd.document_type.id, None)?;
 
         let snapshots = self
             .snapshot_repo
-            .list_snapshots(cmd.document_type, cmd.document_instance_id)
+            .list_snapshots(&cmd.document_type.id, cmd.document_instance_id)
             .await?;
 
         Ok(snapshots)
@@ -613,14 +599,10 @@ where
         caller: &CallerContext,
         cmd: GetSnapshotCommand,
     ) -> Result<DocumentSnapshot, ApplicationError> {
-        caller.check_read_document(cmd.document_type, None)?;
-
-        self.context.find_type(cmd.document_type).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(cmd.document_type.clone()))
-        })?;
+        caller.check_read_document(&cmd.document_type.id, None)?;
 
         self.snapshot_repo
-            .get_snapshot(cmd.document_type, cmd.document_instance_id, cmd.revision)
+            .get_snapshot(&cmd.document_type.id, cmd.document_instance_id, cmd.revision)
             .await?
             .ok_or_else(|| ApplicationError::NotFound {
                 entity: "DocumentSnapshot",
@@ -637,13 +619,13 @@ where
     async fn load_working_instance_with_permission(
         &self,
         caller: &CallerContext,
-        type_id: &DocumentTypeId,
+        doc_type: &'static DocumentType,
         instance_id: DocumentInstanceId,
         action: WorkingInstanceAction,
     ) -> Result<(&'static DocumentType, DocumentInstance), ApplicationError> {
         let instance = self
             .instance_repo
-            .find_by_id(type_id, instance_id, VersionView::Working)
+            .find_by_id(&doc_type.id, instance_id, VersionView::Working)
             .await?
             .ok_or(ApplicationError::Domain(
                 DomainError::DocumentInstanceNotFound(instance_id),
@@ -661,19 +643,15 @@ where
             }
         }
 
-        let doc_type = self.context.find_type(type_id).ok_or_else(|| {
-            ApplicationError::Domain(DomainError::DocumentTypeNotFound(type_id.clone()))
-        })?;
-
         Ok((doc_type, instance))
     }
 
-    async fn check_singleton_guard(&self, doc_type: &DocumentType) -> Result<(), ApplicationError> {
+    async fn check_singleton_guard(&self, doc_type: &'static DocumentType) -> Result<(), ApplicationError> {
         if doc_type.kind == DocumentKind::Singleton
             && self.instance_repo.exists_for_type(&doc_type.id).await?
         {
             return Err(ApplicationError::Domain(
-                DomainError::SingletonAlreadyExists(doc_type.id.clone()),
+                DomainError::SingletonAlreadyExists(&doc_type.id),
             ));
         }
         Ok(())
@@ -819,9 +797,13 @@ where
             return Ok(());
         }
 
+        let target_doc_type = self.context.find_type(&rel_def.target).ok_or_else(|| {
+            ApplicationError::Domain(DomainError::DocumentTypeNotFound(rel_def.target.clone()))
+        })?;
+
         let titles = self
             .instance_repo
-            .find_display_titles_by_ids(&rel_def.target, &target_ids)
+            .find_display_titles_by_ids(target_doc_type, &target_ids)
             .await?;
 
         let effective_fields = doc_type.effective_display_fields();
@@ -1187,13 +1169,13 @@ mod tests {
         );
 
         let created = service
-            .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+            .create(&caller, CreateDocumentCommand::new(doc_type, fields))
             .await
             .expect("create success");
 
         // Newly created draft is not published yet: default VersionView::Published returns None
         let published_res = service
-            .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, created.id))
+            .find_by_id(&caller, FindByIdCommand::new(doc_type, created.id))
             .await
             .unwrap();
         assert!(published_res.is_none());
@@ -1202,7 +1184,7 @@ mod tests {
         let fetched = service
             .find_by_id(
                 &caller,
-                FindByIdCommand::new(&doc_type.id, created.id).with_view(VersionView::Working),
+                FindByIdCommand::new(doc_type, created.id).with_view(VersionView::Working),
             )
             .await
             .unwrap()
@@ -1228,19 +1210,19 @@ mod tests {
         service
             .create(
                 &caller,
-                CreateDocumentCommand::new(&doc_type.id, fields.clone()),
+                CreateDocumentCommand::new(doc_type, fields.clone()),
             )
             .await
             .expect("first create succeeds");
 
         // Second creation must fail with SingletonAlreadyExists
         let second = service
-            .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+            .create(&caller, CreateDocumentCommand::new(doc_type, fields))
             .await;
 
         assert!(matches!(
             second,
-            Err(ApplicationError::Domain(DomainError::SingletonAlreadyExists(id))) if id == doc_type.id
+            Err(ApplicationError::Domain(DomainError::SingletonAlreadyExists(id))) if id == &doc_type.id
         ));
     }
 
@@ -1257,7 +1239,7 @@ mod tests {
         );
 
         let inst = service
-            .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+            .create(&caller, CreateDocumentCommand::new(doc_type, fields))
             .await
             .unwrap();
 
@@ -1273,7 +1255,7 @@ mod tests {
         );
 
         // Query with populate
-        let cmd = FindDocumentsCommand::new(&doc_type.id, Pagination::default())
+        let cmd = FindDocumentsCommand::new(doc_type, Pagination::default())
             .with_view(VersionView::Working)
             .with_populate(vec![rel_attr.clone()]);
 
@@ -1303,7 +1285,7 @@ mod tests {
         );
 
         let created = service
-            .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+            .create(&caller, CreateDocumentCommand::new(doc_type, fields))
             .await
             .unwrap();
         assert_eq!(created.audit.version, 1);
@@ -1319,7 +1301,7 @@ mod tests {
         let updated = service
             .update(
                 &caller,
-                UpdateDocumentCommand::new(created.id, &doc_type.id, update_fields),
+                UpdateDocumentCommand::new(created.id, doc_type, update_fields),
             )
             .await
             .expect("update success");
@@ -1340,7 +1322,7 @@ mod tests {
         );
 
         let created = service
-            .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+            .create(&caller, CreateDocumentCommand::new(doc_type, fields))
             .await
             .unwrap();
 
@@ -1348,7 +1330,7 @@ mod tests {
         let published = service
             .publish(
                 &caller,
-                PublishDocumentCommand::new(created.id, &doc_type.id),
+                PublishDocumentCommand::new(created.id, doc_type),
             )
             .await
             .expect("publish success");
@@ -1363,7 +1345,7 @@ mod tests {
         let unpublished = service
             .unpublish(
                 &caller,
-                UnpublishDocumentCommand::new(created.id, &doc_type.id),
+                UnpublishDocumentCommand::new(created.id, doc_type),
             )
             .await
             .expect("unpublish success");
@@ -1398,7 +1380,7 @@ mod tests {
         let res = service
             .create(
                 &unauthorized_caller,
-                CreateDocumentCommand::new(&doc_type.id, fields),
+                CreateDocumentCommand::new(doc_type, fields),
             )
             .await;
 
@@ -1427,7 +1409,7 @@ mod tests {
         let created = service
             .create(
                 &caller,
-                CreateDocumentCommand::new(&leaked_doc_type.id, HashMap::new()),
+                CreateDocumentCommand::new(leaked_doc_type, HashMap::new()),
             )
             .await
             .expect("create succeeds");
@@ -1435,7 +1417,7 @@ mod tests {
         let publish_result = service
             .publish(
                 &caller,
-                PublishDocumentCommand::new(created.id, &leaked_doc_type.id),
+                PublishDocumentCommand::new(created.id, leaked_doc_type),
             )
             .await;
 
@@ -1464,21 +1446,21 @@ mod tests {
             ))),
         );
         let created = service
-            .create(&caller, CreateDocumentCommand::new(&doc_type.id, fields))
+            .create(&caller, CreateDocumentCommand::new(doc_type, fields))
             .await
             .expect("create succeeds");
 
         service
             .delete(
                 &caller,
-                DeleteDocumentCommand::new(created.id, &doc_type.id),
+                DeleteDocumentCommand::new(created.id, doc_type),
             )
             .await
             .expect("delete succeeds");
 
         // After delete: instance is gone from both published and working views
         let found = service
-            .find_by_id(&caller, FindByIdCommand::new(&doc_type.id, created.id))
+            .find_by_id(&caller, FindByIdCommand::new(doc_type, created.id))
             .await
             .expect("find_by_id returns Ok");
         assert!(found.is_none(), "instance should be gone after delete");
@@ -1486,7 +1468,7 @@ mod tests {
         let found_working = service
             .find_by_id(
                 &caller,
-                FindByIdCommand::new(&doc_type.id, created.id).with_view(VersionView::Working),
+                FindByIdCommand::new(doc_type, created.id).with_view(VersionView::Working),
             )
             .await
             .expect("find_by_id returns Ok");
@@ -1581,7 +1563,7 @@ mod tests {
         let tag = service
             .create(
                 &caller,
-                CreateDocumentCommand::new(&tag_type.id, tag_fields),
+                CreateDocumentCommand::new(tag_type, tag_fields),
             )
             .await
             .unwrap();
@@ -1598,7 +1580,7 @@ mod tests {
         let mut relations = HashMap::new();
         relations.insert(tags_attr.clone(), RelationAction::Connect(vec![tag.id]));
 
-        let cmd = CreateDocumentCommand::new(&article_type.id, article_fields)
+        let cmd = CreateDocumentCommand::new(article_type, article_fields)
             .with_relations(relations)
             .with_populate(vec![tags_attr.clone()]);
 
@@ -1630,7 +1612,7 @@ mod tests {
             .create(
                 &caller,
                 CreateDocumentCommand::new(
-                    &tag_type.id,
+                    tag_type,
                     HashMap::from([(
                         AttributeId::try_new("name").unwrap(),
                         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
@@ -1646,7 +1628,7 @@ mod tests {
             .create(
                 &caller,
                 CreateDocumentCommand::new(
-                    &tag_type.id,
+                    tag_type,
                     HashMap::from([(
                         AttributeId::try_new("name").unwrap(),
                         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
@@ -1663,7 +1645,7 @@ mod tests {
             .create(
                 &caller,
                 CreateDocumentCommand::new(
-                    &article_type.id,
+                    article_type,
                     HashMap::from([(
                         title_attr.clone(),
                         ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(
@@ -1676,7 +1658,7 @@ mod tests {
             .unwrap();
 
         // 1. Update with Set [tag1, tag2] and populate
-        let update_cmd = UpdateDocumentCommand::new(article.id, &article_type.id, HashMap::new())
+        let update_cmd = UpdateDocumentCommand::new(article.id, article_type, HashMap::new())
             .with_relations(HashMap::from([(
                 tags_attr.clone(),
                 RelationAction::Set(vec![tag1.id, tag2.id]),
@@ -1691,7 +1673,7 @@ mod tests {
 
         // 2. Update with Disconnect [tag1]
         let disconnect_cmd =
-            UpdateDocumentCommand::new(article.id, &article_type.id, HashMap::new())
+            UpdateDocumentCommand::new(article.id, article_type, HashMap::new())
                 .with_relations(HashMap::from([(
                     tags_attr.clone(),
                     RelationAction::Disconnect(vec![tag1.id]),
@@ -1704,7 +1686,7 @@ mod tests {
         assert_eq!(remaining[0].id, tag2.id);
 
         // 3. Update with Unset
-        let unset_cmd = UpdateDocumentCommand::new(article.id, &article_type.id, HashMap::new())
+        let unset_cmd = UpdateDocumentCommand::new(article.id, article_type, HashMap::new())
             .with_relations(HashMap::from([(tags_attr.clone(), RelationAction::Unset)]))
             .with_populate(vec![tags_attr.clone()]);
 
@@ -1720,7 +1702,7 @@ mod tests {
         let cat2_id = DocumentInstanceId::new(Uuid::now_v7());
 
         let cmd = CreateDocumentCommand::new(
-            &article_type.id,
+            article_type,
             HashMap::from([(
                 title_attr,
                 ContentValue::Scalar(DomainValue::Primitive(PrimitiveValue::Text(

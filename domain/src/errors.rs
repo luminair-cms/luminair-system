@@ -14,7 +14,7 @@ pub enum DomainError {
     DocumentInstanceNotFound(DocumentInstanceId),
 
     #[error("Singleton document type already has an instance: {0}")]
-    SingletonAlreadyExists(DocumentTypeId),
+    SingletonAlreadyExists(&'static DocumentTypeId),
 
     #[error("invalid field value for attribute '{attribute_id}': {reason}")]
     InvalidFieldValue {
