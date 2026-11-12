@@ -1,0 +1,25 @@
+[package]
+name = "luminair-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "luminair-server"
+path = "src/main.rs"
+
+[dependencies]
+domain = { workspace = true }
+application = { workspace = true }
+luminair-schema-loader = { workspace = true }
+luminair-persistence = { workspace = true }
+luminair-auth = { workspace = true }
+luminair-http = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }

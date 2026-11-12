@@ -1,4 +1,4 @@
-# Refactoring Plan: Dual-Target Deployment (Microservice & AWS Lambda) with Edge Cognito Auth and Granular Infrastructure Crates
+﻿# Refactoring Plan: Dual-Target Deployment (Microservice & AWS Lambda) with Edge Cognito Auth and Granular Infrastructure Crates
 
 - **Target Crates**:
   - `infrastructure/schema-loader` (granular crate)
@@ -10,7 +10,7 @@
   - `bootstrap/luminair-server` (new entrypoint binary crate)
   - `bootstrap/luminair-cli` (new entrypoint binary crate)
 - **Governing Architecture**: [`docs/architecture.md`](../architecture.md), [`ADR-002`](../adr/ADR-002-hexagonal-architecture.md), [`ADR-003`](../adr/ADR-003-aws-dsql-database.md), [`ADR-006`](../adr/ADR-006-user-profile-and-directory-architecture.md)
-- **Status**: Proposed (Specification & Implementation Plan)
+- **Status**: Completed
 - **Date**: 2026-11-12
 
 ---
@@ -377,21 +377,21 @@ flowchart TD
 
 ### Phase 1: Granular Infrastructure Crates (`infrastructure/*`)
 
-- [ ] **Step 1.1: Extract `infrastructure/schema-loader` Crate**
+- [x] **Step 1.1: Extract `infrastructure/schema-loader` Crate**
   - Create `infrastructure/schema-loader/Cargo.toml` with dependencies: `domain`, `serde`, `serde_json`, `indexmap`, `thiserror`.
   - Move `dto.rs`, `error.rs`, and `loader.rs` from `infrastructure/src/schema_loader/` into `infrastructure/schema-loader/src/`.
   - Expose `pub use loader::{load_schemas_from_dir, load_system_context_from_dir};`.
-- [ ] **Step 1.2: Extract `infrastructure/persistence` Crate**
+- [x] **Step 1.2: Extract `infrastructure/persistence` Crate**
   - Create `infrastructure/persistence/Cargo.toml` with dependencies: `domain`, `application`, `luminair-schema-loader`, `sqlx`, `sea-query`, `sea-query-sqlx`, `tokio`, `uuid`, `chrono`, `rust_decimal`, `tracing`.
   - Move `naming/`, `migration/`, `query/`, `repositories/`, `connection.rs`, and `error.rs` from `infrastructure/src/persistence/` into `infrastructure/persistence/src/`.
   - Expose public repositories (`SqlxDocumentInstanceRepository`, `SqlxRoleRepository`, etc.), connection factory (`create_connection_pool`), and migrations (`run_static_migrations`, `sync_dynamic_schemas`).
-- [ ] **Step 1.3: Extract `infrastructure/auth` Crate (In-Process OIDC)**
+- [x] **Step 1.3: Extract `infrastructure/auth` Crate (In-Process OIDC)**
   - Create `infrastructure/auth/Cargo.toml` with dependencies: `domain`, `application`, `luminair-persistence`, `jsonwebtoken`, `reqwest`, `serde`, `serde_json`, `thiserror`, `tracing`.
   - Move in-process JWT validation (`oidc.rs`), JWKS fetching, `ServiceTokenRegistry`, and `SqlxAuthResolver` into `infrastructure/auth/src/`.
-- [ ] **Step 1.4: Extract `infrastructure/auth-cognito-edge` Crate**
+- [x] **Step 1.4: Extract `infrastructure/auth-cognito-edge` Crate**
   - Create `infrastructure/auth-cognito-edge/Cargo.toml` with dependencies: `domain`, `application`, `luminair-persistence`, `thiserror`, `tracing`. (Zero RSA, zero JWKS, zero `jsonwebtoken` dependencies).
   - Implement `CognitoEdgeAuthResolver` querying `user_role_assignments` and `access_requests` without in-process cryptography.
-- [ ] **Step 1.5: Extract `infrastructure/http` Crate**
+- [x] **Step 1.5: Extract `infrastructure/http` Crate**
   - Create `infrastructure/http/Cargo.toml` with dependencies: `domain`, `application`, `luminair-schema-loader`, `luminair-persistence`, `axum`, `serde`, `serde_json`, `thiserror`, `tracing`.
   - Move `routes.rs`, `handlers/`, `middleware.rs`, `error.rs`, `envelope.rs`, `extractors/`, `codec/`, and generic `HttpState` into `infrastructure/http/src/`.
   - Define `AuthCredentials<'a>` enum and update `Caller` / `OnboardingUser` extractors.
@@ -401,14 +401,14 @@ flowchart TD
 
 ### Phase 2: Create `bootstrap/` Binary Crates
 
-- [ ] **Step 2.1: Register Member Crates in Workspace Root `Cargo.toml`**
+- [x] **Step 2.1: Register Member Crates in Workspace Root `Cargo.toml`**
   - Register all five `infrastructure/*` crates and three `bootstrap/*` crates.
   - Add workspace dependency aliases (`luminair-schema-loader`, `luminair-persistence`, `luminair-auth`, `luminair-auth-cognito-edge`, `luminair-http`).
-- [ ] **Step 2.2: Implement `bootstrap/luminair-cli` Crate**
+- [x] **Step 2.2: Implement `bootstrap/luminair-cli` Crate**
   - Create `bootstrap/luminair-cli/Cargo.toml` (depends only on `domain`, `application`, `luminair-schema-loader`, `luminair-persistence`, `tokio`, `tracing`, `tracing-subscriber`).
   - Move CLI configuration, runner, and reports (`validate`, `dry-run`, `migrate`) into `bootstrap/luminair-cli/src/`.
   - Confirm binary contains **zero** HTTP or Lambda dependencies.
-- [ ] **Step 2.3: Implement `bootstrap/luminair-server` Crate**
+- [x] **Step 2.3: Implement `bootstrap/luminair-server` Crate**
   - Create `bootstrap/luminair-server/Cargo.toml` (depends on `domain`, `application`, `luminair-schema-loader`, `luminair-persistence`, `luminair-auth`, `luminair-http`, `tokio`, `tracing`, `tracing-subscriber`).
   - Implement server startup in `main.rs`:
     - Reads `LUMINAIR_*` environment variables.
@@ -417,7 +417,7 @@ flowchart TD
     - Creates database pool (`max_connections = 20..50`).
     - Assembles `AppContainer::new(pool, context, auth_resolver)` and builds Axum router.
     - Binds `tokio::net::TcpListener` and starts `axum::serve` with graceful `SIGINT`/`SIGTERM` shutdown.
-- [ ] **Step 2.4: Implement `bootstrap/aws-lambda` Crate**
+- [x] **Step 2.4: Implement `bootstrap/aws-lambda` Crate**
   - Create `bootstrap/aws-lambda/Cargo.toml`:
     ```toml
     [package]
@@ -481,10 +481,10 @@ flowchart TD
 
 ### Phase 3: Edge Cognito Auth & Abstract Credentials
 
-- [ ] **Step 3.1: Implement `AuthCredentials` & Update Extractor**
+- [x] **Step 3.1: Implement `AuthCredentials` & Update Extractor**
   - In `infrastructure/http/src/extractors/auth.rs`, map `x-cognito-sub`, `x-cognito-email`, and `x-cognito-name` into `AuthCredentials::EdgeCognito`.
   - Fall back to `Authorization: Bearer <token>` into `AuthCredentials::BearerToken`.
-- [ ] **Step 3.2: Implement `CognitoEdgeAuthResolver`**
+- [x] **Step 3.2: Implement `CognitoEdgeAuthResolver`**
   - In `infrastructure/auth-cognito-edge/src/lib.rs`, implement `AuthContextResolver` for `CognitoEdgeAuthResolver`.
   - Read-only lookup for `UserId` role assignments and onboarding status.
   - Return `AuthResolutionError::Auth(AuthError::MissingToken)` if `EdgeCognito` credentials are not present or `user_id` is blank.
@@ -493,26 +493,26 @@ flowchart TD
 
 ### Phase 4: Aurora DSQL Serverless Pool & IAM Refresh
 
-- [ ] **Step 4.1: Background Dynamic IAM Token Refresh**
+- [x] **Step 4.1: Background Dynamic IAM Token Refresh**
   - Extend `infrastructure/persistence/src/connection.rs` with an AWS SDK-backed token provider (`AwsSdkDsqlTokenProvider`).
   - Automatically regenerates Aurora DSQL IAM tokens prior to the 15-minute expiration window using `max_lifetime = Duration::from_secs(600)`.
-- [ ] **Step 4.2: Serverless Pool Sizing Safeguards**
+- [x] **Step 4.2: Serverless Pool Sizing Safeguards**
   - In `create_connection_pool`, enforce that when running in a Lambda environment (detected via `AWS_LAMBDA_FUNCTION_NAME`), `max_connections` defaults to `1` (maximum `2`).
 
 ---
 
 ### Phase 5: Operational Packaging, Docker & Tests
 
-- [ ] **Step 5.1: Update `Dockerfile` for Dual Binaries**
+- [x] **Step 5.1: Update `Dockerfile` for Dual Binaries**
   - Update multi-stage Docker build to compile `luminair-cli` and `luminair-server`:
     ```dockerfile
     RUN cargo build --release -p luminair-cli -p luminair-server
     ```
   - Copy both binaries to `/usr/local/bin/`.
-- [ ] **Step 5.2: Update `docker-compose.yml`**
+- [x] **Step 5.2: Update `docker-compose.yml`**
   - Update `luminair-server` service to invoke `luminair-server`.
   - Update `cli-validate`, `cli-dry-run`, and `cli-migrate` to invoke `luminair-cli`.
-- [ ] **Step 5.3: Update Integration & E2E Tests**
+- [x] **Step 5.3: Update Integration & E2E Tests**
   - Update `infrastructure/tests/cli_test.rs` to target `luminair-cli`.
   - Update `infrastructure/tests/e2e_service_test.rs` to target `luminair-server`.
 
@@ -520,16 +520,16 @@ flowchart TD
 
 ### Phase 6: Documentation & ADR-007
 
-- [ ] **Step 6.1: Update [`docs/architecture.md`](../architecture.md)**
+- [x] **Step 6.1: Update [`docs/architecture.md`](../architecture.md)**
   - Reflect granular `infrastructure/*` adapter crates and `bootstrap/*` entrypoints.
   - Document dual deployment targets (container microservice vs. AWS Lambda serverless).
-- [ ] **Step 6.2: Update [`docs/deploy-with-aws.md`](../deploy-with-aws.md)**
+- [x] **Step 6.2: Update [`docs/deploy-with-aws.md`](../deploy-with-aws.md)**
   - Document Amazon API Gateway HTTP API (v2) JWT Authorizer setup for AWS Cognito.
   - Document parameter mappings for `x-cognito-*` headers.
   - Document serverless deployment commands (`cargo lambda build -p aws-lambda --release --arm64`).
-- [ ] **Step 6.3: Update [`docs/plan-infrastructure.md`](../plan-infrastructure.md)**
+- [x] **Step 6.3: Update [`docs/plan-infrastructure.md`](../plan-infrastructure.md)**
   - Add Phase 8: Dual-Target Deployment & Granular Crate Refactoring.
-- [ ] **Step 6.4: Author [`docs/adr/ADR-007-dual-target-deployment-lambda-and-microservice.md`](../adr/)**
+- [x] **Step 6.4: Author [`docs/adr/ADR-007-dual-target-deployment-lambda-and-microservice.md`](../adr/ADR-007-dual-target-deployment-lambda-and-microservice.md)**
   - Document context, evaluated alternatives, decision, consequences, and approval record.
 
 ---

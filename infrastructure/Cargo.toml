@@ -8,6 +8,11 @@ license.workspace = true
 [dependencies]
 domain.workspace = true
 application.workspace = true
+luminair-schema-loader = { workspace = true }
+luminair-persistence = { workspace = true }
+luminair-auth = { workspace = true }
+luminair-auth-cognito-edge = { workspace = true }
+luminair-http = { workspace = true }
 sqlx.workspace = true
 tokio.workspace = true
 uuid.workspace = true
@@ -33,4 +38,4 @@ domain = { workspace = true, features = ["test-support"] }
 application = { workspace = true, features = ["test-support"] }
 testcontainers = { workspace = true }
 assert-json-diff = { workspace = true }
-
+luminair-cli = { workspace = true }

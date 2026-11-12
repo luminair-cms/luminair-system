@@ -1,0 +1,34 @@
+[package]
+name = "luminair-persistence"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+domain = { workspace = true }
+application = { workspace = true }
+luminair-schema-loader = { workspace = true }
+sqlx = { workspace = true }
+sea-query = { workspace = true }
+sea-query-sqlx = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+indexmap = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+domain = { workspace = true, features = ["test-support"] }
+application = { workspace = true, features = ["test-support"] }
+testcontainers = { workspace = true }
+assert-json-diff = { workspace = true }

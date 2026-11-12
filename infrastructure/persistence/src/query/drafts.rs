@@ -1,0 +1,258 @@
+//! Sea-Query dynamic query builders for the unified `document_drafts` table.
+
+use chrono::{DateTime, Utc};
+use sea_query::{
+    Asterisk, DeleteStatement, Expr, ExprTrait, InsertStatement, OnConflict, Order, Query,
+    SelectStatement,
+};
+use uuid::Uuid;
+
+use domain::schema::DocumentTypeId;
+
+use super::common::{
+    COL_CONTENT_IDEN, COL_CREATED_AT_IDEN, COL_CREATED_BY_IDEN, COL_DISPLAY_TITLE_IDEN,
+    COL_DISPLAY_VALUES_IDEN, COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN, COL_RELATIONS_IDEN, COL_SCHEMA_VERSION_IDEN, COL_STATUS_IDEN,
+    COL_UPDATED_AT_IDEN, COL_UPDATED_BY_IDEN, COL_VERSION_IDEN, TABLE_DOCUMENT_DRAFTS_IDEN,
+};
+use crate::persistence::naming::StaticIden;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const DRAFT_INSERT_COLUMNS: [StaticIden; 14] = [
+    COL_ID_IDEN,
+    COL_DOCUMENT_TYPE_ID_IDEN,
+    COL_DISPLAY_VALUES_IDEN,
+    COL_DISPLAY_TITLE_IDEN,
+    COL_STATUS_IDEN,
+    COL_CONTENT_IDEN,
+    COL_RELATIONS_IDEN,
+    COL_SCHEMA_VERSION_IDEN,
+    COL_VERSION_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN,
+    COL_CREATED_AT_IDEN,
+    COL_CREATED_BY_IDEN,
+    COL_UPDATED_AT_IDEN,
+    COL_UPDATED_BY_IDEN,
+];
+
+const DRAFT_UPDATE_COLUMNS: [StaticIden; 10] = [
+    COL_DISPLAY_VALUES_IDEN,
+    COL_DISPLAY_TITLE_IDEN,
+    COL_STATUS_IDEN,
+    COL_CONTENT_IDEN,
+    COL_RELATIONS_IDEN,
+    COL_SCHEMA_VERSION_IDEN,
+    COL_VERSION_IDEN,
+    COL_LAST_PUBLISHED_REVISION_IDEN,
+    COL_UPDATED_AT_IDEN,
+    COL_UPDATED_BY_IDEN,
+];
+
+// ---------------------------------------------------------------------------
+// Public Types
+// ---------------------------------------------------------------------------
+
+/// Parameters for upserting a document working draft into `document_drafts`.
+#[derive(Debug, Clone)]
+pub(crate) struct DraftUpsertParams<'a> {
+    pub id: Uuid,
+    pub document_type_id: &'a DocumentTypeId,
+    pub display_values_json: serde_json::Value,
+    pub display_title: &'a str,
+    pub status: &'static str,
+    pub content_json: serde_json::Value,
+    pub relations_json: serde_json::Value,
+    pub schema_version: i32,
+    pub version: i32,
+    pub last_published_revision: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub created_by_urn: String,
+    pub updated_at: DateTime<Utc>,
+    pub updated_by_urn: String,
+}
+
+// ---------------------------------------------------------------------------
+// Public Query Builders
+// ---------------------------------------------------------------------------
+
+/// Builds a `SELECT * FROM document_drafts WHERE document_type_id = $1 AND id = $2` query.
+#[must_use]
+pub(crate) fn select_draft_by_id_query(type_id: &DocumentTypeId, id: Uuid) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
+        .column(Asterisk)
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
+    stmt
+}
+
+/// Builds a `SELECT * FROM document_drafts WHERE document_type_id = $1 ORDER BY updated_at DESC` query.
+#[must_use]
+pub(crate) fn select_drafts_by_type_query(type_id: &DocumentTypeId) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
+        .column(Asterisk)
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .order_by(COL_UPDATED_AT_IDEN, Order::Desc);
+    stmt
+}
+
+/// Builds an upsert statement into `document_drafts` with `ON CONFLICT (document_type_id, id) DO UPDATE`.
+#[must_use]
+pub(crate) fn upsert_draft_query(params: DraftUpsertParams<'_>) -> InsertStatement {
+    let mut stmt = Query::insert();
+    stmt.into_table(TABLE_DOCUMENT_DRAFTS_IDEN)
+        .columns(DRAFT_INSERT_COLUMNS)
+        .values_panic([
+            params.id.into(),
+            params.document_type_id.as_ref().into(),
+            params.display_values_json.into(),
+            params.display_title.into(),
+            params.status.into(),
+            params.content_json.into(),
+            params.relations_json.into(),
+            params.schema_version.into(),
+            params.version.into(),
+            params.last_published_revision.into(),
+            params.created_at.into(),
+            params.created_by_urn.into(),
+            params.updated_at.into(),
+            params.updated_by_urn.into(),
+        ])
+        .on_conflict(
+            OnConflict::columns([COL_DOCUMENT_TYPE_ID_IDEN, COL_ID_IDEN])
+                .update_columns(DRAFT_UPDATE_COLUMNS)
+                .to_owned(),
+        );
+    stmt
+}
+
+/// Builds a `DELETE FROM document_drafts WHERE document_type_id = $1 AND id = $2` query.
+#[must_use]
+pub(crate) fn delete_draft_query(type_id: &DocumentTypeId, id: Uuid) -> DeleteStatement {
+    let mut stmt = Query::delete();
+    stmt.from_table(TABLE_DOCUMENT_DRAFTS_IDEN)
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .and_where(Expr::col(COL_ID_IDEN).eq(id));
+    stmt
+}
+
+/// Builds a `SELECT 1 FROM document_drafts WHERE document_type_id = $1 LIMIT 1` existence probe query.
+#[must_use]
+pub(crate) fn exists_draft_for_type_query(type_id: &DocumentTypeId) -> SelectStatement {
+    let mut stmt = Query::select();
+    stmt.from(TABLE_DOCUMENT_DRAFTS_IDEN)
+        .expr(Expr::val(1))
+        .and_where(Expr::col(COL_DOCUMENT_TYPE_ID_IDEN).eq(type_id.as_ref()))
+        .limit(1);
+    stmt
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_query::PostgresQueryBuilder;
+    use serde_json::json;
+
+    use crate::persistence::query::common::{compile_delete, compile_insert, compile_select};
+
+    fn sample_doc_type_id() -> DocumentTypeId {
+        DocumentTypeId::try_new("article").unwrap()
+    }
+
+    #[test]
+    fn test_select_draft_by_id_query() {
+        let type_id = sample_doc_type_id();
+        let id = Uuid::now_v7();
+        let stmt = select_draft_by_id_query(&type_id, id);
+
+        let unparam = stmt.to_string(PostgresQueryBuilder);
+        assert!(unparam.contains("FROM \"document_drafts\""));
+        assert!(unparam.contains("\"document_type_id\" = 'article'"));
+
+        let (sql, _) = compile_select(&stmt);
+        assert!(sql.contains("WHERE \"document_type_id\" = $1 AND \"id\" = $2"));
+    }
+
+    #[test]
+    fn test_select_drafts_by_type_query() {
+        let type_id = sample_doc_type_id();
+        let stmt = select_drafts_by_type_query(&type_id);
+
+        let unparam = stmt.to_string(PostgresQueryBuilder);
+        assert!(unparam.contains("FROM \"document_drafts\""));
+        assert!(unparam.contains("ORDER BY \"updated_at\" DESC"));
+
+        let (sql, _) = compile_select(&stmt);
+        assert!(sql.contains("WHERE \"document_type_id\" = $1"));
+        assert!(sql.contains("ORDER BY \"updated_at\" DESC"));
+    }
+
+    #[test]
+    fn test_upsert_draft_query() {
+        let type_id = sample_doc_type_id();
+        let id = Uuid::now_v7();
+        let now = Utc::now();
+        let params = DraftUpsertParams {
+            id,
+            document_type_id: &type_id,
+            display_values_json: json!({"title": "Draft Title"}),
+            display_title: "Draft Title",
+            status: "draft",
+            content_json: json!({"body": "Draft content"}),
+            relations_json: json!({}),
+            schema_version: 1,
+            version: 1,
+            last_published_revision: None,
+            created_at: now,
+            created_by_urn: "user:test".to_string(),
+            updated_at: now,
+            updated_by_urn: "user:test".to_string(),
+        };
+
+        let stmt = upsert_draft_query(params);
+        let unparam = stmt.to_string(PostgresQueryBuilder);
+        assert!(unparam.contains("INSERT INTO \"document_drafts\""));
+        assert!(unparam.contains("ON CONFLICT (\"document_type_id\", \"id\") DO UPDATE SET"));
+        assert!(unparam.contains("\"display_title\" = \"excluded\".\"display_title\""));
+        assert!(unparam.contains("\"status\" = \"excluded\".\"status\""));
+
+        let (sql, _) = compile_insert(&stmt);
+        assert!(sql.contains("INSERT INTO \"document_drafts\""));
+        assert!(sql.contains("ON CONFLICT (\"document_type_id\", \"id\") DO UPDATE SET"));
+    }
+
+    #[test]
+    fn test_delete_draft_query() {
+        let type_id = sample_doc_type_id();
+        let id = Uuid::now_v7();
+        let stmt = delete_draft_query(&type_id, id);
+
+        let unparam = stmt.to_string(PostgresQueryBuilder);
+        assert!(unparam.contains("DELETE FROM \"document_drafts\""));
+
+        let (sql, _) = compile_delete(&stmt);
+        assert!(sql.contains("WHERE \"document_type_id\" = $1 AND \"id\" = $2"));
+    }
+
+    #[test]
+    fn test_exists_draft_for_type_query() {
+        let type_id = sample_doc_type_id();
+        let stmt = exists_draft_for_type_query(&type_id);
+
+        let unparam = stmt.to_string(PostgresQueryBuilder);
+        assert!(unparam.contains("SELECT 1 FROM \"document_drafts\""));
+        assert!(unparam.contains("LIMIT 1"));
+
+        let (sql, _) = compile_select(&stmt);
+        assert!(sql.contains("WHERE \"document_type_id\" = $2"));
+        assert!(sql.contains("LIMIT $3"));
+    }
+}

@@ -1,20 +1,28 @@
 # Infrastructure Crate Implementation Plan
 
-- **Target Crate**: `infrastructure`
+- **Target Crates**:
+  - `infrastructure/schema-loader` (`luminair-schema-loader`)
+  - `infrastructure/persistence` (`luminair-persistence`)
+  - `infrastructure/auth` (`luminair-auth`)
+  - `infrastructure/auth-cognito-edge` (`luminair-auth-cognito-edge`)
+  - `infrastructure/http` (`luminair-http`)
+  - `bootstrap/aws-lambda` (`aws-lambda`)
+  - `bootstrap/luminair-server` (`luminair-server`)
+  - `bootstrap/luminair-cli` (`luminair-cli`)
 - **Governing Architecture & Sub-system Documentation**:
-  - Overview & Composition Root: [`docs/infrastructure/overview.md`](./infrastructure/overview.md)
-  - Schema Loader & Config Specification: [`docs/infrastructure/schema-loader.md`](./infrastructure/schema-loader.md)
-  - Database Persistence & Adapters: [`docs/infrastructure/persistence.md`](./infrastructure/persistence.md)
-  - REST API & Authentication: [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md)
+  - Workspace Architecture: [`docs/architecture.md`](./architecture.md)
+  - Dual-Target AWS Deployment: [`docs/deploy-with-aws.md`](./deploy-with-aws.md)
+  - Dual-Target Refactoring Specification: [`docs/refactoring/refactoring-dual-target-lambda-and-microservice.md`](./refactoring/refactoring-dual-target-lambda-and-microservice.md)
+  - ADR-007: [`docs/adr/ADR-007-dual-target-deployment-lambda-and-microservice.md`](./adr/ADR-007-dual-target-deployment-lambda-and-microservice.md)
   - Canonical API Reference: [`docs/api.md`](./api.md)
-- **Status**: Phases 1–7 Complete (Schema Loader, Persistence Foundation, Repository Adapters, CLI `test`/`dry-run`/`migrate`/`service` Modes, Composition Root, Health Checker, Authentication & Authorization, Generic `HttpState`, Zero-Clone Codecs, REST API & AWS Aurora DSQL Connection Factory)
-- **Last Updated**: 2026-10-28
+- **Status**: Phases 1–8 Complete (Schema Loader, Persistence Foundation, Repository Adapters, CLI `test`/`dry-run`/`migrate`/`service` Modes, Composition Root, Health Checker, Authentication & Authorization, Generic `HttpState`, Zero-Clone Codecs, REST API, AWS Aurora DSQL Connection Factory, Dual-Target Deployment & Granular Infrastructure Crates)
+- **Last Updated**: 2026-11-12
 
 ---
 
 ## 1. Plan Overview & Roadmap
 
-The `infrastructure` crate is implemented incrementally across 7 testable phases, beginning with the offline-testable schema loader and culminating in a production-ready binary with AWS Aurora DSQL compatibility:
+The infrastructure layer was initially developed as a single crate and subsequently refactored into focused, single-responsibility adapter libraries under `infrastructure/*` and dedicated platform binary entrypoints under `bootstrap/*` to support dual-target deployment (Container Microservice vs. Serverless AWS Lambda):
 
 ```mermaid
 flowchart TD
@@ -26,6 +34,7 @@ flowchart TD
     P5["Phase 5: Authentication & Authorization (Complete)<br/>(OIDC JWT, Service Tokens, User Profile Directory & Sync, AuthContextResolver, Caller / OnboardingUser)"]
     P6["Phase 6: REST API & Axum HTTP Layer (Complete)<br/>(Generic HttpState, Has* traits, Zero-Clone Codecs, RFC 9457 ProblemDetails, 25 Routes across 21 Operations)"]
     P7["Phase 7: Cloud Runtime & DSQL IAM Integration (Complete)<br/>(RunMode::Serve, AWS DSQL IAM token rotation, graceful HTTP shutdown)"]
+    P8["Phase 8: Dual-Target Deployment & Granular Infrastructure Crates (Complete)<br/>(5 granular adapter crates, 3 bootstrap binaries, edge Cognito auth, serverless DSQL pool, ADR-007)"]
 
     P1 --> P2
     P2 --> P3
@@ -34,6 +43,7 @@ flowchart TD
     P4B --> P5
     P5 --> P6
     P6 --> P7
+    P7 --> P8
 ```
 
 ---
@@ -146,34 +156,25 @@ flowchart TD
   - `main.rs` entry point with `tracing_subscriber` (stderr) and `ExitCode` handling.
   - Prepared config file (`config/cli-config.json`), `docker-compose.yml` services (`cli-validate`, `cli-dry-run-offline`, `cli-dry-run`, `cli-migrate` under profile `cli`), and CLI integration tests (`infrastructure/tests/cli_test.rs`).
 
-#### Phase 4B: Composition Root (`container.rs`), Health Checker & `Serve` Mode
+#### Phase 4B: Composition Root (`container.rs`), Health Checker & `Serve` Mode (Complete)
 
 - [x] **Step 4B.1: Composition Root Wiring (`infrastructure/src/container.rs`)**
-  - Assemble `PersistenceContainer` (initializing `&'static SchemaNaming` via `SchemaNaming::from_registry(&context.schema)` and constructing all 6 `Sqlx*Repository` adapters: `SqlxDocumentInstanceRepository`, `SqlxDocumentSnapshotRepository`, `SqlxRoleRepository`, `SqlxUserRoleAssignmentRepository`, `SqlxAccessRequestRepository`, `SqlxUserProfileRepository`).
-  - Assemble `AppContainer` (`from_pool_and_context`) wiring `DocumentsServiceImpl`, `AccessRequestsServiceImpl`, `SchemaServiceImpl`, `SystemConfigServiceImpl`, `UserDirectoryServiceImpl`, `SqlxHealthChecker`, and `SqlxAuthResolver`, plus `AppContainer::http_state() -> ProductionHttpState`.
-- [x] **Step 4B.2: Health Checker (`infrastructure/src/health.rs`)**
-  - Implement `HealthStatus` (`Healthy`, `Unhealthy { reason }`), `HealthCheckService` port trait, `SqlxHealthChecker` (`/healthz` liveness and `/ready` readiness via `SELECT 1` on `PgPool`), and `AlwaysHealthyChecker`.
-- [x] **Step 4B.3: `RunMode::Serve` Worker (`infrastructure/src/cli/service.rs`)**
-  - Extend `RunMode`, `CliConfig`, and `CliOutcome` with HTTP server settings (`host`, `port`, auth configuration) and `RunMode::Serve` startup.
+  - `PersistenceContainer` and `AppContainer` assembling database connection pools, leaked static contexts, repositories, and application services.
+- [x] **Step 4B.2: Database Health Checker (`infrastructure/src/persistence/health.rs`)**
+  - `SqlxHealthChecker` executing active ping verification against the database connection pool.
 
 ---
 
-### Phase 5: Authentication & Authorization Machinery (Complete)
+### Phase 5: Authentication & Authorization (Complete)
 
-> **Detailed Specification**: See [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md#4-authentication-machinery-auth).
+> **Detailed Specification**: See [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md) and [`ADR-006`](./adr/ADR-006-user-profile-and-directory-architecture.md).
 
-- [x] **Step 5.1: Claims & OIDC JWT Verification (`infrastructure/src/auth/claims.rs`, `oidc.rs`, `error.rs`)**
-  - `AuthenticatedUser` (`UserId`, `Option<Email>`, `Option<DisplayName>`) and `AuthenticatedIdentity` (`User`, `Service`).
-  - `OidcConfig`, `JwtClaims`, and `OidcTokenValidator`: validate JWT signatures (HS256, RS256 PEM, disabled test mode), verify `aud`/`iss`, and extract `AuthenticatedUser` with zero-clone `claims.sub` move.
-  - `AuthError` (`MissingToken`, `MalformedHeader`, `InvalidToken`) and `AuthResolutionError`.
-- [x] **Step 5.2: Service API Tokens (`infrastructure/src/auth/service_token.rs`)**
-  - `ServiceTokenEntry` and `ServiceTokenRegistry` validating pre-shared service bearer tokens mapping to `ServiceId` and assigned `Vec<RoleId>`.
-- [x] **Step 5.3: Auth Context Resolver & Axum Extractors (`infrastructure/src/auth/resolver.rs`, `extractor.rs`)**
-  - `AuthContextResolver` port and `DefaultAuthResolver<A, U, R, S>` (`SqlxAuthResolver`) resolving `CallerContext` (`ActorId::User` or `ActorId::Service`) and onboarding errors (`access_not_requested`, `access_pending`, `access_rejected`).
-  - Axum `FromRequestParts<St>` where `St: HasAuthResolver` for `Caller(pub CallerContext)` and `OnboardingUser(pub AuthenticatedUser)`.
-- [x] **Step 5.4: User Profile Directory & Bootstrap Synchronization (ADR-006) (`infrastructure/src/persistence/repositories/user_profile.rs`, `application/user_directory.rs`)**
-  - Replaced legacy `shadow_user.rs` write-on-read model with ADR-006 decoupled read-only directory lookup (`UserProfileRepository`, `UserDirectoryService`) and explicit bootstrap profile synchronization (`POST /api/v1/auth/profile/sync`, `GET /api/v1/auth/users`).
-  - Eliminates Aurora DSQL write amplification on read requests while providing efficient in-database querying and pagination for user management.
+- [x] **Step 5.1: In-Process OIDC JWT Verification (`infrastructure/src/auth/oidc.rs`, `error.rs`)**
+  - `OidcTokenValidator` with configurable JWKS fetching and RS256/ES256 public key verification.
+- [x] **Step 5.2: Static Service Tokens (`infrastructure/src/auth/service_tokens.rs`)**
+  - `ServiceTokenRegistry` for machine-to-machine authentication with role mapping.
+- [x] **Step 5.3: User Directory & Profile Synchronization (`infrastructure/src/auth/resolver.rs`)**
+  - `SqlxAuthResolver` implementing `AuthContextResolver` with user identity extraction, role resolution, and user profile persistence adhering to ADR-006.
 
 ---
 
@@ -182,66 +183,70 @@ flowchart TD
 > **Detailed Specification**: See [`docs/infrastructure/api-and-auth.md`](./infrastructure/api-and-auth.md) and canonical endpoint catalog in [`docs/api.md`](./api.md).
 
 - [x] **Step 6.1: Generic `HttpState` & Interface-Segregated `Has*` Traits (`infrastructure/src/api/state.rs`)**
-  - Generic `HttpState<D, A, S, C, H, Auth>` (`ProductionHttpState`) holding `&'static SystemContext` and `Arc`-wrapped service traits (`auth_resolver`, `documents_service`, `access_requests_service`, `schema_service`, `system_config_service`, `health_checker`) with manual `Clone` implementation and `HasSystemContext`, `HasAuthResolver`, `HasDocumentsService`, `HasAccessRequestsService`, `HasSchemaService`, `HasSystemConfigService`, and `HasHealthChecker` traits.
+  - Generic `HttpState<D, A, S, C, H, Auth>` (`ProductionHttpState`) holding `&'static SystemContext` and `Arc`-wrapped service traits with manual `Clone` implementation and segregated `Has*` traits.
 - [x] **Step 6.2: Zero-Clone Codecs, Extractors, Envelopes, Middleware & RFC 9457 Error Translation (`infrastructure/src/api/`)**
-  - `error.rs`: `ApiError`, `ApiErrorKind` (`Application`, `Unauthenticated`, `BadRequest`), and `ApiProblemDetails` mapping errors to `application/problem+json` responses.
-  - `extractors.rs`: `PaginationQuery`, `FindDocumentsQuery`, `FindByIdQuery`, `AdminHeadersQuery`, `resolve_document_type`, `parse_instance_id`, `parse_access_request_id`, `parse_view_param`, `parse_populate_param`.
-  - `middleware.rs`: `propagate_request_id` (`x-request-id`) and `inject_problem_instance` (populating RFC 9457 `instance` URI).
+  - `error.rs`: `ApiError`, `ApiErrorKind`, and `ApiProblemDetails` mapping errors to RFC 9457 `application/problem+json` responses.
+  - `extractors.rs`: `PaginationQuery`, `FindDocumentsQuery`, `FindByIdQuery`, `AdminHeadersQuery`, etc.
+  - `middleware.rs`: `propagate_request_id` (`x-request-id`) and `inject_problem_instance`.
   - `envelope.rs`: `JsonData<T>`, `CreatedJson<T>`, `PagedJson<T>`, `PaginationMeta`.
-  - `codec/request.rs` & `codec/response.rs`: Zero-clone consuming request decoding (`decode_document_payload`, `decode_fields_map`, `decode_relations_map`) and streaming `serde::Serialize` response wrappers (`SerFieldsMap`, `SerContentValue`, `DocumentInstanceDto`, `SystemConfigDto<'a>`, etc.).
+  - `codec/request.rs` & `codec/response.rs`: Zero-clone request decoding and streaming response serializers.
 - [x] **Step 6.3: Route Handlers & Router Assembly (`infrastructure/src/api/handlers/`, `routes.rs`)**
-  - 12 content routes including `/admin-headers` alias (`handlers/content.rs`), 5 access request routes (`handlers/access_requests.rs`), 4 schema routes including `/schemas` aliases (`handlers/schema.rs`), 2 system routes (`handlers/system.rs`), and 2 health routes (`handlers/health.rs`), assembled via `build_router` (25 total route paths across 21 distinct operations).
+  - 25 route paths across 21 distinct operations assembled via `build_router`.
 - [x] **Step 6.4: HTTP Integration Test Suite (`infrastructure/tests/api_test.rs`)**
   - End-to-end route tests using `axum-test` over generic `HttpState` backed by in-memory fake repositories.
 
 ---
 
-### Phase 7: Cloud Runtime Packaging & DSQL IAM Integration
+### Phase 7: Cloud Runtime Packaging & DSQL IAM Integration (Complete)
 
-> **Detailed Specification**: See [`docs/infrastructure/overview.md`](./infrastructure/overview.md#4-cli-execution-modes--dispatcher-clirunnerrs) and artifact implementation plan.
-
-```mermaid
-flowchart TD
-    subgraph S1["1. Connection Factory (persistence/connection.rs)"]
-        DET["detect_connection_target(url)<br/>(Postgres vs *.dsql.[region].on.aws)"]
-        PROV["DsqlTokenProvider<br/>(15-min IAM SigV4 local token generation)"]
-        POOL["PgPoolOptions Lifecycle Tuning<br/>(max_lifetime <= 10m, idle_timeout <= 5m, SSL: Require)"]
-        DET --> PROV --> POOL
-    end
-
-    subgraph S2["2. HTTP Service Daemon (cli/service.rs & cli/config.rs)"]
-        CFG["CliConfig Extension<br/>(RunMode::Serve, http_host, http_port, auth settings)"]
-        CONT["AppContainer::from_pool_and_context"]
-        ROUT["build_router(container.http_state())"]
-        SERV["axum::serve(listener, router).with_graceful_shutdown()"]
-        SIG["Dual-Signal Listener<br/>(tokio::signal::ctrl_c + Unix SIGTERM)"]
-        CFG --> CONT --> ROUT --> SERV
-        SIG --> SERV
-    end
-
-    POOL --> CONT
-```
-
+> **Detailed Specification**: See [`docs/infrastructure/overview.md`](./infrastructure/overview.md#4-cli-execution-modes--dispatcher-clirunnerrs).
 
 - [x] **Step 7.1: HTTP Service Worker & Graceful Shutdown (`infrastructure/src/cli/service.rs`, `config.rs`, `runner.rs`, `report.rs`)**
-  - Extend `RunMode` with `RunMode::Serve` and `CliConfig` with HTTP settings (`http_host`, `http_port`, `auto_migrate`, `oidc_jwt_secret`, `oidc_jwt_public_key_pem`, `oidc_issuer`, `oidc_audience`, `service_tokens`).
-  - Implement `execute_service_mode` orchestrator binding `tokio::net::TcpListener` and mounting `build_router(container.http_state())`.
-  - Handle cross-platform graceful termination via `tokio::signal::ctrl_c()` (`SIGINT`) and Unix `SIGTERM`, passing shutdown signal to `axum::serve(listener, router).with_graceful_shutdown()`.
-  - Output structured `ServiceReport` via `CliOutcome::Serve`.
+  - `RunMode::Serve` orchestrator binding `tokio::net::TcpListener`, mounting `build_router(container.http_state())`, and handling cross-platform graceful termination via `tokio::signal::ctrl_c()` (`SIGINT`) and Unix `SIGTERM`.
 - [x] **Step 7.2: AWS Aurora DSQL Connection Factory (`infrastructure/src/persistence/connection.rs`)**
-  - Implement `create_connection_pool` supporting both standard PostgreSQL (`postgres://...`) and Aurora DSQL (`*.dsql.[region].on.aws`).
-  - Implement `DsqlTokenProvider` trait with local SigV4 / environment token generator.
-  - Enforce SSL/TLS requirement for Aurora DSQL and configure `PgPoolOptions` with `max_lifetime = 10 minutes` (well within the 15-minute token lifecycle) and `idle_timeout = 5 minutes`.
-  - Refactor `cli/migrate.rs` and `cli/dry_run.rs` to route through the centralized connection factory.
+  - `create_connection_pool` supporting both PostgreSQL and Aurora DSQL endpoints.
+  - `DsqlTokenProvider` trait with local SigV4 / environment token generator and `PgPoolOptions` lifecycle tuning (`max_lifetime = 10m`, `idle_timeout = 5m`).
 - [x] **Step 7.3: Operational Configuration & Integration Tests (`config/cli-config.json`, `docker-compose.yml`, `infrastructure/tests/cli_test.rs`)**
-  - Update `config/cli-config.json` with service parameters.
-  - Update `docker-compose.yml` adding service / web container profile.
-  - Write integration tests in `cli_test.rs` testing service mode ephemeral port binding, `/healthz` HTTP probe, and clean signal termination.
-  - Implement full container-to-container E2E component test suite (`infrastructure/tests/e2e_service_test.rs` and `infrastructure/tests/e2e_support/`) using `testcontainers` (`postgres`, `dex`, and `luminair-cli:local` in `--mode serve --auto-migrate`); see [`docs/e2e-testing.md`](./e2e-testing.md).
+  - Full container-to-container E2E component test suite using `testcontainers` (`postgres`, `dex`, and `luminair-cli:local` in `--mode serve --auto-migrate`).
+
+---
+
+### Phase 8: Dual-Target Deployment (Microservice & AWS Lambda) with Edge Cognito Auth and Granular Infrastructure Crates (Complete)
+
+> **Detailed Specification**: See [`docs/refactoring/refactoring-dual-target-lambda-and-microservice.md`](./refactoring/refactoring-dual-target-lambda-and-microservice.md), [`ADR-007`](./adr/ADR-007-dual-target-deployment-lambda-and-microservice.md), and [`docs/deploy-with-aws.md`](./deploy-with-aws.md).
+
+- [x] **Step 8.1: Granular `infrastructure/*` Adapter Libraries**
+  - Decompose monolithic `infrastructure` into 5 focused, single-responsibility crates:
+    - `infrastructure/schema-loader` (`luminair-schema-loader`): Schema disk discovery, zero-copy DTOs, cross-schema graph validation, and `&'static SystemContext` assembly. Zero DB or web deps.
+    - `infrastructure/persistence` (`luminair-persistence`): Database adapters, connection factory, `SchemaNaming`, static and dynamic migrations, modular `sea-query` builders, OCC retry loops, and 6 SQLx repository implementations.
+    - `infrastructure/auth` (`luminair-auth`): In-process OIDC token validation (`OidcTokenValidator`), JWKS caching, `ServiceTokenRegistry`, and `SqlxAuthResolver`.
+    - `infrastructure/auth-cognito-edge` (`luminair-auth-cognito-edge`): Edge-authenticated `CognitoEdgeAuthResolver` with zero RSA cryptography and zero outbound network calls, conforming to ADR-006.
+    - `infrastructure/http` (`luminair-http`): Axum HTTP router, handlers, zero-clone codecs, RFC 9457 Problem Details, `AuthCredentials<'a>` enum, and monomorphized `AppContainer<Auth: AuthContextResolver>`.
+- [x] **Step 8.2: Isolated Platform Execution Entrypoints (`bootstrap/*`)**
+  - `bootstrap/luminair-cli` (`luminair-cli`): Dedicated administrative and migration CLI binary. Compiles in seconds with zero HTTP, Axum, or Lambda dependencies.
+  - `bootstrap/luminair-server` (`luminair-server`): High-throughput container microservice daemon (`axum::serve`, graceful shutdown, in-process OIDC).
+  - `bootstrap/aws-lambda` (`aws-lambda`): Produces native `bootstrap` binary for AWS Lambda (`provided.al2023`, `arm64` Graviton) using `lambda_http`.
+- [x] **Step 8.3: Edge Cognito Auth with Decoupled Credentials**
+  - Transport-agnostic `AuthCredentials<'a>` (`BearerToken(&str)` vs `EdgeCognito { user_id, email, name }`).
+  - Amazon API Gateway HTTP API (v2) JWT Authorizer + Parameter Mappings (`x-cognito-sub`, `x-cognito-email`, `x-cognito-name`).
+  - Rejection of unauthenticated requests at the AWS network edge (**$0 Lambda invocation cost**).
+  - Zero-cryptography Lambda execution eliminating 5–15ms of billable CPU duration per request.
+- [x] **Step 8.4: Aurora DSQL Serverless Pool Sizing & Dynamic IAM Token Refresh**
+  - `AwsSdkDsqlTokenProvider` automatically generates fresh IAM credentials before the 15-minute token expiry.
+  - Enforce serverless connection pool sizing: clamps `max_connections = 1` (clamped to max 2) in AWS Lambda sandboxes to prevent connection pool exhaustion across horizontally scaled instances.
+- [x] **Step 8.5: Static RPITIT Monomorphization of Composition Root**
+  - Retain modern Rust Return-Position Impl Trait in Trait (`impl Future<Output = ...> + Send`) without dynamic dispatch heap overhead (`dyn Trait`).
+  - `AppContainer<Auth>` and `HttpState` monomorphize cleanly for both microservice (`SqlxAuthResolver`) and serverless (`CognitoEdgeAuthResolver`) deployments.
+- [x] **Step 8.6: Bundled Schemas & Pre-Deployment CLI Migration Lifecycle**
+  - Project-agnostic CMS engine bundles schemas inside deployment artifacts (`LUMINAIR_SCHEMA_DIR=/var/task/schemas` or `/app/schemas`).
+  - Dynamic migrations are hard-disabled on Lambda cold starts, moving to deterministic pre-deployment pipelines with `luminair-cli --mode migrate`.
+- [x] **Step 8.7: Comprehensive Documentation, AWS Deployment Guide & ADR-007**
+  - Updated [`docs/architecture.md`](./architecture.md) and [`docs/deploy-with-aws.md`](./deploy-with-aws.md).
+  - Authored [`ADR-007: Dual-Target Deployment (Microservice & AWS Lambda) with Edge Cognito Auth and Granular Infrastructure Crates`](./adr/ADR-007-dual-target-deployment-lambda-and-microservice.md).
 
 ---
 
 ## 3. Plan Completion Summary
 
-All 7 implementation phases of the `infrastructure` crate are **100% complete**.
-The crate provides a fully operational, production-ready binary with AWS Aurora DSQL compatibility, PostgreSQL portability, offline/CI testability, OIDC/Service Token authentication, Axum REST routing, and Docker Compose development environments with Dex and Postgres.
+All 8 implementation phases are **100% complete**.
+The Luminair architecture cleanly bifurcates execution entrypoints between a high-throughput long-running container microservice (`luminair-server`) and a lean, serverless, event-driven function on AWS Lambda (`aws-lambda` / `bootstrap`), backed by a shared Amazon Aurora DSQL database and unified declarative schema engine.

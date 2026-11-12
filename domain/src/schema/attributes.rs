@@ -5,7 +5,7 @@ use std::{
 };
 
 use nutype::nutype;
-use rust_decimal::Decimal;
+pub use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::schema::documents::DocumentTypeId;

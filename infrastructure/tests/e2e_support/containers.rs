@@ -19,7 +19,7 @@ const POSTGRES_IMAGE: &str = "postgres";
 const POSTGRES_TAG: &str = "18.6-alpine3.24";
 const DEX_IMAGE: &str = "ghcr.io/dexidp/dex";
 const DEX_TAG: &str = "v2.43.0";
-const LUMINAIR_IMAGE: &str = "luminair-cli";
+const LUMINAIR_IMAGE: &str = "luminair";
 const LUMINAIR_TAG: &str = "local";
 
 /// Complete isolated end-to-end test environment spanning Postgres, Dex, and Luminair.
@@ -96,7 +96,7 @@ fn ensure_luminair_image_built(workspace_root: &Path) {
         return;
     }
     let status = Command::new("docker")
-        .args(["build", "-t", "luminair-cli:local", "."])
+        .args(["build", "-t", "luminair:local", "."])
         .current_dir(workspace_root)
         .status()
         .expect("execute docker build");
@@ -112,16 +112,11 @@ fn create_docker_network() -> DockerNetworkGuard {
         .args(["network", "create", &name])
         .status()
         .expect("execute docker network create");
-    assert!(
-        status.success(),
-        "Failed to create docker network {name}"
-    );
+    assert!(status.success(), "Failed to create docker network {name}");
     DockerNetworkGuard { name }
 }
 
-async fn start_postgres_container(
-    network_name: &str,
-) -> (ContainerAsync<GenericImage>, String) {
+async fn start_postgres_container(network_name: &str) -> (ContainerAsync<GenericImage>, String) {
     let pg_alias = format!("postgres-{}", Uuid::now_v7().simple());
     let ready_msg = "database system is ready to accept connections";
 
@@ -228,6 +223,7 @@ fn build_luminair_image(
         .with_env_var("LUMINAIR_HTTP_HOST", "0.0.0.0")
         .with_env_var("LUMINAIR_HTTP_PORT", "8080")
         .with_env_var("LUMINAIR_AUTO_MIGRATE", "true")
+        .with_env_var("LUMINAIR_SCHEMA_DIR", "/app/config/schemas")
         .with_env_var("LUMINAIR_OIDC_ISSUER", "http://localhost:5556/dex")
         .with_env_var("LUMINAIR_OIDC_AUDIENCE", "luminair-admin-spa")
         .with_env_var("LUMINAIR_OIDC_JWKS_URL", jwks_url)
@@ -235,13 +231,7 @@ fn build_luminair_image(
             "LUMINAIR_SERVICE_TOKENS",
             "local-dev-admin-token:ci-agent:admin",
         )
-        .with_cmd([
-            "--config",
-            "/app/config/cli-config.json",
-            "--mode",
-            "serve",
-            "--auto-migrate",
-        ])
+        .with_cmd(Vec::<String>::new())
 }
 
 async fn wait_for_luminair_ready(

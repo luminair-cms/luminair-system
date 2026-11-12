@@ -1,4 +1,4 @@
-//! Integration tests for the Luminair CLI subsystem (`infrastructure::cli`).
+//! Integration tests for the Luminair CLI subsystem (`luminair_cli`).
 //!
 //! Validates `validate`, `dry-run`, and `migrate` modes against prepared configuration
 //! fixtures in `config/cli-config.json` and `config/schemas/`.
@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-use infrastructure::cli::{
+use luminair_cli::{
     CliConfig, CliError, CliOutcome, DocumentTypeSummary, OutputFormat, RunMode,
-    StaticMigrationStatus, run,
+    StaticMigrationStatus, ValidationReport, run,
 };
-use infrastructure::persistence::migration::PlannedMigrationStep;
+use luminair_persistence::migration::PlannedMigrationStep;
 
 // ---------------------------------------------------------------------------
 // RAII Test Fixtures
@@ -184,119 +184,96 @@ async fn test_cli_live_database_migrate_and_dry_run_when_database_url_set() {
 #[test]
 fn test_cli_service_mode_config_parsing_and_flags() {
     let args = [
-        "luminair",
+        "luminair-cli",
         "--mode",
-        "serve",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "9090",
-        "--auto-migrate",
+        "dry-run",
+        "--offline",
+        "--schema-dir",
+        "config/schemas",
         "--database-url",
         "postgres://luminair:secret@localhost:5432/luminair",
-        "--oidc-jwt-secret",
-        "super-secret-key",
-        "--oidc-issuer",
-        "http://localhost:5556/dex",
-        "--oidc-audience",
-        "luminair-admin-spa",
+        "--format",
+        "json",
     ];
 
     let config = CliConfig::parse_from_iter(args).expect("CLI arg parsing should succeed");
-    assert_eq!(config.mode, RunMode::Serve);
-    assert_eq!(config.http_host, "127.0.0.1");
-    assert_eq!(config.http_port, 9090);
-    assert!(config.auto_migrate);
+    assert_eq!(config.mode, RunMode::DryRun);
+    assert!(config.offline);
+    assert_eq!(config.schema_dir, PathBuf::from("config/schemas"));
     assert_eq!(
         config.database_url.as_deref(),
         Some("postgres://luminair:secret@localhost:5432/luminair")
     );
-    assert_eq!(config.oidc_jwt_secret.as_deref(), Some("super-secret-key"));
-    assert_eq!(
-        config.oidc_issuer.as_deref(),
-        Some("http://localhost:5556/dex")
-    );
-    assert_eq!(config.oidc_audience.as_deref(), Some("luminair-admin-spa"));
+    assert_eq!(config.output_format, OutputFormat::Json);
 }
 
 #[test]
 fn test_cli_service_mode_config_oidc_jwks_url() {
-    let args = [
-        "luminair",
-        "--mode",
-        "serve",
-        "--oidc-jwks-url",
-        "http://dex:5556/dex/keys",
-        "--oidc-issuer",
-        "http://localhost:5556/dex",
-        "--oidc-audience",
-        "luminair-admin-spa",
-    ];
+    let args = ["luminair-cli", "--mode", "serve"];
 
-    let config = CliConfig::parse_from_iter(args).expect("CLI arg parsing should succeed");
-    assert_eq!(config.mode, RunMode::Serve);
-    assert_eq!(
-        config.oidc_jwks_url.as_deref(),
-        Some("http://dex:5556/dex/keys")
+    let result = CliConfig::parse_from_iter(args);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, CliError::Config(ref msg) if msg.contains("luminair-server")),
+        "expected error directing to luminair-server, got: {err:?}"
     );
-    assert_eq!(
-        config.oidc_issuer.as_deref(),
-        Some("http://localhost:5556/dex")
-    );
-    assert_eq!(config.oidc_audience.as_deref(), Some("luminair-admin-spa"));
 }
 
 #[test]
 fn test_cli_service_mode_validation_rejects_missing_database_url() {
     let root = workspace_root();
     let config = CliConfig {
-        mode: RunMode::Serve,
+        mode: RunMode::Migrate,
         schema_dir: root.join("config/schemas"),
         database_url: None,
         ..CliConfig::default()
     };
     let err = config
         .validate()
-        .expect_err("should reject missing database_url");
+        .expect_err("should reject missing database_url for migrate mode");
     assert!(
-        matches!(err, CliError::Config(msg) if msg.contains("database_url is required for 'serve' mode"))
+        matches!(err, CliError::Config(msg) if msg.contains("database_url is required for 'migrate' mode"))
     );
 }
 
 #[test]
 fn test_cli_service_mode_validation_rejects_zero_port() {
-    let root = workspace_root();
     let config = CliConfig {
-        mode: RunMode::Serve,
-        schema_dir: root.join("config/schemas"),
-        database_url: Some("postgres://localhost:5432/db".to_string()),
-        http_port: 0,
+        max_db_connections: 0,
         ..CliConfig::default()
     };
-    let err = config.validate().expect_err("should reject port 0");
+    let err = config.validate().expect_err("should reject 0 connections");
     assert!(
-        matches!(err, CliError::Config(msg) if msg.contains("http_port must be greater than zero"))
+        matches!(err, CliError::Config(msg) if msg.contains("max_db_connections must be greater than zero"))
     );
 }
 
 #[test]
 fn test_cli_service_report_rendering() {
-    use infrastructure::cli::ServiceReport;
-
-    let report = ServiceReport {
-        bind_address: "127.0.0.1:8080".to_string(),
-        status: "Shutdown cleanly".to_string(),
+    let report = ValidationReport {
+        schema_dir: "config/schemas".to_string(),
+        default_locale: "en".to_string(),
+        available_locales: vec!["en".to_string()],
+        document_types: vec![DocumentTypeSummary {
+            id: "article".to_string(),
+            kind: "collection".to_string(),
+            table_name: "articles".to_string(),
+            draft_and_publish: true,
+            field_count: 5,
+            relation_count: 2,
+        }],
+        database_url_configured: false,
     };
-    let outcome = CliOutcome::Serve(report);
+    let outcome = CliOutcome::Validate(report);
 
     let text = outcome.render(OutputFormat::Text).expect("text format");
-    assert!(text.contains("=== Luminair HTTP Service Report ==="));
-    assert!(text.contains("Bind Address: 127.0.0.1:8080"));
-    assert!(text.contains("Status:       Shutdown cleanly"));
+    assert!(text.contains("=== Configuration & Schema Validation Report ==="));
+    assert!(text.contains("article"));
 
     let json = outcome.render(OutputFormat::Json).expect("json format");
-    assert!(json.contains("\"mode\": \"serve\""));
-    assert!(json.contains("\"bindAddress\": \"127.0.0.1:8080\""));
+    assert!(json.contains("\"mode\": \"validate\""));
+    assert!(json.contains("\"defaultLocale\": \"en\""));
 }
 
 // ---------------------------------------------------------------------------

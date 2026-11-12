@@ -20,6 +20,14 @@ use crate::errors::DomainError;
 ))]
 pub struct SystemConfigId(Uuid);
 
+impl SystemConfigId {
+    /// Generates a new `SystemConfigId` with UUID v7.
+    #[must_use]
+    pub fn generate() -> Self {
+        Self::new(Uuid::now_v7())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemConfig {
     pub id: SystemConfigId,

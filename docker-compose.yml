@@ -69,34 +69,37 @@ services:
       start_period: 3s
 
   cli-validate:
-    image: luminair-cli:local
+    image: luminair:local
     build:
       context: .
       dockerfile: Dockerfile
     profiles:
       - "cli"
+    entrypoint: ["luminair-cli"]
     volumes:
       - ./config:/app/config:ro
     command: ["--config", "/app/config/cli-config.json", "--mode", "validate"]
 
   cli-dry-run-offline:
-    image: luminair-cli:local
+    image: luminair:local
     build:
       context: .
       dockerfile: Dockerfile
     profiles:
       - "cli"
+    entrypoint: ["luminair-cli"]
     volumes:
       - ./config:/app/config:ro
     command: ["--config", "/app/config/cli-config.json", "--mode", "dry-run", "--offline"]
 
   cli-dry-run:
-    image: luminair-cli:local
+    image: luminair:local
     build:
       context: .
       dockerfile: Dockerfile
     profiles:
       - "cli"
+    entrypoint: ["luminair-cli"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,12 +110,13 @@ services:
     command: ["--config", "/app/config/cli-config.json", "--mode", "dry-run"]
 
   cli-migrate:
-    image: luminair-cli:local
+    image: luminair:local
     build:
       context: .
       dockerfile: Dockerfile
     profiles:
       - "cli"
+    entrypoint: ["luminair-cli"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,7 +127,7 @@ services:
     command: ["--config", "/app/config/cli-config.json", "--mode", "migrate"]
 
   luminair-server:
-    image: luminair-cli:local
+    image: luminair:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -141,12 +145,12 @@ services:
       LUMINAIR_HTTP_HOST: "0.0.0.0"
       LUMINAIR_HTTP_PORT: 8080
       LUMINAIR_AUTO_MIGRATE: "true"
+      LUMINAIR_SCHEMA_DIR: "/app/config/schemas"
       LUMINAIR_OIDC_ISSUER: "http://localhost:5556/dex"
       LUMINAIR_OIDC_AUDIENCE: "luminair-admin-spa"
       LUMINAIR_OIDC_JWKS_URL: "http://dex:5556/dex/keys"
     volumes:
       - ./config:/app/config:ro
-    command: ["--config", "/app/config/cli-config.json", "--mode", "serve"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
       interval: 5s

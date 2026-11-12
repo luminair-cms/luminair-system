@@ -9,12 +9,11 @@ use application::services::{
     UserDirectoryServiceImpl,
 };
 use domain::system::SystemContext;
-
-use crate::api::state::{HttpState, ProductionHttpState};
-use crate::auth::{OidcTokenValidator, ServiceTokenRegistry, SqlxAuthResolver};
-use crate::health::SqlxHealthChecker;
-use crate::persistence::naming::SchemaNaming;
-use crate::persistence::repositories::{
+use luminair_auth::{OidcTokenValidator, ServiceTokenRegistry, SqlxAuthResolver};
+use luminair_http::container::AppContainer as HttpAppContainer;
+use luminair_http::state::ProductionHttpState;
+use luminair_persistence::health::SqlxHealthChecker;
+use luminair_persistence::repositories::{
     SqlxAccessRequestRepository, SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository,
     SqlxRoleRepository, SqlxUserProfileRepository, SqlxUserRoleAssignmentRepository,
 };
@@ -23,19 +22,7 @@ use crate::persistence::repositories::{
 // Structs
 // ---------------------------------------------------------------------------
 
-/// Sub-container aggregating SQLx repository adapters and database persistence machinery.
-#[derive(Debug, Clone)]
-pub(crate) struct PersistenceContainer {
-    pub document_instance_repo: SqlxDocumentInstanceRepository,
-    pub document_snapshot_repo: SqlxDocumentSnapshotRepository,
-    pub role_repo: SqlxRoleRepository,
-    pub assignment_repo: SqlxUserRoleAssignmentRepository,
-    pub access_request_repo: SqlxAccessRequestRepository,
-    pub user_profile_repo: SqlxUserProfileRepository,
-}
-
 /// Central composition root container holding initialized services and adapters.
-#[derive(Clone)]
 pub(crate) struct AppContainer {
     pub context: &'static SystemContext,
     pub auth_resolver: Arc<SqlxAuthResolver>,
@@ -58,31 +45,6 @@ pub(crate) struct AppContainer {
 // Inherent Implementations
 // ---------------------------------------------------------------------------
 
-impl PersistenceContainer {
-    /// Creates a new persistence container bound to the provided connection pool.
-    #[must_use]
-    pub(crate) fn new(pool: PgPool, context: &'static SystemContext) -> Self {
-        let naming = SchemaNaming::from_registry(&context.schema);
-        let document_instance_repo =
-            SqlxDocumentInstanceRepository::new(pool.clone(), naming);
-        let document_snapshot_repo =
-            SqlxDocumentSnapshotRepository::new(pool.clone(), naming);
-        let role_repo = SqlxRoleRepository::new(pool.clone());
-        let assignment_repo = SqlxUserRoleAssignmentRepository::new(pool.clone());
-        let access_request_repo = SqlxAccessRequestRepository::new(pool.clone());
-        let user_profile_repo = SqlxUserProfileRepository::new(pool);
-
-        Self {
-            document_instance_repo,
-            document_snapshot_repo,
-            role_repo,
-            assignment_repo,
-            access_request_repo,
-            user_profile_repo,
-        }
-    }
-}
-
 impl AppContainer {
     /// Constructs the central composition root from a database pool and startup context.
     #[must_use]
@@ -92,52 +54,29 @@ impl AppContainer {
         oidc_validator: Arc<OidcTokenValidator>,
         service_tokens: Arc<ServiceTokenRegistry>,
     ) -> Self {
-        let persistence = PersistenceContainer::new(pool.clone(), context);
-
-        let documents_service = Arc::new(DocumentsServiceImpl::new_with_snapshots(
-            persistence.document_instance_repo.clone(),
-            persistence.document_snapshot_repo.clone(),
-            context,
-        ));
-
-        let access_requests_service = Arc::new(AccessRequestsServiceImpl::new(
-            persistence.access_request_repo.clone(),
-            persistence.assignment_repo.clone(),
-            persistence.role_repo.clone(),
-        ));
-
-        let user_directory_service = Arc::new(UserDirectoryServiceImpl::new(
-            persistence.user_profile_repo.clone(),
-        ));
-
-        let schema_service = Arc::new(SchemaServiceImpl::new(context));
-        let system_config_service = Arc::new(SystemConfigServiceImpl::new(context));
-        let health_checker = Arc::new(SqlxHealthChecker::new(pool));
-
-        let auth_resolver = Arc::new(SqlxAuthResolver::new(
+        let auth_resolver = Arc::new(SqlxAuthResolver::from_pool(
+            pool.clone(),
             oidc_validator,
             service_tokens,
-            persistence.access_request_repo.clone(),
-            persistence.assignment_repo.clone(),
-            persistence.role_repo.clone(),
         ));
+        let inner = HttpAppContainer::new(pool, context, auth_resolver);
 
         Self {
-            context,
-            auth_resolver,
-            documents_service,
-            access_requests_service,
-            user_directory_service,
-            schema_service,
-            system_config_service,
-            health_checker,
+            context: inner.context,
+            auth_resolver: inner.auth_resolver,
+            documents_service: inner.documents_service,
+            access_requests_service: inner.access_requests_service,
+            user_directory_service: inner.user_directory_service,
+            schema_service: inner.schema_service,
+            system_config_service: inner.system_config_service,
+            health_checker: inner.health_checker,
         }
     }
 
     /// Projects the service layer into repository-free [`ProductionHttpState`].
     #[must_use]
-    pub(crate) fn http_state(&self) -> ProductionHttpState {
-        HttpState::new(
+    pub(crate) fn http_state(&self) -> ProductionHttpState<SqlxAuthResolver> {
+        luminair_http::state::HttpState::new(
             self.context,
             Arc::clone(&self.auth_resolver),
             Arc::clone(&self.documents_service),

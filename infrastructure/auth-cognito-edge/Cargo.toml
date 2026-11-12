@@ -1,0 +1,19 @@
+[package]
+name = "luminair-auth-cognito-edge"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+domain = { workspace = true }
+application = { workspace = true }
+luminair-persistence = { workspace = true }
+luminair-http = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+chrono = { workspace = true }
+uuid = { workspace = true }
