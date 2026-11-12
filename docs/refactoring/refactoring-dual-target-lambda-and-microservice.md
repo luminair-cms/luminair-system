@@ -1,9 +1,17 @@
-# Refactoring Plan: Dual-Target Deployment (Microservice & AWS Lambda) with Edge Cognito Auth and Bundled Schemas
+# Refactoring Plan: Dual-Target Deployment (Microservice & AWS Lambda) with Edge Cognito Auth and Granular Infrastructure Crates
 
-- **Target Crates**: `infrastructure` (library extraction), `bootstrap/aws-lambda` (new crate), `bootstrap/luminair-server` (new crate), `bootstrap/luminair-cli` (new crate)
+- **Target Crates**:
+  - `infrastructure/schema-loader` (granular crate)
+  - `infrastructure/persistence` (granular crate)
+  - `infrastructure/auth` (granular crate — in-process OIDC & service tokens)
+  - `infrastructure/auth-cognito-edge` (granular crate — zero-cryptography edge claims)
+  - `infrastructure/http` (granular crate — Axum REST driving adapter, extractors & composition root)
+  - `bootstrap/aws-lambda` (new entrypoint binary crate)
+  - `bootstrap/luminair-server` (new entrypoint binary crate)
+  - `bootstrap/luminair-cli` (new entrypoint binary crate)
 - **Governing Architecture**: [`docs/architecture.md`](../architecture.md), [`ADR-002`](../adr/ADR-002-hexagonal-architecture.md), [`ADR-003`](../adr/ADR-003-aws-dsql-database.md), [`ADR-006`](../adr/ADR-006-user-profile-and-directory-architecture.md)
 - **Status**: Proposed (Specification & Implementation Plan)
-- **Date**: 2026-11-11
+- **Date**: 2026-11-12
 
 ---
 
@@ -12,51 +20,60 @@
 The purpose of this refactoring is to enable the Luminair backend to be deployed in two first-class target environments from a single unified codebase:
 1. **Standard Long-Running Microservice**: Runs as a persistent Linux daemon listening on a TCP socket (`luminair-server` using `axum::serve`) inside Docker, AWS ECS Fargate, Kubernetes, or EC2.
 2. **Serverless AWS Lambda**: Runs as an event-driven function (`bootstrap` using `lambda_http`) on AWS Lambda (`provided.al2023`, `arm64` Graviton) fronted by Amazon API Gateway HTTP API (v2) and backed by Amazon Aurora DSQL.
+3. **Lean Administrative & Migration CLI**: Runs as a standalone command-line executable (`luminair-cli`) for deterministic pre-deployment schema validation, offline dry-run inspection, and dynamic database migrations.
 
 ### Core Architectural Directives
 - **Zero Business Logic Modification**: Pure business domain ([`domain`](../../domain)) and application orchestration ([`application`](../../application)) crates remain 100% agnostic and untouched.
-- **`bootstrap/` Directory of Independent Crates**: Group entrypoints under a `bootstrap/` folder containing 3 focused, independent binary crates (`bootstrap/aws-lambda`, `bootstrap/luminair-cli`, `bootstrap/luminair-server`), keeping dependencies completely isolated.
-- **AWS Cognito Edge Authentication**: Offload JWT validation to Amazon API Gateway HTTP API (v2) at the AWS network edge. Unauthenticated requests are rejected with zero Lambda invocations ($0 compute cost). Valid requests pass verified claims (`sub`, `email`, `name`, `cognito:groups`) directly into Lambda without in-process RSA cryptography.
+- **Granular `infrastructure/` Layered Adapter Crates (Approach 1.A)**: Split monolithic `infrastructure` into five focused, single-responsibility adapter crates (`schema-loader`, `persistence`, `auth`, `auth-cognito-edge`, `http`). `luminair-cli` depends only on `persistence` and `schema-loader`, pulling in zero web-server or Lambda dependencies. `aws-lambda` pulls in zero CLI or in-process RSA/JWKS dependencies.
+- **AWS Cognito Edge Authentication with Decoupled Credentials (Approach 2.A)**: Offload JWT validation to Amazon API Gateway HTTP API (v2) at the AWS network edge. Unauthenticated requests are rejected at the edge with zero Lambda invocations ($0 compute cost). Valid requests pass claims via parameter-mapped headers into an abstracted `AuthCredentials` model, eliminating in-process RSA cryptography in Lambda.
+- **Monomorphized Composition Root with RPITIT (Approach 3.A)**: Retain modern Rust Return-Position Impl Trait in Trait (`impl Future<Output = ...> + Send`) without dynamic heap allocation (`dyn Trait`), making `AppContainer<Auth>` and `HttpState` generic over `Auth: AuthContextResolver`.
+- **Strict ADR-006 Conformance for User Profiles (Approach 4.A)**: `CognitoEdgeAuthResolver` is 100% read-only. Profile synchronization is decoupled from the hot-path request pipeline, protecting Amazon Aurora DSQL from Optimistic Concurrency Control (`40001` OCC) write conflicts.
+- **Dynamic Aurora DSQL IAM Refresh & Serverless Sizing (Approach 5.A)**: Implement dynamic AWS SDK IAM token refresh within `max_lifetime <= 10m` pools, and enforce serverless pool sizing (`max_connections = 1`) on AWS Lambda.
 - **Pattern 1: Bundled Schemas per Project Artifact**: Luminair functions as a reusable, project-agnostic engine. Any project with custom JSON schemas bundles its own schemas inside its deployment artifact (`lambda.zip` or Docker image) with zero Rust code changes.
-- **Strict Migration & Dry-Run Lifecycle Separation**: Hard-disable auto-migrations on Lambda cold starts. Provide deterministic, explicit `dry-run` and `migrate` CLI flows for both long-running and serverless deployments.
+- **Strict Migration & Dry-Run Lifecycle Separation**: Hard-disable dynamic migrations on Lambda cold starts. Provide deterministic, explicit `dry-run` and `migrate` CLI flows for both long-running and serverless deployments.
 
 ---
 
 ## 2. Architectural Decisions & Key Concepts
 
-### Decision 1: Crate Layout — `bootstrap/` Directory with 3 Independent Crates
+### Decision 1: Crate Layout — Granular `infrastructure/` & Isolated `bootstrap/`
 
-Currently, `infrastructure` is both a library of adapters and a binary containing CLI/server execution logic. To separate reusable adapters from platform-specific deployment runners with strict dependency isolation, the workspace is reorganized into library layers and entrypoint runners:
+Monolithic `infrastructure` is decomposed into cohesive adapter crates under `infrastructure/` and platform entrypoints under `bootstrap/`:
 
 ```text
 luminair-system/
-├── Cargo.toml                         # Workspace root
-├── domain/                            # Pure domain entities, value objects, ports (unchanged)
-├── application/                       # Pure use-cases, services (unchanged)
-├── infrastructure/                    # Shared library of adapters (no [[bin]])
-│   ├── src/
-│   │   ├── api/                       # Axum Router, Handlers, DTOs, RFC 9457 middleware
-│   │   ├── auth/                      # Auth resolver traits, Cognito claim extractors, service tokens
-│   │   ├── persistence/               # SQLx, SeaQuery, Aurora DSQL pool, dynamic DDL sync
-│   │   ├── schema_loader/             # Schema discovery & SystemContext assembly
-│   │   ├── health.rs                  # Health checkers
-│   │   ├── container.rs               # AppContainer composition root
-│   │   └── lib.rs                     # Pure library root (main.rs removed)
-│   └── Cargo.toml
+├── Cargo.toml                              # Workspace root manifest
+├── domain/                                 # Pure domain entities, value objects, ports (unchanged)
+├── application/                            # Pure use-cases, services (unchanged)
 │
-└── bootstrap/                         # Execution entrypoints folder (3 independent crates)
-    ├── aws-lambda/                    # AWS Lambda custom runtime crate
-    │   ├── Cargo.toml                 # Dependencies: lambda_http, infrastructure, tokio, tracing
-    │   └── src/
-    │       └── main.rs                # Generates the 'bootstrap' binary required by AWS Lambda
-    ├── luminair-cli/                  # Administrative & migration CLI crate
-    │   ├── Cargo.toml                 # Dependencies: infrastructure, tokio, tracing (no HTTP/lambda deps)
-    │   └── src/
-    │       └── main.rs                # Generates the 'luminair-cli' binary (migrate, dry-run, validate)
-    └── luminair-server/               # Long-running HTTP service daemon crate
-        ├── Cargo.toml                 # Dependencies: infrastructure, tokio, tracing (no lambda deps)
-        └── src/
-            └── main.rs                # Generates the 'luminair-server' binary (axum::serve)
+├── infrastructure/                         # Adapter layer (focused library crates)
+│   ├── schema-loader/                      # Schema disk walker, validation & SystemContext assembly
+│   │   ├── Cargo.toml                      # Deps: domain, serde, serde_json, indexmap
+│   │   └── src/
+│   ├── persistence/                        # Database adapters, SeaQuery, SQLx, DSQL connection factory
+│   │   ├── Cargo.toml                      # Deps: domain, application, schema-loader, sqlx, sea-query
+│   │   ├── migrations/                     # Embedded static migrations (-- no-transaction)
+│   │   └── src/
+│   ├── auth/                               # In-process OIDC validator, JWKS client & Service Tokens
+│   │   ├── Cargo.toml                      # Deps: domain, application, persistence, jsonwebtoken, reqwest
+│   │   └── src/
+│   ├── auth-cognito-edge/                  # Edge-authenticated claims resolver (zero cryptography)
+│   │   ├── Cargo.toml                      # Deps: domain, application, persistence (no jsonwebtoken/reqwest!)
+│   │   └── src/
+│   └── http/                               # Axum router, REST routes, handlers, DTO codecs, ProblemDetails
+│       ├── Cargo.toml                      # Deps: domain, application, schema-loader, persistence, axum
+│       └── src/
+│
+└── bootstrap/                              # Platform execution entrypoints
+    ├── aws-lambda/                         # AWS Lambda custom runtime
+    │   ├── Cargo.toml                      # Deps: http, persistence, auth-cognito-edge, schema-loader, lambda_http
+    │   └── src/main.rs                     # Produces 'bootstrap' binary for provided.al2023 (arm64)
+    ├── luminair-server/                    # Long-running HTTP service daemon
+    │   ├── Cargo.toml                      # Deps: http, persistence, auth, schema-loader, tokio
+    │   └── src/main.rs                     # Produces 'luminair-server' binary (axum::serve + graceful shutdown)
+    └── luminair-cli/                       # Administrative & migration CLI
+        ├── Cargo.toml                      # Deps: persistence, schema-loader, tokio (ZERO Axum/Lambda deps!)
+        └── src/main.rs                     # Produces 'luminair-cli' binary (validate, dry-run, migrate)
 ```
 
 #### Workspace Members in Root `Cargo.toml`:
@@ -66,76 +83,178 @@ resolver = "2"
 members = [
     "domain",
     "application",
-    "infrastructure",
+    "infrastructure/schema-loader",
+    "infrastructure/persistence",
+    "infrastructure/auth",
+    "infrastructure/auth-cognito-edge",
+    "infrastructure/http",
     "bootstrap/aws-lambda",
     "bootstrap/luminair-cli",
     "bootstrap/luminair-server",
 ]
+
+[workspace.dependencies]
+# Workspace crates
+domain = { path = "domain" }
+application = { path = "application" }
+luminair-schema-loader = { path = "infrastructure/schema-loader" }
+luminair-persistence = { path = "infrastructure/persistence" }
+luminair-auth = { path = "infrastructure/auth" }
+luminair-auth-cognito-edge = { path = "infrastructure/auth-cognito-edge" }
+luminair-http = { path = "infrastructure/http" }
 ```
 
-#### Why 3 Independent Crates in `bootstrap/`:
-1. **Total Dependency Isolation**:
-   - `aws-lambda` pulls in `lambda_http`, but does NOT depend on CLI arg parsers or TCP daemon logic.
-   - `luminair-server` pulls in Tokio TCP and signal handling, but does NOT depend on `lambda_http`.
-   - `luminair-cli` is lean and only contains migration/validation runners, pulling in zero web-server or Lambda dependencies.
-2. **Deterministic Build Targets**:
-   - `cargo lambda build -p aws-lambda --release --arm64` directly produces the `bootstrap` executable for AWS Lambda (`provided.al2023`).
-   - `cargo build -p luminair-server --release` produces the microservice server executable.
-   - `cargo build -p luminair-cli --release` produces the CLI migration tool.
-3. **No Feature-Flag Contamination**:
-   Avoids complex Cargo feature unification issues that occur when gating dependencies inside a single crate.
+#### Architectural Advantages:
+1. **True Dependency Isolation**:
+   - `bootstrap/luminair-cli` does not pull in `axum`, `reqwest`, `jsonwebtoken`, or `lambda_http`. It compiles in a fraction of the time and has zero attack surface from web dependencies.
+   - `bootstrap/aws-lambda` does not compile CLI argument parsers, TCP daemon machinery, or in-process RSA/JWKS validation code.
+   - `bootstrap/luminair-server` compiles standard microservice components with in-process OIDC and graceful TCP shutdown.
+2. **Minimal Lambda Cold Starts & Artifact Size**:
+   - The compiled `bootstrap` binary contains only the Axum HTTP routing layer, lightweight Edge claim extraction, database repositories, and `lambda_http` runner.
 
 ---
 
-### Decision 2: AWS Cognito Authentication at API Gateway Edge
+### Decision 2: AWS Cognito Edge Authentication with Decoupled Credentials
 
-#### Cost & Performance Penalty of In-Process JWT Validation in Lambda:
+#### The Cost & Cold-Start Penalty of In-Process JWT Validation in Lambda:
 1. Every invocation spends CPU cycles computing `RS256` RSA signature checks, adding ~5–15ms of billable execution duration per request.
 2. Unauthenticated or spam requests invoke Lambda sandboxes, racking up execution costs just to return `401 Unauthorized`.
-3. Fetching and caching JWKS keys from Cognito over the network complicates cold-start predictability.
+3. Fetching and caching JWKS keys from Cognito over the network complicates cold-start latency and sandbox recycling.
 
-#### The Edge Solution: API Gateway HTTP API (v2) JWT Authorizer
-1. Configure API Gateway HTTP API (v2) with a native JWT Authorizer pointing to the AWS Cognito User Pool.
+#### The Edge Solution: API Gateway HTTP API (v2) JWT Authorizer + Parameter Mapping:
+1. API Gateway HTTP API (v2) is configured with a native JWT Authorizer pointing to the AWS Cognito User Pool.
 2. API Gateway verifies `iss`, `aud`, `exp`, and RSA cryptographic signatures at the AWS edge network:
    - **Invalid/missing tokens**: Rejected immediately at the edge with `401 Unauthorized`. **Lambda is NOT invoked (Cost = $0)**.
-   - **Valid tokens**: Injected with claims into `requestContext.authorizer.jwt.claims`.
-3. **Parameter Mapping to Trusted Headers**:
-   API Gateway is configured to map validated claims into HTTP headers sent to the integration:
-   ```yaml
-   ParameterMappings:
-     - Header:
-         Name: x-cognito-sub
-         Value: $context.authorizer.jwt.claims.sub
-     - Header:
-         Name: x-cognito-email
-         Value: $context.authorizer.jwt.claims.email
-     - Header:
-         Name: x-cognito-name
-         Value: $context.authorizer.jwt.claims.name
-     - Header:
-         Name: x-cognito-groups
-         Value: $context.authorizer.jwt.claims['cognito:groups']
-   ```
-4. **Hexagonal Auth Resolver (`CognitoEdgeAuthResolver`)**:
-   In `infrastructure/src/auth/resolver.rs`, introduce an implementation of `AuthContextResolver` that reads the trusted `x-cognito-*` headers (or `RequestContext` extension):
-   - Zero RSA cryptography in Lambda.
-   - Directly maps `x-cognito-sub` into `UserId` and performs local role resolution (`user_role_assignments`) and profile synchronization ([`ADR-006`](../adr/ADR-006-user-profile-and-directory-architecture.md)).
+   - **Valid tokens**: Parameter mappings securely overwrite trusted HTTP headers:
+     ```yaml
+     ParameterMappings:
+       - Header:
+           Name: x-cognito-sub
+           Value: $context.authorizer.jwt.claims.sub
+       - Header:
+           Name: x-cognito-email
+           Value: $context.authorizer.jwt.claims.email
+       - Header:
+           Name: x-cognito-name
+           Value: $context.authorizer.jwt.claims.name
+     ```
+   - **Spoofing Prevention**: Parameter mappings explicitly overwrite any client-supplied headers. An attacker sending a spoofed `x-cognito-sub` header will have it replaced by API Gateway with the verified token claim or rejected.
+
+#### Transport-Agnostic Credential Model (`AuthCredentials`):
+To prevent HTTP transport details from leaking into domain/application ports, define an `AuthCredentials` enum in `infrastructure/http`:
+
+```rust
+pub enum AuthCredentials<'a> {
+    /// In-process token validation (Bearer JWT or Service Token)
+    BearerToken(&'a str),
+    /// Verified edge claims injected by API Gateway
+    EdgeCognito {
+        user_id: &'a str,
+        email: Option<&'a str>,
+        name: Option<&'a str>,
+    },
+}
+
+pub trait AuthContextResolver: Send + Sync + 'static {
+    fn resolve_user_identity(
+        &self,
+        credentials: AuthCredentials<'_>,
+    ) -> impl Future<Output = Result<AuthenticatedUser, AuthResolutionError>> + Send;
+
+    fn resolve_caller(
+        &self,
+        credentials: AuthCredentials<'_>,
+    ) -> impl Future<Output = Result<CallerContext, AuthResolutionError>> + Send;
+}
+```
+
+Axum extractors (`Caller`, `OnboardingUser`) inspect incoming request parts:
+- If `x-cognito-sub` is present $\rightarrow$ constructs `AuthCredentials::EdgeCognito`.
+- Else if `Authorization: Bearer <token>` is present $\rightarrow$ constructs `AuthCredentials::BearerToken`.
+- Otherwise $\rightarrow$ yields `AuthError::MissingToken`.
 
 ---
 
-### Decision 3: Pattern 1 — Bundled Schemas per Project Artifact
+### Decision 3: Monomorphized Composition Root (`AppContainer<Auth>`) with RPITIT
 
-Luminair acts as a generic, headless content engine. Different projects define their own distinct domain schemas (e.g. Project 1: `article`, `category`; Project 2: `product`, `order`, `store`).
+Per `.ai/skills/backend/rust-patterns.md`, async trait methods in repository and auth ports use Return-Position Impl Trait in Trait (RPITIT):
+```rust
+fn resolve_caller(&self, ...) -> impl Future<Output = Result<CallerContext, AuthResolutionError>> + Send;
+```
+RPITIT traits are **non-dyn-compatible** (not object-safe in modern Rust). Rather than boxing futures (`Pin<Box<dyn Future...>>`) on every request, `AppContainer` and `HttpState` use **monomorphized static dispatch**:
+
+```rust
+pub struct AppContainer<Auth> {
+    pub context: &'static SystemContext,
+    pub auth_resolver: Arc<Auth>,
+    pub documents_service: Arc<DocumentsServiceImpl<SqlxDocumentInstanceRepository, SqlxDocumentSnapshotRepository>>,
+    pub access_requests_service: Arc<AccessRequestsServiceImpl<SqlxAccessRequestRepository, SqlxUserRoleAssignmentRepository, SqlxRoleRepository>>,
+    pub user_directory_service: Arc<UserDirectoryServiceImpl<SqlxUserProfileRepository>>,
+    pub schema_service: Arc<SchemaServiceImpl>,
+    pub system_config_service: Arc<SystemConfigServiceImpl>,
+    pub health_checker: Arc<SqlxHealthChecker>,
+}
+
+impl<Auth: AuthContextResolver> AppContainer<Auth> {
+    pub fn new(
+        pool: PgPool,
+        context: &'static SystemContext,
+        auth_resolver: Arc<Auth>,
+    ) -> Self { ... }
+
+    pub fn http_state(&self) -> HttpState<..., Auth, ...> { ... }
+}
+```
+
+- In `bootstrap/luminair-server`: instantiates `AppContainer::new(pool, context, Arc::new(SqlxAuthResolver::new(...)))`.
+- In `bootstrap/aws-lambda`: instantiates `AppContainer::new(pool, context, Arc::new(CognitoEdgeAuthResolver::new(pool.clone())))`.
+- **Result**: Zero dynamic vtable dispatch, zero premature heap allocations, 100% type-safe compilation.
+
+---
+
+### Decision 4: ADR-006 Conformance for User Profile Synchronization
+
+Per [`ADR-006`](../adr/ADR-006-user-profile-and-directory-architecture.md), Amazon Aurora DSQL is protected against Optimistic Concurrency Control (`40001` OCC) write amplification:
+- **`CognitoEdgeAuthResolver` is Strictly Read-Only**:
+  1. Resolves `UserId::try_new(sub)`.
+  2. Queries `user_role_assignments` by user ID.
+  3. If no assignments exist, queries `access_requests` to determine onboarding status (`access_not_requested`, `access_pending`, `access_rejected`).
+  4. Resolves assigned `Role` records.
+  5. **Zero writes to `user_profiles` are performed during request authentication.**
+- **Profile Synchronization Lifecycle**:
+  - Profiles are synchronized when an authenticated user logs into the Admin Studio via `POST /api/v1/auth/profile/sync` (`UserDirectoryService::sync_profile`).
+  - Profiles are atomically created/updated when submitting an initial access request (`POST /api/v1/auth/access-requests`).
+
+---
+
+### Decision 5: Aurora DSQL Connection Factory & Serverless Sizing
+
+#### Dynamic IAM Token Refresh (Within 15-Minute Expiry):
+1. Aurora DSQL IAM DB authentication tokens expire after 15 minutes.
+2. `infrastructure/persistence/src/connection.rs` configures `PgPoolOptions` with:
+   - `max_lifetime = Some(Duration::from_secs(10 * 60))` (10 minutes).
+   - `idle_timeout = Some(Duration::from_secs(5 * 60))` (5 minutes).
+3. A dynamic `DsqlTokenProvider` generates refreshed tokens using AWS SDK SigV4 credentials. When connections are recycled, new connections acquire fresh IAM credentials.
+
+#### Serverless Pool Sizing:
+- In container / microservice mode (`luminair-server`), `max_connections` defaults to `20..50`.
+- In Lambda mode (`aws-lambda`), `max_connections` defaults to `1` (maximum `2`). Since AWS Lambda scales horizontally by adding concurrent execution sandboxes, keeping each sandbox at 1 connection prevents connection pool exhaustion at the database layer.
+
+---
+
+### Decision 6: Pattern 1 — Bundled Schemas per Project Artifact
+
+Luminair acts as a generic, headless content engine. Projects define custom schemas in JSON without modifying Rust source code.
 
 #### Bundling Strategy:
-- The compiled `bootstrap` binary is completely generic and published as a reusable artifact (GitHub Releases, Amazon S3, or internal OCI registry).
+- The compiled `bootstrap` binary is completely generic and published as a reusable artifact (GitHub Releases, Amazon S3, or OCI registry).
 - Each project repository maintains:
   ```text
   my-project-repo/
   ├── schemas/
   │   ├── system-config.json
   │   └── document-types/
-  │       ├── product.json
+  │       ├── article.json
   │       └── category.json
   ├── deploy/                  # Terraform / CDK / SAM descriptors
   └── Makefile / CI script
@@ -156,7 +275,7 @@ Luminair acts as a generic, headless content engine. Different projects define t
 
 ---
 
-### Decision 4: Migration & Dry-Run Lifecycle in Both Environments
+### Decision 7: Strict Migration & Dry-Run Lifecycle Separation
 
 #### The Golden Rule: Never Run Dynamic Migrations on Lambda Cold Start
 If 50 Lambda containers cold-start simultaneously during a traffic surge, running dynamic DDL migrations concurrently in 50 instances would cause severe database contention, lock failures, and invocation timeouts.
@@ -187,11 +306,11 @@ sequenceDiagram
     CI->>ECR: Push image: luminair-app:v1.2.0
     
     Note over CI,DSQL: Step 1: Pre-flight Dry-Run Gate
-    CI->>DSQL: Run luminair-cli --mode dry-run
+    CI->>DSQL: Run luminair-cli --mode dry-run --schema-dir ./schemas
     DSQL-->>CI: Migration report (Additive, 0 destructive changes)
     
     Note over CI,DSQL: Step 2: Execute Migrations
-    CI->>DSQL: Run ECS RunTask: luminair-cli --mode migrate
+    CI->>DSQL: Run ECS RunTask: luminair-cli --mode migrate --schema-dir ./schemas
     DSQL-->>CI: Migrations applied successfully
     
     Note over CI,ECS: Step 3: Rolling Update Service
@@ -214,9 +333,9 @@ sequenceDiagram
     participant APIGW as Amazon API Gateway (HTTP API v2)
 
     Note over CI,DSQL: Step 1: Migration & Dry-Run Verification
-    CI->>DSQL: Run luminair-cli --mode dry-run --schemas-dir ./schemas
+    CI->>DSQL: Run luminair-cli --mode dry-run --schema-dir ./schemas
     DSQL-->>CI: Dry-run passed (schema plan safe)
-    CI->>DSQL: Run luminair-cli --mode migrate --schemas-dir ./schemas
+    CI->>DSQL: Run luminair-cli --mode migrate --schema-dir ./schemas
     DSQL-->>CI: DSQL dynamic tables updated
     
     Note over CI,Lambda: Step 2: Package & Deploy
@@ -240,96 +359,65 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    P1["Phase 1: Library Decoupling<br/>(Convert infrastructure to pure library crate)"]
-    P2["Phase 2: Bootstrap Crates Creation<br/>(Create bootstrap/luminair-server and luminair-cli crates)"]
-    P3["Phase 3: AWS Lambda Crate & Cognito Edge Resolver<br/>(Implement bootstrap/aws-lambda and x-cognito header resolver)"]
-    P4["Phase 4: Aurora DSQL Serverless Pool & IAM Provider<br/>(max_connections=1 for Lambda, dynamic IAM credential refresh)"]
-    P5["Phase 5: Documentation & Deployment Runbooks<br/>(Update architecture.md, deploy-with-aws.md, plan-infrastructure.md, ADR-007)"]
+    P1["Phase 1: Granular Infrastructure Crates<br/>(Extract schema-loader, persistence, auth, auth-cognito-edge, http)"]
+    P2["Phase 2: Bootstrap Binary Crates<br/>(Create luminair-cli, luminair-server, and aws-lambda)"]
+    P3["Phase 3: Edge Cognito Auth & Abstract Credentials<br/>(Implement AuthCredentials and CognitoEdgeAuthResolver)"]
+    P4["Phase 4: Aurora DSQL Serverless Pool & IAM Refresh<br/>(max_connections=1 for Lambda, dynamic IAM refresh)"]
+    P5["Phase 5: Operational Packaging & Docker/E2E Updates<br/>(Update Dockerfile, docker-compose, and integration test targets)"]
+    P6["Phase 6: Documentation & ADR-007<br/>(Update architecture.md, deploy-with-aws.md, plan-infrastructure.md, write ADR-007)"]
 
     P1 --> P2
     P2 --> P3
     P3 --> P4
     P4 --> P5
+    P5 --> P6
 ```
 
 ---
 
-### Phase 1: Library Decoupling (`infrastructure`)
+### Phase 1: Granular Infrastructure Crates (`infrastructure/*`)
 
-- [ ] **Step 1.1: Remove `infrastructure/src/main.rs`**
-  - Delete `infrastructure/src/main.rs`.
-  - Ensure `infrastructure/src/lib.rs` exports all needed modules (`api`, `auth`, `persistence`, `schema_loader`, `container`, `health`, `cli`).
-- [ ] **Step 1.2: Generalize `AppContainer` & `HttpState` Initialization**
-  - Verify that `AppContainer` can accept pluggable auth resolvers:
-    - `SqlxAuthResolver` (for in-process OIDC token validation in microservice mode)
-    - `CognitoEdgeAuthResolver` (for API Gateway edge-verified requests in Lambda mode)
+- [ ] **Step 1.1: Extract `infrastructure/schema-loader` Crate**
+  - Create `infrastructure/schema-loader/Cargo.toml` with dependencies: `domain`, `serde`, `serde_json`, `indexmap`, `thiserror`.
+  - Move `dto.rs`, `error.rs`, and `loader.rs` from `infrastructure/src/schema_loader/` into `infrastructure/schema-loader/src/`.
+  - Expose `pub use loader::{load_schemas_from_dir, load_system_context_from_dir};`.
+- [ ] **Step 1.2: Extract `infrastructure/persistence` Crate**
+  - Create `infrastructure/persistence/Cargo.toml` with dependencies: `domain`, `application`, `luminair-schema-loader`, `sqlx`, `sea-query`, `sea-query-sqlx`, `tokio`, `uuid`, `chrono`, `rust_decimal`, `tracing`.
+  - Move `naming/`, `migration/`, `query/`, `repositories/`, `connection.rs`, and `error.rs` from `infrastructure/src/persistence/` into `infrastructure/persistence/src/`.
+  - Expose public repositories (`SqlxDocumentInstanceRepository`, `SqlxRoleRepository`, etc.), connection factory (`create_connection_pool`), and migrations (`run_static_migrations`, `sync_dynamic_schemas`).
+- [ ] **Step 1.3: Extract `infrastructure/auth` Crate (In-Process OIDC)**
+  - Create `infrastructure/auth/Cargo.toml` with dependencies: `domain`, `application`, `luminair-persistence`, `jsonwebtoken`, `reqwest`, `serde`, `serde_json`, `thiserror`, `tracing`.
+  - Move in-process JWT validation (`oidc.rs`), JWKS fetching, `ServiceTokenRegistry`, and `SqlxAuthResolver` into `infrastructure/auth/src/`.
+- [ ] **Step 1.4: Extract `infrastructure/auth-cognito-edge` Crate**
+  - Create `infrastructure/auth-cognito-edge/Cargo.toml` with dependencies: `domain`, `application`, `luminair-persistence`, `thiserror`, `tracing`. (Zero RSA, zero JWKS, zero `jsonwebtoken` dependencies).
+  - Implement `CognitoEdgeAuthResolver` querying `user_role_assignments` and `access_requests` without in-process cryptography.
+- [ ] **Step 1.5: Extract `infrastructure/http` Crate**
+  - Create `infrastructure/http/Cargo.toml` with dependencies: `domain`, `application`, `luminair-schema-loader`, `luminair-persistence`, `axum`, `serde`, `serde_json`, `thiserror`, `tracing`.
+  - Move `routes.rs`, `handlers/`, `middleware.rs`, `error.rs`, `envelope.rs`, `extractors/`, `codec/`, and generic `HttpState` into `infrastructure/http/src/`.
+  - Define `AuthCredentials<'a>` enum and update `Caller` / `OnboardingUser` extractors.
+  - Implement generic composition root: `AppContainer<Auth: AuthContextResolver>`.
 
 ---
 
-### Phase 2: Create `bootstrap/` Crates (`aws-lambda`, `luminair-cli`, `luminair-server`)
+### Phase 2: Create `bootstrap/` Binary Crates
 
 - [ ] **Step 2.1: Register Member Crates in Workspace Root `Cargo.toml`**
-  ```toml
-  members = [
-      "domain",
-      "application",
-      "infrastructure",
-      "bootstrap/aws-lambda",
-      "bootstrap/luminair-cli",
-      "bootstrap/luminair-server",
-  ]
-  ```
-- [ ] **Step 2.2: Implement `bootstrap/luminair-server` Crate**
-  - Create `bootstrap/luminair-server/Cargo.toml`:
-    ```toml
-    [package]
-    name = "luminair-server"
-    version.workspace = true
-    edition.workspace = true
-
-    [dependencies]
-    domain = { workspace = true }
-    application = { workspace = true }
-    infrastructure = { workspace = true }
-    tokio = { workspace = true }
-    tracing = { workspace = true }
-    tracing-subscriber = { workspace = true }
-    ```
-  - Create `bootstrap/luminair-server/src/main.rs`:
-    - Reads environment configuration (`LUMINAIR_*`).
-    - Loads schemas from `LUMINAIR_SCHEMA_DIR`.
+  - Register all five `infrastructure/*` crates and three `bootstrap/*` crates.
+  - Add workspace dependency aliases (`luminair-schema-loader`, `luminair-persistence`, `luminair-auth`, `luminair-auth-cognito-edge`, `luminair-http`).
+- [ ] **Step 2.2: Implement `bootstrap/luminair-cli` Crate**
+  - Create `bootstrap/luminair-cli/Cargo.toml` (depends only on `domain`, `application`, `luminair-schema-loader`, `luminair-persistence`, `tokio`, `tracing`, `tracing-subscriber`).
+  - Move CLI configuration, runner, and reports (`validate`, `dry-run`, `migrate`) into `bootstrap/luminair-cli/src/`.
+  - Confirm binary contains **zero** HTTP or Lambda dependencies.
+- [ ] **Step 2.3: Implement `bootstrap/luminair-server` Crate**
+  - Create `bootstrap/luminair-server/Cargo.toml` (depends on `domain`, `application`, `luminair-schema-loader`, `luminair-persistence`, `luminair-auth`, `luminair-http`, `tokio`, `tracing`, `tracing-subscriber`).
+  - Implement server startup in `main.rs`:
+    - Reads `LUMINAIR_*` environment variables.
+    - Loads schemas via `load_system_context_from_dir`.
+    - Builds `SqlxAuthResolver` with OIDC validator / service tokens.
     - Creates database pool (`max_connections = 20..50`).
-    - Binds `tokio::net::TcpListener` and starts `axum::serve` with graceful shutdown.
-- [ ] **Step 2.3: Implement `bootstrap/luminair-cli` Crate**
-  - Create `bootstrap/luminair-cli/Cargo.toml`:
-    ```toml
-    [package]
-    name = "luminair-cli"
-    version.workspace = true
-    edition.workspace = true
-
-    [dependencies]
-    domain = { workspace = true }
-    application = { workspace = true }
-    infrastructure = { workspace = true }
-    tokio = { workspace = true }
-    tracing = { workspace = true }
-    tracing-subscriber = { workspace = true }
-    ```
-  - Create `bootstrap/luminair-cli/src/main.rs`:
-    - Re-implements CLI runner commands (`dry-run`, `migrate`, `validate`).
-    - Outputs reports in human-readable and JSON formats.
-
----
-
-### Phase 3: Implement `bootstrap/aws-lambda` Crate & Cognito Edge Auth
-
-- [ ] **Step 3.1: Implement `CognitoEdgeAuthResolver` (`infrastructure/src/auth/`)**
-  - Implement `AuthContextResolver` for edge-authenticated requests.
-  - Resolves `AuthenticatedUser` directly from incoming headers (`x-cognito-sub`, `x-cognito-email`, `x-cognito-name`).
-  - Resolves `CallerContext` by checking database role assignments (`user_role_assignments`) and onboarding state.
-  - Bypasses RSA signature check (already executed by API Gateway).
-- [ ] **Step 3.2: Implement `bootstrap/aws-lambda` Crate**
+    - Assembles `AppContainer::new(pool, context, auth_resolver)` and builds Axum router.
+    - Binds `tokio::net::TcpListener` and starts `axum::serve` with graceful `SIGINT`/`SIGTERM` shutdown.
+- [ ] **Step 2.4: Implement `bootstrap/aws-lambda` Crate**
   - Create `bootstrap/aws-lambda/Cargo.toml`:
     ```toml
     [package]
@@ -344,87 +432,105 @@ flowchart TD
     [dependencies]
     domain = { workspace = true }
     application = { workspace = true }
-    infrastructure = { workspace = true }
+    luminair-schema-loader = { workspace = true }
+    luminair-persistence = { workspace = true }
+    luminair-auth-cognito-edge = { workspace = true }
+    luminair-http = { workspace = true }
     tokio = { workspace = true }
     tracing = { workspace = true }
     tracing-subscriber = { workspace = true }
     lambda_http = { version = "0.14", default-features = false, features = ["apigw_http"] }
     ```
-  - Create `bootstrap/aws-lambda/src/main.rs`:
+  - Implement Lambda entrypoint in `bootstrap/aws-lambda/src/main.rs`:
     ```rust
     use std::sync::Arc;
     use lambda_http::{Error, run};
-    use infrastructure::api::routes::build_router;
-    use infrastructure::auth::CognitoEdgeAuthResolver;
-    use infrastructure::container::AppContainer;
-    use infrastructure::schema_loader::load_system_context_from_dir;
-    use infrastructure::persistence::create_connection_pool;
+    use luminair_auth_cognito_edge::CognitoEdgeAuthResolver;
+    use luminair_http::container::AppContainer;
+    use luminair_http::routes::build_router;
+    use luminair_persistence::create_connection_pool;
+    use luminair_schema_loader::load_system_context_from_dir;
 
     #[tokio::main]
     async fn main() -> Result<(), Error> {
         init_tracing();
-        
-        // 1. INIT Phase (executed once per Lambda container sandbox)
+
+        // 1. INIT Phase (executed once per Lambda sandbox)
         let schema_dir = std::env::var("LUMINAIR_SCHEMA_DIR")
             .unwrap_or_else(|_| "/var/task/schemas".into());
         let context = load_system_context_from_dir(std::path::Path::new(&schema_dir))
             .expect("schema directory must be valid at cold start");
-        
+
         let db_url = std::env::var("LUMINAIR_DATABASE_URL")
             .expect("LUMINAIR_DATABASE_URL is required");
-        
+
         // Serverless connection pool: max_connections = 1
         let pool = create_connection_pool(&db_url, 1).await
             .expect("failed to connect to Aurora DSQL");
-        
+
         let auth_resolver = Arc::new(CognitoEdgeAuthResolver::new(pool.clone()));
-        let container = AppContainer::from_pool_and_context_with_resolver(pool, context, auth_resolver);
+        let container = AppContainer::new(pool, context, auth_resolver);
         let router = build_router(container.http_state());
 
         // 2. Invocation Loop
         run(router).await
     }
     ```
-  ```
 
 ---
 
-### Phase 4: Aurora DSQL Connection Factory & Dynamic IAM Refresh
+### Phase 3: Edge Cognito Auth & Abstract Credentials
+
+- [ ] **Step 3.1: Implement `AuthCredentials` & Update Extractor**
+  - In `infrastructure/http/src/extractors/auth.rs`, map `x-cognito-sub`, `x-cognito-email`, and `x-cognito-name` into `AuthCredentials::EdgeCognito`.
+  - Fall back to `Authorization: Bearer <token>` into `AuthCredentials::BearerToken`.
+- [ ] **Step 3.2: Implement `CognitoEdgeAuthResolver`**
+  - In `infrastructure/auth-cognito-edge/src/lib.rs`, implement `AuthContextResolver` for `CognitoEdgeAuthResolver`.
+  - Read-only lookup for `UserId` role assignments and onboarding status.
+  - Return `AuthResolutionError::Auth(AuthError::MissingToken)` if `EdgeCognito` credentials are not present or `user_id` is blank.
+
+---
+
+### Phase 4: Aurora DSQL Serverless Pool & IAM Refresh
 
 - [ ] **Step 4.1: Background Dynamic IAM Token Refresh**
-  - Extend [`infrastructure/src/persistence/connection.rs`](file:///Users/dmitri.astafiev/luminair/luminair-system/infrastructure/src/persistence/connection.rs) with an AWS SDK-backed token provider (`AwsSdkDsqlTokenProvider`).
-  - Automatically regenerates Aurora DSQL IAM tokens prior to the 15-minute expiration window for warm containers and long-running daemons.
+  - Extend `infrastructure/persistence/src/connection.rs` with an AWS SDK-backed token provider (`AwsSdkDsqlTokenProvider`).
+  - Automatically regenerates Aurora DSQL IAM tokens prior to the 15-minute expiration window using `max_lifetime = Duration::from_secs(600)`.
 - [ ] **Step 4.2: Serverless Pool Sizing Safeguards**
   - In `create_connection_pool`, enforce that when running in a Lambda environment (detected via `AWS_LAMBDA_FUNCTION_NAME`), `max_connections` defaults to `1` (maximum `2`).
 
 ---
 
-### Phase 5: Documentation Update Plan
+### Phase 5: Operational Packaging, Docker & Tests
 
-The following project documents must be updated in tandem with the refactoring:
+- [ ] **Step 5.1: Update `Dockerfile` for Dual Binaries**
+  - Update multi-stage Docker build to compile `luminair-cli` and `luminair-server`:
+    ```dockerfile
+    RUN cargo build --release -p luminair-cli -p luminair-server
+    ```
+  - Copy both binaries to `/usr/local/bin/`.
+- [ ] **Step 5.2: Update `docker-compose.yml`**
+  - Update `luminair-server` service to invoke `luminair-server`.
+  - Update `cli-validate`, `cli-dry-run`, and `cli-migrate` to invoke `luminair-cli`.
+- [ ] **Step 5.3: Update Integration & E2E Tests**
+  - Update `infrastructure/tests/cli_test.rs` to target `luminair-cli`.
+  - Update `infrastructure/tests/e2e_service_test.rs` to target `luminair-server`.
 
-#### 1. [`docs/architecture.md`](../architecture.md)
-- **Crate Layout Update**: Add `bootstrap` to the crate table and dependency diagram.
-- **Dual Deployment Targets**: Document the microservice daemon vs. AWS Lambda event handler architecture.
-- **Composition Root Clarity**: Document that `bootstrap/src/bin/` owns the composition roots for their respective platforms.
+---
 
-#### 2. [`docs/deploy-with-aws.md`](../deploy-with-aws.md)
-- **Target A (ECS Fargate / Microservice)**: Containerized deployment runbook with `luminair-server`.
-- **Target B (AWS Lambda Serverless)**:
-  - Lambda custom runtime (`provided.al2023`, `arm64`) setup.
-  - Amazon API Gateway HTTP API (v2) JWT Authorizer setup for AWS Cognito.
-  - Parameter mappings for `x-cognito-*` headers.
-- **Pattern 1: Bundled Schemas Runbook**: How separate projects zip their `./schemas` with the pre-built `bootstrap` binary.
-- **Database Migration & Dry-Run Section**:
-  - Detailed pre-deployment CI/CD commands for `luminair-cli --mode dry-run` and `luminair-cli --mode migrate`.
-  - Explanation of why auto-migrations are prohibited on Lambda cold start.
+### Phase 6: Documentation & ADR-007
 
-#### 3. [`docs/plan-infrastructure.md`](../plan-infrastructure.md)
-- Add **Phase 8: Dual-Target Deployment & `bootstrap` Crate Extraction**.
-- Mark dependencies, tasks, and verification gates.
-
-#### 4. New Architecture Decision Record: [`docs/adr/ADR-007-dual-target-deployment-lambda-and-microservice.md`](../adr/)
-- Propose ADR-007 documenting deciders, context, alternatives considered (in-process auth vs edge auth; multi-tenant vs bundled schemas), and consequences.
+- [ ] **Step 6.1: Update [`docs/architecture.md`](../architecture.md)**
+  - Reflect granular `infrastructure/*` adapter crates and `bootstrap/*` entrypoints.
+  - Document dual deployment targets (container microservice vs. AWS Lambda serverless).
+- [ ] **Step 6.2: Update [`docs/deploy-with-aws.md`](../deploy-with-aws.md)**
+  - Document Amazon API Gateway HTTP API (v2) JWT Authorizer setup for AWS Cognito.
+  - Document parameter mappings for `x-cognito-*` headers.
+  - Document serverless deployment commands (`cargo lambda build -p aws-lambda --release --arm64`).
+- [ ] **Step 6.3: Update [`docs/plan-infrastructure.md`](../plan-infrastructure.md)**
+  - Add Phase 8: Dual-Target Deployment & Granular Crate Refactoring.
+- [ ] **Step 6.4: Author [`docs/adr/ADR-007-dual-target-deployment-lambda-and-microservice.md`](../adr/)**
+  - Document context, evaluated alternatives, decision, consequences, and approval record.
 
 ---
 
@@ -432,10 +538,10 @@ The following project documents must be updated in tandem with the refactoring:
 
 1. **Unit & Spec Tests**:
    - `cargo test --workspace` must pass with zero failures.
-   - Test `CognitoEdgeAuthResolver` with mocked request headers (`x-cognito-sub`, `x-cognito-email`).
+   - Test `CognitoEdgeAuthResolver` with mocked `AuthCredentials::EdgeCognito`.
 2. **Local Lambda Simulation**:
    - Use `cargo lambda watch` or AWS SAM CLI (`sam local start-api`) to execute HTTP requests against `bootstrap` locally, verifying that API Gateway v2 payloads parse seamlessly into Axum routes.
 3. **Microservice Regression Tests**:
-   - Verify that existing integration test suites ([`infrastructure/tests/api_test.rs`](file:///Users/dmitri.astafiev/luminair/luminair-system/infrastructure/tests/api_test.rs) and [`infrastructure/tests/cli_test.rs`](file:///Users/dmitri.astafiev/luminair/luminair-system/infrastructure/tests/cli_test.rs)) continue to pass when invoking `luminair-server` and `luminair-cli`.
+   - Verify that CLI tests (`luminair-cli`) and E2E service tests (`luminair-server`) pass cleanly with Docker/PostgreSQL.
 4. **Linting & Quality Gates**:
    - `cargo clippy --workspace --all-targets -- -D warnings` must produce zero warnings.
